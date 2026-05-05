@@ -1,0 +1,2096 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Room Mask Painter</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #eef2f4;
+      --panel: #ffffff;
+      --panel-soft: #f7f9fa;
+      --ink: #172026;
+      --muted: #66727a;
+      --line: #d7dee3;
+      --accent: #0f766e;
+      --accent-strong: #0b5f59;
+      --danger: #b42318;
+      --shadow: 0 18px 42px rgba(23, 32, 38, 0.12);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 68px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      min-width: 220px;
+      gap: 12px;
+    }
+
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(15, 118, 110, 0.18), rgba(245, 158, 11, 0.18)),
+        #ffffff;
+      border: 1px solid var(--line);
+      position: relative;
+      flex: 0 0 auto;
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      background: var(--ink);
+      opacity: 0.82;
+    }
+
+    .brand-mark::before {
+      left: 8px;
+      top: 9px;
+      width: 20px;
+      height: 2px;
+      box-shadow: 0 9px 0 var(--ink), 9px 18px 0 var(--ink);
+    }
+
+    .brand-mark::after {
+      left: 9px;
+      top: 8px;
+      width: 2px;
+      height: 20px;
+      box-shadow: 18px 4px 0 var(--ink), 9px 18px 0 var(--ink);
+    }
+
+    .brand-title {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .brand-title strong {
+      font-size: 15px;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .brand-title span {
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 38vw;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .button,
+    .icon-button {
+      border: 1px solid var(--line);
+      background: #ffffff;
+      color: var(--ink);
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+      user-select: none;
+    }
+
+    .button:hover,
+    .icon-button:hover {
+      border-color: #b8c4ca;
+      background: var(--panel-soft);
+    }
+
+    .button:active,
+    .icon-button:active {
+      transform: translateY(1px);
+    }
+
+    .button:disabled,
+    .icon-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+      transform: none;
+    }
+
+    .button {
+      min-height: 38px;
+      padding: 0 12px;
+      gap: 8px;
+      font-weight: 650;
+      font-size: 13px;
+    }
+
+    .button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+    }
+
+    .button.primary:hover {
+      border-color: var(--accent-strong);
+      background: var(--accent-strong);
+    }
+
+    .icon-button {
+      width: 38px;
+      height: 38px;
+      padding: 0;
+    }
+
+    .icon-button.is-active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: #e8f4f2;
+    }
+
+    .icon {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      flex: 0 0 auto;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 286px minmax(0, 1fr);
+      height: calc(100vh - 100px);
+      min-height: 0;
+    }
+
+    .side {
+      overflow: auto;
+      border-right: 1px solid var(--line);
+      background: var(--panel);
+      padding: 14px;
+    }
+
+    .tool-section {
+      padding: 14px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .tool-section:first-child {
+      padding-top: 0;
+    }
+
+    .tool-section:last-child {
+      border-bottom: 0;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.2;
+      text-transform: uppercase;
+      color: #46535b;
+      font-weight: 800;
+    }
+
+    .value-pill {
+      min-width: 42px;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 12px;
+      background: var(--panel-soft);
+    }
+
+    .swatches {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(28px, 1fr));
+      gap: 8px;
+    }
+
+    .swatch {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      min-height: 30px;
+      border-radius: 8px;
+      border: 2px solid #ffffff;
+      box-shadow: 0 0 0 1px var(--line);
+      cursor: pointer;
+    }
+
+    .swatch.is-active {
+      box-shadow: 0 0 0 2px var(--ink);
+    }
+
+    .field {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .field-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .field label {
+      font-size: 13px;
+      color: #314047;
+      font-weight: 650;
+      min-width: 0;
+    }
+
+    .range {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .page-strip {
+      display: grid;
+      grid-template-columns: 38px 1fr 38px;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .page-label {
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .rooms {
+      display: grid;
+      gap: 8px;
+    }
+
+    .room-row {
+      min-height: 38px;
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) 32px;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px;
+      background: var(--panel-soft);
+    }
+
+    .room-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.16);
+    }
+
+    .room-meta {
+      min-width: 0;
+      display: grid;
+      gap: 1px;
+    }
+
+    .room-meta strong {
+      font-size: 13px;
+      line-height: 1.2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .room-meta span {
+      color: var(--muted);
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .small-icon-button {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #ffffff;
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .small-icon-button:hover {
+      color: var(--danger);
+      border-color: #f1aaa3;
+      background: #fff5f4;
+    }
+
+    .empty-list {
+      color: var(--muted);
+      font-size: 13px;
+      border: 1px dashed #c5d0d6;
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+      background: #fbfcfc;
+    }
+
+    .workspace {
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: 1fr;
+    }
+
+    .canvas-shell {
+      overflow: auto;
+      min-width: 0;
+      min-height: 0;
+      padding: 24px;
+      background:
+        linear-gradient(90deg, rgba(23, 32, 38, 0.045) 1px, transparent 1px),
+        linear-gradient(rgba(23, 32, 38, 0.045) 1px, transparent 1px),
+        #e8edf0;
+      background-size: 24px 24px;
+    }
+
+    .stage-wrap {
+      min-width: max-content;
+      min-height: max-content;
+      display: grid;
+      place-items: start center;
+    }
+
+    .stage {
+      position: relative;
+      width: 842px;
+      height: 1192px;
+      background: #ffffff;
+      box-shadow: var(--shadow);
+      cursor: crosshair;
+      isolation: isolate;
+    }
+
+    .stage.is-hidden {
+      display: none;
+    }
+
+    .stage.is-busy {
+      cursor: progress;
+    }
+
+    .stage canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    #maskCanvas {
+      pointer-events: none;
+      mix-blend-mode: multiply;
+    }
+
+    #waveCanvas {
+      pointer-events: none;
+    }
+
+    .empty-state {
+      min-height: calc(100vh - 170px);
+      display: grid;
+      place-items: center;
+    }
+
+    .empty-actions {
+      width: min(420px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .empty-title {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.25;
+    }
+
+    .empty-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .statusbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 32px;
+      padding: 0 14px;
+      border-top: 1px solid var(--line);
+      background: #ffffff;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .statusbar strong {
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    @media (max-width: 920px) {
+      body {
+        overflow: auto;
+      }
+
+      .topbar {
+        align-items: flex-start;
+      }
+
+      .app {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+
+      .side {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0 18px;
+      }
+
+      .canvas-shell {
+        height: 72vh;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .topbar {
+        display: grid;
+      }
+
+      .brand-title span {
+        max-width: 82vw;
+      }
+
+      .toolbar {
+        justify-content: flex-start;
+      }
+
+      .side {
+        grid-template-columns: 1fr;
+      }
+
+      .button {
+        min-width: 38px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div class="brand-title">
+        <strong>Room Mask Painter</strong>
+        <span id="docName">No PDF loaded</span>
+      </div>
+    </div>
+
+    <div class="toolbar" role="toolbar" aria-label="Main controls">
+      <button id="importBtn" class="button primary" type="button" title="Import PDF">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
+        <span>Import</span>
+      </button>
+      <button id="sampleBtn" class="button" type="button" title="Load sample PDF">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>
+        <span>Example 1</span>
+      </button>
+      <button id="sample2Btn" class="button" type="button" title="Load example 2 PDF">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 12h7"></path><path d="M8 16h8"></path></svg>
+        <span>Example 2</span>
+      </button>
+      <button id="sample3Btn" class="button" type="button" title="Load example 3 PDF">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 11h8"></path><path d="M8 15h7"></path></svg>
+        <span>Example 3</span>
+      </button>
+      <button id="undoBtn" class="icon-button" type="button" title="Undo last room" aria-label="Undo last room" disabled>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"></path><path d="M4 9h10a6 6 0 1 1 0 12h-1"></path></svg>
+      </button>
+      <button id="clearBtn" class="icon-button" type="button" title="Clear page masks" aria-label="Clear page masks" disabled>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M6 6l1 15h10l1-15"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>
+      </button>
+      <button id="exportBtn" class="button" type="button" title="Export composite PNG" disabled>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M7 10l5 5 5-5"></path><path d="M12 15V3"></path></svg>
+        <span>PNG</span>
+      </button>
+      <button id="exportMaskBtn" class="button" type="button" title="Export masks PNG" disabled>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M7 7h10v10H7z"></path></svg>
+        <span>Mask</span>
+      </button>
+    </div>
+  </header>
+
+  <input id="fileInput" type="file" accept="application/pdf" hidden>
+
+  <main class="app">
+    <aside class="side">
+      <section class="tool-section">
+        <div class="section-head">
+          <h2>Fill</h2>
+          <span id="activeColorLabel" class="value-pill">1</span>
+        </div>
+        <div id="swatches" class="swatches" aria-label="Mask colors"></div>
+        <div class="field">
+          <div class="field-row">
+            <label for="opacityRange">Opacity</label>
+            <span id="opacityValue" class="value-pill">42%</span>
+          </div>
+          <input id="opacityRange" class="range" type="range" min="15" max="75" value="42">
+        </div>
+      </section>
+
+      <section class="tool-section">
+        <div class="section-head">
+          <h2>Walls</h2>
+        </div>
+        <div class="field">
+          <div class="field-row">
+            <label for="thresholdRange">Sensitivity</label>
+            <span id="thresholdValue" class="value-pill">236</span>
+          </div>
+          <input id="thresholdRange" class="range" type="range" min="170" max="252" value="236">
+        </div>
+        <div class="field">
+          <div class="field-row">
+            <label for="inflateRange">Line width</label>
+            <span id="inflateValue" class="value-pill">1</span>
+          </div>
+          <input id="inflateRange" class="range" type="range" min="0" max="5" value="1">
+        </div>
+        <div class="field">
+          <div class="field-row">
+            <label for="gapRange">Gap seal</label>
+            <span id="gapValue" class="value-pill">3</span>
+          </div>
+          <input id="gapRange" class="range" type="range" min="0" max="18" value="3">
+        </div>
+        <div class="field">
+          <div class="field-row">
+            <label for="dashRange">Dash bridge</label>
+            <span id="dashValue" class="value-pill">42</span>
+          </div>
+          <input id="dashRange" class="range" type="range" min="0" max="90" value="42">
+        </div>
+      </section>
+
+      <section class="tool-section">
+        <div class="section-head">
+          <h2>Page</h2>
+        </div>
+        <div class="page-strip">
+          <button id="prevPageBtn" class="icon-button" type="button" title="Previous page" aria-label="Previous page" disabled>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+          </button>
+          <div id="pageLabel" class="page-label">0 / 0</div>
+          <button id="nextPageBtn" class="icon-button" type="button" title="Next page" aria-label="Next page" disabled>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+          </button>
+        </div>
+        <div class="field">
+          <div class="field-row">
+            <label for="zoomRange">Zoom</label>
+            <span id="zoomValue" class="value-pill">100%</span>
+          </div>
+          <input id="zoomRange" class="range" type="range" min="55" max="165" value="100">
+        </div>
+      </section>
+
+      <section class="tool-section">
+        <div class="section-head">
+          <h2>Rooms</h2>
+          <span id="roomCount" class="value-pill">0</span>
+        </div>
+        <div id="rooms" class="rooms"></div>
+      </section>
+    </aside>
+
+    <section class="workspace" aria-label="Canvas workspace">
+      <div id="canvasShell" class="canvas-shell">
+        <div id="emptyState" class="empty-state">
+          <div class="empty-actions">
+            <h1 class="empty-title">Start with a floor plan PDF</h1>
+            <div class="empty-buttons">
+              <button id="emptyImportBtn" class="button primary" type="button">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
+                <span>Import</span>
+              </button>
+              <button id="emptySampleBtn" class="button" type="button">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>
+                <span>Example 1</span>
+              </button>
+              <button id="emptySample2Btn" class="button" type="button">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 12h7"></path><path d="M8 16h8"></path></svg>
+                <span>Example 2</span>
+              </button>
+              <button id="emptySample3Btn" class="button" type="button">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 11h8"></path><path d="M8 15h7"></path></svg>
+                <span>Example 3</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div id="stageWrap" class="stage-wrap">
+          <div id="stage" class="stage is-hidden">
+            <canvas id="pdfCanvas"></canvas>
+            <canvas id="maskCanvas"></canvas>
+            <canvas id="waveCanvas"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="statusbar">
+    <span id="statusText">Ready</span>
+    <span><strong id="pixelInfo">0 x 0</strong></span>
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    const els = {
+      docName: document.getElementById("docName"),
+      importBtn: document.getElementById("importBtn"),
+      sampleBtn: document.getElementById("sampleBtn"),
+      sample2Btn: document.getElementById("sample2Btn"),
+      sample3Btn: document.getElementById("sample3Btn"),
+      emptyImportBtn: document.getElementById("emptyImportBtn"),
+      emptySampleBtn: document.getElementById("emptySampleBtn"),
+      emptySample2Btn: document.getElementById("emptySample2Btn"),
+      emptySample3Btn: document.getElementById("emptySample3Btn"),
+      fileInput: document.getElementById("fileInput"),
+      undoBtn: document.getElementById("undoBtn"),
+      clearBtn: document.getElementById("clearBtn"),
+      exportBtn: document.getElementById("exportBtn"),
+      exportMaskBtn: document.getElementById("exportMaskBtn"),
+      prevPageBtn: document.getElementById("prevPageBtn"),
+      nextPageBtn: document.getElementById("nextPageBtn"),
+      pageLabel: document.getElementById("pageLabel"),
+      stage: document.getElementById("stage"),
+      emptyState: document.getElementById("emptyState"),
+      swatches: document.getElementById("swatches"),
+      rooms: document.getElementById("rooms"),
+      roomCount: document.getElementById("roomCount"),
+      activeColorLabel: document.getElementById("activeColorLabel"),
+      opacityRange: document.getElementById("opacityRange"),
+      opacityValue: document.getElementById("opacityValue"),
+      thresholdRange: document.getElementById("thresholdRange"),
+      thresholdValue: document.getElementById("thresholdValue"),
+      inflateRange: document.getElementById("inflateRange"),
+      inflateValue: document.getElementById("inflateValue"),
+      gapRange: document.getElementById("gapRange"),
+      gapValue: document.getElementById("gapValue"),
+      dashRange: document.getElementById("dashRange"),
+      dashValue: document.getElementById("dashValue"),
+      zoomRange: document.getElementById("zoomRange"),
+      zoomValue: document.getElementById("zoomValue"),
+      statusText: document.getElementById("statusText"),
+      pixelInfo: document.getElementById("pixelInfo"),
+      pdfCanvas: document.getElementById("pdfCanvas"),
+      maskCanvas: document.getElementById("maskCanvas"),
+      waveCanvas: document.getElementById("waveCanvas")
+    };
+
+    const ctx = {
+      pdf: els.pdfCanvas.getContext("2d", { willReadFrequently: true }),
+      mask: els.maskCanvas.getContext("2d"),
+      wave: els.waveCanvas.getContext("2d")
+    };
+
+    const palette = [
+      "#23a6d5", "#ef476f", "#06d6a0", "#ffd166", "#f97316", "#7c3aed",
+      "#2f80ed", "#e11d48", "#16a34a", "#ca8a04", "#0891b2", "#db2777"
+    ];
+
+    const state = {
+      pdfDoc: null,
+      fileName: "",
+      currentPage: 1,
+      pageCount: 0,
+      renderScale: 2,
+      zoom: 1,
+      colorIndex: 0,
+      roomsByPage: new Map(),
+      history: [],
+      wallMap: null,
+      wallKey: "",
+      structureCanvas: null,
+      structureCtx: null,
+      structureInkPixels: 0,
+      wallSourceIsVector: false,
+      renderTask: null,
+      renderToken: 0,
+      animating: false
+    };
+
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    }
+
+    function setStatus(message) {
+      els.statusText.textContent = message;
+    }
+
+    function setBusy(isBusy) {
+      state.animating = isBusy;
+      els.stage.classList.toggle("is-busy", isBusy);
+    }
+
+    function hexToRgb(hex) {
+      const clean = hex.replace("#", "");
+      return {
+        r: parseInt(clean.slice(0, 2), 16),
+        g: parseInt(clean.slice(2, 4), 16),
+        b: parseInt(clean.slice(4, 6), 16)
+      };
+    }
+
+    function rgba(hex, alpha) {
+      const c = hexToRgb(hex);
+      return `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha})`;
+    }
+
+    function currentColor() {
+      return palette[state.colorIndex % palette.length];
+    }
+
+    function currentRooms() {
+      if (!state.roomsByPage.has(state.currentPage)) {
+        state.roomsByPage.set(state.currentPage, []);
+      }
+      return state.roomsByPage.get(state.currentPage);
+    }
+
+    function formatArea(count) {
+      const total = els.pdfCanvas.width * els.pdfCanvas.height || 1;
+      return `${((count / total) * 100).toFixed(2)}% page`;
+    }
+
+    function updateSwatches() {
+      els.swatches.innerHTML = "";
+      palette.forEach((color, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "swatch";
+        button.style.background = color;
+        button.title = `Color ${index + 1}`;
+        button.setAttribute("aria-label", `Color ${index + 1}`);
+        button.classList.toggle("is-active", index === state.colorIndex % palette.length);
+        button.addEventListener("click", () => {
+          state.colorIndex = index;
+          updateSwatches();
+        });
+        els.swatches.appendChild(button);
+      });
+      els.activeColorLabel.textContent = String((state.colorIndex % palette.length) + 1);
+      els.activeColorLabel.style.borderColor = currentColor();
+      els.activeColorLabel.style.color = currentColor();
+    }
+
+    function updateControls() {
+      const hasPdf = Boolean(state.pdfDoc);
+      const rooms = hasPdf ? currentRooms() : [];
+      els.undoBtn.disabled = state.history.length === 0 || state.animating;
+      els.clearBtn.disabled = !hasPdf || rooms.length === 0 || state.animating;
+      els.exportBtn.disabled = !hasPdf;
+      els.exportMaskBtn.disabled = !hasPdf || rooms.length === 0;
+      els.prevPageBtn.disabled = !hasPdf || state.currentPage <= 1 || state.animating;
+      els.nextPageBtn.disabled = !hasPdf || state.currentPage >= state.pageCount || state.animating;
+      els.pageLabel.textContent = hasPdf ? `${state.currentPage} / ${state.pageCount}` : "0 / 0";
+      els.roomCount.textContent = String(rooms.length);
+      els.opacityValue.textContent = `${els.opacityRange.value}%`;
+      els.thresholdValue.textContent = els.thresholdRange.value;
+      els.inflateValue.textContent = els.inflateRange.value;
+      els.gapValue.textContent = els.gapRange.value;
+      els.dashValue.textContent = els.dashRange.value;
+      els.zoomValue.textContent = `${els.zoomRange.value}%`;
+      updateRoomList();
+      updateSwatches();
+    }
+
+    function updateRoomList() {
+      const rooms = state.pdfDoc ? currentRooms() : [];
+      els.rooms.innerHTML = "";
+      if (rooms.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty-list";
+        empty.textContent = "No rooms on this page";
+        els.rooms.appendChild(empty);
+        return;
+      }
+
+      rooms.forEach((room, index) => {
+        const row = document.createElement("div");
+        row.className = "room-row";
+
+        const dot = document.createElement("span");
+        dot.className = "room-dot";
+        dot.style.background = room.color;
+
+        const meta = document.createElement("div");
+        meta.className = "room-meta";
+        meta.innerHTML = `<strong>Room ${index + 1}</strong><span>${formatArea(room.region.count)}</span>`;
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "small-icon-button";
+        remove.title = "Remove room";
+        remove.setAttribute("aria-label", `Remove room ${index + 1}`);
+        remove.innerHTML = `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>`;
+        remove.addEventListener("click", () => removeRoom(room.id));
+
+        row.append(dot, meta, remove);
+        els.rooms.appendChild(row);
+      });
+    }
+
+    function resizeLayer(canvas, width, height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+
+    function applyStageSize() {
+      const width = els.pdfCanvas.width / state.renderScale * state.zoom;
+      const height = els.pdfCanvas.height / state.renderScale * state.zoom;
+      els.stage.style.width = `${width}px`;
+      els.stage.style.height = `${height}px`;
+      els.pixelInfo.textContent = `${els.pdfCanvas.width} x ${els.pdfCanvas.height}`;
+    }
+
+    async function loadPdfFromData(data, name) {
+      if (!window.pdfjsLib) {
+        setStatus("PDF renderer failed to load");
+        return;
+      }
+
+      const loadingTask = pdfjsLib.getDocument({ data });
+      setStatus("Loading PDF...");
+      const pdfDoc = await loadingTask.promise;
+      state.pdfDoc = pdfDoc;
+      state.fileName = name;
+      state.currentPage = 1;
+      state.pageCount = pdfDoc.numPages;
+      state.roomsByPage = new Map();
+      state.history = [];
+      els.docName.textContent = name;
+      const rendered = await renderPage(1);
+      if (rendered) setStatus("Click a room area to fill");
+    }
+
+    async function loadPdfFile(file) {
+      if (!file) return;
+      try {
+        const data = await file.arrayBuffer();
+        await loadPdfFromData(data, file.name || "Imported PDF");
+      } catch (error) {
+        console.error(error);
+        setStatus("Could not load PDF");
+      } finally {
+        els.fileInput.value = "";
+      }
+    }
+
+    async function loadBundledPdf(filename) {
+      try {
+        setStatus("Loading PDF...");
+        const response = await fetch(encodeURI(filename));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.arrayBuffer();
+        await loadPdfFromData(data, filename);
+      } catch (error) {
+        console.error(error);
+        setStatus("Use Import to choose this PDF");
+      }
+    }
+
+    function loadSamplePdf() {
+      return loadBundledPdf("floor plant example.pdf");
+    }
+
+    function loadSample2Pdf() {
+      return loadBundledPdf("floor plant example 2.pdf");
+    }
+
+    function loadSample3Pdf() {
+      return loadBundledPdf("floor plant example 3.pdf");
+    }
+
+    function drawConstructedPath(targetCtx, args) {
+      const OPS = pdfjsLib.OPS || {};
+      const ops = args[0] || [];
+      const coords = args[1] || [];
+      let c = 0;
+      let currentX = 0;
+      let currentY = 0;
+
+      for (const op of ops) {
+        if (op === OPS.rectangle) {
+          const x = coords[c++];
+          const y = coords[c++];
+          const w = coords[c++];
+          const h = coords[c++];
+          targetCtx.rect(x, y, w, h);
+        } else if (op === OPS.moveTo) {
+          currentX = coords[c++];
+          currentY = coords[c++];
+          targetCtx.moveTo(currentX, currentY);
+        } else if (op === OPS.lineTo) {
+          currentX = coords[c++];
+          currentY = coords[c++];
+          targetCtx.lineTo(currentX, currentY);
+        } else if (op === OPS.curveTo) {
+          const x1 = coords[c++];
+          const y1 = coords[c++];
+          const x2 = coords[c++];
+          const y2 = coords[c++];
+          currentX = coords[c++];
+          currentY = coords[c++];
+          targetCtx.bezierCurveTo(x1, y1, x2, y2, currentX, currentY);
+        } else if (op === OPS.curveTo2) {
+          const x1 = currentX;
+          const y1 = currentY;
+          const x2 = coords[c++];
+          const y2 = coords[c++];
+          currentX = coords[c++];
+          currentY = coords[c++];
+          targetCtx.bezierCurveTo(x1, y1, x2, y2, currentX, currentY);
+        } else if (op === OPS.curveTo3) {
+          const x1 = coords[c++];
+          const y1 = coords[c++];
+          currentX = coords[c++];
+          currentY = coords[c++];
+          targetCtx.bezierCurveTo(x1, y1, currentX, currentY, currentX, currentY);
+        } else if (op === OPS.closePath) {
+          targetCtx.closePath();
+        }
+      }
+    }
+
+    function applyGraphicsState(targetCtx, states) {
+      for (const state of states || []) {
+        const key = state[0];
+        const value = state[1];
+        if (key === "LW") targetCtx.lineWidth = value;
+        if (key === "LC") targetCtx.lineCap = ["butt", "round", "square"][value] || "butt";
+        if (key === "LJ") targetCtx.lineJoin = ["miter", "round", "bevel"][value] || "miter";
+        if (key === "D") {
+          targetCtx.setLineDash(value[0] || []);
+          targetCtx.lineDashOffset = value[1] || 0;
+        }
+      }
+    }
+
+    function countInkPixels(canvasCtx, width, height) {
+      const data = canvasCtx.getImageData(0, 0, width, height).data;
+      let count = 0;
+      for (let p = 3; p < data.length; p += 4) {
+        if (data[p] > 8) count++;
+      }
+      return count;
+    }
+
+    function countMapPixels(map) {
+      let count = 0;
+      for (let i = 0; i < map.length; i++) {
+        if (map[i]) count++;
+      }
+      return count;
+    }
+
+    async function buildStructureLayer(page, viewport, width, height) {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const targetCtx = canvas.getContext("2d", { willReadFrequently: true });
+      const OPS = pdfjsLib.OPS || {};
+      const operatorList = await page.getOperatorList();
+
+      targetCtx.save();
+      targetCtx.setTransform(...viewport.transform);
+      targetCtx.strokeStyle = "#000000";
+      targetCtx.fillStyle = "#000000";
+      targetCtx.lineWidth = 1;
+      targetCtx.lineCap = "butt";
+      targetCtx.lineJoin = "miter";
+
+      for (let i = 0; i < operatorList.fnArray.length; i++) {
+        const fn = operatorList.fnArray[i];
+        const args = operatorList.argsArray[i] || [];
+
+        if (fn === OPS.save) {
+          targetCtx.save();
+        } else if (fn === OPS.restore) {
+          targetCtx.restore();
+        } else if (fn === OPS.transform) {
+          targetCtx.transform(...args);
+        } else if (fn === OPS.setLineWidth) {
+          targetCtx.lineWidth = args[0] || 1;
+        } else if (fn === OPS.setLineCap) {
+          targetCtx.lineCap = ["butt", "round", "square"][args[0]] || "butt";
+        } else if (fn === OPS.setLineJoin) {
+          targetCtx.lineJoin = ["miter", "round", "bevel"][args[0]] || "miter";
+        } else if (fn === OPS.setDash) {
+          targetCtx.setLineDash(args[0] || []);
+          targetCtx.lineDashOffset = args[1] || 0;
+        } else if (fn === OPS.setGState) {
+          applyGraphicsState(targetCtx, args[0]);
+        } else if (fn === OPS.constructPath) {
+          drawConstructedPath(targetCtx, args);
+        } else if (fn === OPS.stroke) {
+          targetCtx.stroke();
+          targetCtx.beginPath();
+        } else if (fn === OPS.closeStroke) {
+          targetCtx.closePath();
+          targetCtx.stroke();
+          targetCtx.beginPath();
+        } else if (fn === OPS.fillStroke || fn === OPS.eoFillStroke) {
+          targetCtx.fill(fn === OPS.eoFillStroke ? "evenodd" : "nonzero");
+          targetCtx.stroke();
+          targetCtx.beginPath();
+        } else if (fn === OPS.fill || fn === OPS.eoFill) {
+          // Pure fills are often text glyph outlines. Stroked paths carry the room boundaries.
+          targetCtx.beginPath();
+        } else if (fn === OPS.endPath) {
+          targetCtx.beginPath();
+        }
+      }
+
+      targetCtx.restore();
+      const inkPixels = countInkPixels(targetCtx, width, height);
+      return { canvas, ctx: targetCtx, inkPixels };
+    }
+
+    async function renderPage(pageNumber) {
+      if (!state.pdfDoc) return;
+      const token = ++state.renderToken;
+      if (state.renderTask) {
+        try {
+          state.renderTask.cancel();
+        } catch (error) {
+          console.warn("Could not cancel previous render", error);
+        }
+        state.renderTask = null;
+      }
+      setBusy(true);
+      setStatus("Rendering page...");
+      try {
+        const page = await state.pdfDoc.getPage(pageNumber);
+        const baseViewport = page.getViewport({ scale: 1 });
+        const maxEdge = 2900;
+        state.renderScale = Math.max(1.4, Math.min(2.45, maxEdge / Math.max(baseViewport.width, baseViewport.height)));
+        const viewport = page.getViewport({ scale: state.renderScale });
+        const width = Math.round(viewport.width);
+        const height = Math.round(viewport.height);
+
+        resizeLayer(els.pdfCanvas, width, height);
+        resizeLayer(els.maskCanvas, width, height);
+        resizeLayer(els.waveCanvas, width, height);
+        ctx.pdf.fillStyle = "#ffffff";
+        ctx.pdf.fillRect(0, 0, width, height);
+        const renderTask = page.render({ canvasContext: ctx.pdf, viewport });
+        state.renderTask = renderTask;
+        try {
+          await renderTask.promise;
+        } catch (error) {
+          if (error?.name === "RenderingCancelledException") return false;
+          throw error;
+        } finally {
+          if (state.renderTask === renderTask) state.renderTask = null;
+        }
+        if (token !== state.renderToken) return false;
+        const structureLayer = await buildStructureLayer(page, viewport, width, height);
+        if (token !== state.renderToken) return false;
+
+        state.currentPage = pageNumber;
+        state.wallMap = null;
+        state.wallKey = "";
+        state.structureCanvas = structureLayer.canvas;
+        state.structureCtx = structureLayer.ctx;
+        state.structureInkPixels = structureLayer.inkPixels;
+        state.wallSourceIsVector = structureLayer.inkPixels > 600;
+        applyStageSize();
+        redrawMasks();
+        els.emptyState.style.display = "none";
+        els.stage.classList.remove("is-hidden");
+        setStatus("Click a room area to fill");
+        return true;
+      } catch (error) {
+        if (token === state.renderToken) {
+          console.error(error);
+          setStatus("Could not render page");
+        }
+        return false;
+      } finally {
+        if (token === state.renderToken) {
+          setBusy(false);
+          updateControls();
+        }
+      }
+    }
+
+    function currentWallKey() {
+      return [
+        state.currentPage,
+        els.pdfCanvas.width,
+        els.pdfCanvas.height,
+        els.thresholdRange.value,
+        els.inflateRange.value,
+        els.gapRange.value,
+        els.dashRange.value
+      ].join(":");
+    }
+
+    function buildWallMap() {
+      const key = currentWallKey();
+      if (state.wallMap && state.wallKey === key) return state.wallMap;
+
+      const width = els.pdfCanvas.width;
+      const height = els.pdfCanvas.height;
+      const size = width * height;
+      const threshold = Number(els.thresholdRange.value);
+      const inflate = Number(els.inflateRange.value);
+      const gap = Number(els.gapRange.value);
+      const dash = Number(els.dashRange.value);
+      const useVectorSource = state.wallSourceIsVector && state.structureCtx;
+      const sourceCtx = useVectorSource ? state.structureCtx : ctx.pdf;
+      const data = sourceCtx.getImageData(0, 0, width, height).data;
+      const rawMap = new Uint8Array(size);
+
+      for (let i = 0, p = 0; i < size; i++, p += 4) {
+        const alpha = data[p + 3];
+        if (alpha < 10) continue;
+        if (useVectorSource) {
+          rawMap[i] = 1;
+          continue;
+        }
+        const lum = data[p] * 0.299 + data[p + 1] * 0.587 + data[p + 2] * 0.114;
+        if (lum < threshold) rawMap[i] = 1;
+      }
+
+      let map = useVectorSource ? rawMap : filterStructuralInk(rawMap, width, height);
+      if (gap > 0) map = closeGaps(map, width, height, gap);
+      if (dash > 0) {
+        const beforeBridge = countMapPixels(map);
+        const bridged = bridgeDashedLines(map, width, height, dash);
+        const addedRatio = (countMapPixels(bridged) - beforeBridge) / Math.max(1, beforeBridge);
+        map = addedRatio > 0.55 && dash > 14
+          ? bridgeDashedLines(map, width, height, 12)
+          : bridged;
+      }
+      if (!useVectorSource) map = removeSmallComponents(map, width, height, 24, 220);
+      if (inflate > 0) map = dilate(map, width, height, inflate);
+
+      state.wallMap = map;
+      state.wallKey = key;
+      return map;
+    }
+
+    function walkComponent(map, seen, width, height, start, queue) {
+      let head = 0;
+      let tail = 0;
+      let minX = width;
+      let maxX = 0;
+      let minY = height;
+      let maxY = 0;
+      queue[tail++] = start;
+      seen[start] = 1;
+
+      while (head < tail) {
+        const idx = queue[head++];
+        const y = Math.floor(idx / width);
+        const x = idx - y * width;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+
+        const y0 = Math.max(0, y - 1);
+        const y1 = Math.min(height - 1, y + 1);
+        const x0 = Math.max(0, x - 1);
+        const x1 = Math.min(width - 1, x + 1);
+        for (let yy = y0; yy <= y1; yy++) {
+          const row = yy * width;
+          for (let xx = x0; xx <= x1; xx++) {
+            const next = row + xx;
+            if (seen[next] || !map[next]) continue;
+            seen[next] = 1;
+            queue[tail++] = next;
+          }
+        }
+      }
+
+      return { start: 0, end: tail, minX, minY, maxX, maxY, area: tail };
+    }
+
+    function filterStructuralInk(rawMap, width, height) {
+      const size = width * height;
+      const out = new Uint8Array(size);
+      const seen = new Uint8Array(size);
+      const queue = new Int32Array(size);
+
+      for (let i = 0; i < size; i++) {
+        if (seen[i] || !rawMap[i]) continue;
+        const component = walkComponent(rawMap, seen, width, height, i, queue);
+        const w = component.maxX - component.minX + 1;
+        const h = component.maxY - component.minY + 1;
+        const density = component.area / (w * h);
+        const lineish = (w >= 10 && h <= 8 && w >= h * 2) || (h >= 10 && w <= 8 && h >= w * 2);
+        const dotish = w <= 8 && h <= 8 && component.area >= 2;
+        const longSparseLine = (w >= 70 || h >= 70) && density <= 0.14;
+        const sparseSymbol = (w >= 35 || h >= 35) && density <= 0.11 && component.area <= 260;
+
+        if (lineish || dotish || longSparseLine || sparseSymbol) {
+          for (let q = 0; q < component.end; q++) out[queue[q]] = 1;
+        }
+      }
+
+      return out;
+    }
+
+    function removeSmallComponents(map, width, height, minSpan, minArea) {
+      const size = width * height;
+      const out = new Uint8Array(size);
+      const seen = new Uint8Array(size);
+      const queue = new Int32Array(size);
+
+      for (let i = 0; i < size; i++) {
+        if (seen[i] || !map[i]) continue;
+        const component = walkComponent(map, seen, width, height, i, queue);
+        const w = component.maxX - component.minX + 1;
+        const h = component.maxY - component.minY + 1;
+        if (w >= minSpan || h >= minSpan || component.area >= minArea) {
+          for (let q = 0; q < component.end; q++) out[queue[q]] = 1;
+        }
+      }
+
+      return out;
+    }
+
+    function closeGaps(map, width, height, gap) {
+      const out = new Uint8Array(map);
+
+      for (let y = 0; y < height; y++) {
+        const row = y * width;
+        let last = -1;
+        for (let x = 0; x < width; x++) {
+          if (!map[row + x]) continue;
+          if (last >= 0) {
+            const span = x - last - 1;
+            if (span > 0 && span <= gap) {
+              for (let fill = last + 1; fill < x; fill++) out[row + fill] = 1;
+            }
+          }
+          last = x;
+        }
+      }
+
+      for (let x = 0; x < width; x++) {
+        let last = -1;
+        for (let y = 0; y < height; y++) {
+          const idx = y * width + x;
+          if (!map[idx]) continue;
+          if (last >= 0) {
+            const span = y - last - 1;
+            if (span > 0 && span <= gap) {
+              for (let fill = last + 1; fill < y; fill++) out[fill * width + x] = 1;
+            }
+          }
+          last = y;
+        }
+      }
+
+      return out;
+    }
+
+    function hasPixelInHorizontalBand(map, width, height, x, y, band) {
+      const y0 = Math.max(0, y - band);
+      const y1 = Math.min(height - 1, y + band);
+      for (let yy = y0; yy <= y1; yy++) {
+        if (map[yy * width + x]) return true;
+      }
+      return false;
+    }
+
+    function hasPixelInVerticalBand(map, width, height, x, y, band) {
+      const x0 = Math.max(0, x - band);
+      const x1 = Math.min(width - 1, x + band);
+      const row = y * width;
+      for (let xx = x0; xx <= x1; xx++) {
+        if (map[row + xx]) return true;
+      }
+      return false;
+    }
+
+    function paintHorizontalBridge(out, width, height, y, fromX, toX, band) {
+      const y0 = Math.max(0, y - band);
+      const y1 = Math.min(height - 1, y + band);
+      for (let yy = y0; yy <= y1; yy++) {
+        const row = yy * width;
+        for (let x = fromX; x <= toX; x++) out[row + x] = 1;
+      }
+    }
+
+    function paintVerticalBridge(out, width, height, x, fromY, toY, band) {
+      const x0 = Math.max(0, x - band);
+      const x1 = Math.min(width - 1, x + band);
+      for (let y = fromY; y <= toY; y++) {
+        const row = y * width;
+        for (let xx = x0; xx <= x1; xx++) out[row + xx] = 1;
+      }
+    }
+
+    function bridgeDashedLines(map, width, height, maxGap) {
+      const out = new Uint8Array(map);
+      const band = Math.max(1, Math.min(5, Math.round(maxGap / 16)));
+      const minRun = Math.max(3, Math.round(maxGap * 0.08));
+
+      for (let y = 0; y < height; y++) {
+        let previous = null;
+        let x = 0;
+        while (x < width) {
+          while (x < width && !hasPixelInHorizontalBand(map, width, height, x, y, band)) x++;
+          if (x >= width) break;
+          const start = x;
+          while (x < width && hasPixelInHorizontalBand(map, width, height, x, y, band)) x++;
+          const end = x - 1;
+          const length = end - start + 1;
+
+          if (length >= minRun) {
+            if (previous) {
+              const gap = start - previous.end - 1;
+              if (gap > 0 && gap <= maxGap) {
+                paintHorizontalBridge(out, width, height, y, previous.end + 1, start - 1, band);
+              }
+            }
+            previous = { end, length };
+          }
+        }
+      }
+
+      for (let x = 0; x < width; x++) {
+        let previous = null;
+        let y = 0;
+        while (y < height) {
+          while (y < height && !hasPixelInVerticalBand(map, width, height, x, y, band)) y++;
+          if (y >= height) break;
+          const start = y;
+          while (y < height && hasPixelInVerticalBand(map, width, height, x, y, band)) y++;
+          const end = y - 1;
+          const length = end - start + 1;
+
+          if (length >= minRun) {
+            if (previous) {
+              const gap = start - previous.end - 1;
+              if (gap > 0 && gap <= maxGap) {
+                paintVerticalBridge(out, width, height, x, previous.end + 1, start - 1, band);
+              }
+            }
+            previous = { end, length };
+          }
+        }
+      }
+
+      return out;
+    }
+
+    function dilate(map, width, height, radius) {
+      const out = new Uint8Array(map);
+      for (let y = 0; y < height; y++) {
+        const y0 = Math.max(0, y - radius);
+        const y1 = Math.min(height - 1, y + radius);
+        for (let x = 0; x < width; x++) {
+          if (!map[y * width + x]) continue;
+          const x0 = Math.max(0, x - radius);
+          const x1 = Math.min(width - 1, x + radius);
+          for (let yy = y0; yy <= y1; yy++) {
+            const row = yy * width;
+            for (let xx = x0; xx <= x1; xx++) out[row + xx] = 1;
+          }
+        }
+      }
+      return out;
+    }
+
+    function scoreOpenPixel(x, y, wallMap, width, height) {
+      let score = 0;
+      const radius = 3;
+      const minX = Math.max(0, x - radius);
+      const maxX = Math.min(width - 1, x + radius);
+      const minY = Math.max(0, y - radius);
+      const maxY = Math.min(height - 1, y + radius);
+      for (let yy = minY; yy <= maxY; yy++) {
+        const row = yy * width;
+        for (let xx = minX; xx <= maxX; xx++) {
+          if (!wallMap[row + xx]) score++;
+        }
+      }
+      return score;
+    }
+
+    function findNearestOpen(sx, sy, wallMap, width, height) {
+      let best = null;
+
+      function consider(x, y, radius) {
+        if (x < 0 || y < 0 || x >= width || y >= height) return;
+        if (wallMap[y * width + x]) return;
+        const score = scoreOpenPixel(x, y, wallMap, width, height) - radius * 0.35;
+        if (!best || score > best.score) best = { x, y, score };
+      }
+
+      consider(sx, sy, 0);
+      if (best && best.score >= 18) return { x: best.x, y: best.y };
+
+      for (let radius = 1; radius <= 18; radius++) {
+        const minX = Math.max(0, sx - radius);
+        const maxX = Math.min(width - 1, sx + radius);
+        const minY = Math.max(0, sy - radius);
+        const maxY = Math.min(height - 1, sy + radius);
+
+        for (let x = minX; x <= maxX; x++) {
+          consider(x, minY, radius);
+          consider(x, maxY, radius);
+        }
+        for (let y = minY; y <= maxY; y++) {
+          consider(minX, y, radius);
+          consider(maxX, y, radius);
+        }
+        if (best && best.score >= 22) return { x: best.x, y: best.y };
+      }
+
+      return best ? { x: best.x, y: best.y } : null;
+    }
+
+    function floodFill(sx, sy) {
+      const width = els.pdfCanvas.width;
+      const height = els.pdfCanvas.height;
+      const size = width * height;
+      const wallMap = buildWallMap();
+      const seed = findNearestOpen(sx, sy, wallMap, width, height);
+      if (!seed) return null;
+
+      const visited = new Uint8Array(size);
+      const mask = new Uint8Array(size);
+      const stack = new Int32Array(size);
+      let stackPointer = 0;
+      let count = 0;
+      let minX = seed.x;
+      let maxX = seed.x;
+      let minY = seed.y;
+      let maxY = seed.y;
+      stack[stackPointer++] = seed.y * width + seed.x;
+
+      while (stackPointer > 0) {
+        const start = stack[--stackPointer];
+        const y = Math.floor(start / width);
+        const x = start - y * width;
+        let idx = y * width + x;
+        if (visited[idx] || wallMap[idx]) continue;
+
+        let left = x;
+        while (left >= 0) {
+          const i = y * width + left;
+          if (visited[i] || wallMap[i]) break;
+          left--;
+        }
+        left++;
+
+        let right = x;
+        while (right < width) {
+          const i = y * width + right;
+          if (visited[i] || wallMap[i]) break;
+          right++;
+        }
+        right--;
+
+        let spanUp = false;
+        let spanDown = false;
+        const row = y * width;
+
+        for (let xx = left; xx <= right; xx++) {
+          idx = row + xx;
+          visited[idx] = 1;
+          mask[idx] = 1;
+          count++;
+          if (xx < minX) minX = xx;
+          if (xx > maxX) maxX = xx;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+
+          if (y > 0) {
+            const up = idx - width;
+            if (!visited[up] && !wallMap[up]) {
+              if (!spanUp) {
+                stack[stackPointer++] = up;
+                spanUp = true;
+              }
+            } else {
+              spanUp = false;
+            }
+          }
+
+          if (y < height - 1) {
+            const down = idx + width;
+            if (!visited[down] && !wallMap[down]) {
+              if (!spanDown) {
+                stack[stackPointer++] = down;
+                spanDown = true;
+              }
+            } else {
+              spanDown = false;
+            }
+          }
+        }
+      }
+
+      if (count < 8) return null;
+      return makeRegion(mask, { minX, minY, maxX, maxY }, seed, count, width, height, wallMap);
+    }
+
+    function includeNearbyBarriers(mask, wallMap, bounds, canvasWidth, canvasHeight) {
+      const visual = new Uint8Array(mask);
+      const radius = Math.max(4, Math.min(8, Number(els.inflateRange.value) + Math.ceil(Number(els.dashRange.value) / 12)));
+      for (let y = bounds.minY; y <= bounds.maxY; y++) {
+        const row = y * canvasWidth;
+        for (let x = bounds.minX; x <= bounds.maxX; x++) {
+          const idx = row + x;
+          if (!mask[idx]) continue;
+          const y0 = Math.max(0, y - radius);
+          const y1 = Math.min(canvasHeight - 1, y + radius);
+          const x0 = Math.max(0, x - radius);
+          const x1 = Math.min(canvasWidth - 1, x + radius);
+          for (let yy = y0; yy <= y1; yy++) {
+            const scan = yy * canvasWidth;
+            for (let xx = x0; xx <= x1; xx++) {
+              const next = scan + xx;
+              if (wallMap[next]) visual[next] = 1;
+            }
+          }
+        }
+      }
+      return visual;
+    }
+
+    function computeMaskBounds(mask, width, height) {
+      let minX = width;
+      let maxX = -1;
+      let minY = height;
+      let maxY = -1;
+      let count = 0;
+
+      for (let y = 0; y < height; y++) {
+        const row = y * width;
+        for (let x = 0; x < width; x++) {
+          if (!mask[row + x]) continue;
+          count++;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+
+      if (count === 0) return null;
+      return { minX, minY, maxX, maxY, count };
+    }
+
+    function fillClosedHoles(mask, bounds, canvasWidth, canvasHeight) {
+      if (!bounds) return;
+      const pad = 2;
+      const minX = Math.max(0, bounds.minX - pad);
+      const minY = Math.max(0, bounds.minY - pad);
+      const maxX = Math.min(canvasWidth - 1, bounds.maxX + pad);
+      const maxY = Math.min(canvasHeight - 1, bounds.maxY + pad);
+      const width = maxX - minX + 1;
+      const height = maxY - minY + 1;
+      const size = width * height;
+      const outside = new Uint8Array(size);
+      const holeSeen = new Uint8Array(size);
+      const queue = new Int32Array(size);
+      let head = 0;
+      let tail = 0;
+
+      function pushLocal(x, y) {
+        if (x < 0 || y < 0 || x >= width || y >= height) return;
+        const local = y * width + x;
+        const global = (minY + y) * canvasWidth + minX + x;
+        if (outside[local] || mask[global]) return;
+        outside[local] = 1;
+        queue[tail++] = local;
+      }
+
+      for (let x = 0; x < width; x++) {
+        pushLocal(x, 0);
+        pushLocal(x, height - 1);
+      }
+      for (let y = 0; y < height; y++) {
+        pushLocal(0, y);
+        pushLocal(width - 1, y);
+      }
+
+      while (head < tail) {
+        const local = queue[head++];
+        const y = Math.floor(local / width);
+        const x = local - y * width;
+        pushLocal(x + 1, y);
+        pushLocal(x - 1, y);
+        pushLocal(x, y + 1);
+        pushLocal(x, y - 1);
+      }
+
+      const maxHoleArea = Math.min(7000, Math.max(160, Math.round((bounds.count || 0) * 0.018)));
+      const maxHoleSpan = Math.max(18, Math.min(120, Math.round(Math.min(width, height) * 0.16)));
+
+      function pushHole(x, y) {
+        if (x < 0 || y < 0 || x >= width || y >= height) return;
+        const local = y * width + x;
+        const global = (minY + y) * canvasWidth + minX + x;
+        if (holeSeen[local] || outside[local] || mask[global]) return;
+        holeSeen[local] = 1;
+        queue[tail++] = local;
+      }
+
+      for (let y = 0; y < height; y++) {
+        const globalRow = (minY + y) * canvasWidth + minX;
+        for (let x = 0; x < width; x++) {
+          const local = y * width + x;
+          const global = globalRow + x;
+          if (outside[local] || holeSeen[local] || mask[global]) continue;
+
+          head = 0;
+          tail = 0;
+          pushHole(x, y);
+          let area = 0;
+          let holeMinX = x;
+          let holeMaxX = x;
+          let holeMinY = y;
+          let holeMaxY = y;
+
+          while (head < tail) {
+            const next = queue[head++];
+            const yy = Math.floor(next / width);
+            const xx = next - yy * width;
+            area++;
+            if (xx < holeMinX) holeMinX = xx;
+            if (xx > holeMaxX) holeMaxX = xx;
+            if (yy < holeMinY) holeMinY = yy;
+            if (yy > holeMaxY) holeMaxY = yy;
+            pushHole(xx + 1, yy);
+            pushHole(xx - 1, yy);
+            pushHole(xx, yy + 1);
+            pushHole(xx, yy - 1);
+          }
+
+          const spanX = holeMaxX - holeMinX + 1;
+          const spanY = holeMaxY - holeMinY + 1;
+          const compactArtifact = spanX <= maxHoleSpan && spanY <= maxHoleSpan;
+          const thinArtifact = Math.min(spanX, spanY) <= 28;
+          if (area <= maxHoleArea && (compactArtifact || thinArtifact)) {
+            for (let i = 0; i < tail; i++) {
+              const fillLocal = queue[i];
+              const yy = Math.floor(fillLocal / width);
+              const xx = fillLocal - yy * width;
+              mask[(minY + yy) * canvasWidth + minX + xx] = 1;
+            }
+          }
+        }
+      }
+    }
+
+    function makeRegion(mask, bounds, seed, count, canvasWidth, canvasHeight, wallMap) {
+      const visualMask = includeNearbyBarriers(mask, wallMap, bounds, canvasWidth, canvasHeight);
+      let visualBounds = computeMaskBounds(visualMask, canvasWidth, canvasHeight);
+      fillClosedHoles(visualMask, visualBounds, canvasWidth, canvasHeight);
+      visualBounds = computeMaskBounds(visualMask, canvasWidth, canvasHeight) || { ...bounds, count };
+
+      bounds = {
+        minX: visualBounds.minX,
+        minY: visualBounds.minY,
+        maxX: visualBounds.maxX,
+        maxY: visualBounds.maxY
+      };
+      count = visualBounds.count;
+
+      const width = bounds.maxX - bounds.minX + 1;
+      const height = bounds.maxY - bounds.minY + 1;
+      const alphaCanvas = document.createElement("canvas");
+      alphaCanvas.width = width;
+      alphaCanvas.height = height;
+      const alphaCtx = alphaCanvas.getContext("2d");
+      const image = alphaCtx.createImageData(width, height);
+
+      for (let y = bounds.minY; y <= bounds.maxY; y++) {
+        const srcRow = y * canvasWidth;
+        const dstRow = (y - bounds.minY) * width;
+        for (let x = bounds.minX; x <= bounds.maxX; x++) {
+          if (!visualMask[srcRow + x]) continue;
+          image.data[((dstRow + (x - bounds.minX)) * 4) + 3] = 255;
+        }
+      }
+      alphaCtx.putImageData(image, 0, 0);
+
+      return {
+        bounds,
+        seed,
+        count,
+        alphaCanvas,
+        width,
+        height
+      };
+    }
+
+    function createTintedCanvas(region, color, opacity) {
+      const canvas = document.createElement("canvas");
+      canvas.width = region.width;
+      canvas.height = region.height;
+      const canvasCtx = canvas.getContext("2d");
+      canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+      canvasCtx.fillStyle = rgba(color, opacity);
+      canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+      canvasCtx.globalCompositeOperation = "destination-in";
+      canvasCtx.drawImage(region.alphaCanvas, 0, 0);
+      canvasCtx.globalCompositeOperation = "source-over";
+      return canvas;
+    }
+
+    function sameRegion(a, b) {
+      return a.count === b.count
+        && a.bounds.minX === b.bounds.minX
+        && a.bounds.minY === b.bounds.minY
+        && a.bounds.maxX === b.bounds.maxX
+        && a.bounds.maxY === b.bounds.maxY;
+    }
+
+    function commitRoom(region, color, opacity) {
+      const rooms = currentRooms();
+      const duplicateIndex = rooms.findIndex((room) => sameRegion(room.region, region));
+      if (duplicateIndex >= 0) {
+        const room = rooms[duplicateIndex];
+        room.color = color;
+        room.opacity = opacity;
+        room.region = region;
+        room.bitmap = createTintedCanvas(region, color, opacity);
+        state.colorIndex = (state.colorIndex + 1) % palette.length;
+        redrawMasks();
+        setStatus(`Room ${duplicateIndex + 1} recolored`);
+        updateControls();
+        return;
+      }
+
+      const room = {
+        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+        page: state.currentPage,
+        color,
+        opacity,
+        region,
+        bitmap: createTintedCanvas(region, color, opacity)
+      };
+      rooms.push(room);
+      state.history.push(room.id);
+      state.colorIndex = (state.colorIndex + 1) % palette.length;
+      redrawMasks();
+      setStatus(`Room ${rooms.length} filled`);
+      updateControls();
+    }
+
+    function redrawMasks() {
+      ctx.mask.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);
+      if (!state.pdfDoc) return;
+      currentRooms().forEach((room) => {
+        ctx.mask.drawImage(room.bitmap, room.region.bounds.minX, room.region.bounds.minY);
+      });
+    }
+
+    function animateWave(region, color, opacity) {
+      return new Promise((resolve) => {
+        const temp = document.createElement("canvas");
+        temp.width = region.width;
+        temp.height = region.height;
+        const tempCtx = temp.getContext("2d");
+        const localX = region.seed.x - region.bounds.minX;
+        const localY = region.seed.y - region.bounds.minY;
+        const maxRadius = Math.max(
+          Math.hypot(localX, localY),
+          Math.hypot(region.width - localX, localY),
+          Math.hypot(localX, region.height - localY),
+          Math.hypot(region.width - localX, region.height - localY)
+        );
+        const start = performance.now();
+        const duration = 880;
+
+        function frame(now) {
+          const t = Math.min(1, (now - start) / duration);
+          const eased = 1 - Math.pow(1 - t, 3);
+          const radius = Math.max(1, maxRadius * eased);
+          const band = 36 + 34 * (1 - eased);
+
+          ctx.wave.clearRect(0, 0, els.waveCanvas.width, els.waveCanvas.height);
+          tempCtx.clearRect(0, 0, temp.width, temp.height);
+
+          tempCtx.fillStyle = rgba(color, opacity * 0.78);
+          tempCtx.beginPath();
+          tempCtx.arc(localX, localY, radius, 0, Math.PI * 2);
+          tempCtx.fill();
+
+          const ring = tempCtx.createRadialGradient(
+            localX, localY, Math.max(0, radius - band),
+            localX, localY, radius + band
+          );
+          ring.addColorStop(0, "rgba(255, 255, 255, 0)");
+          ring.addColorStop(0.44, rgba(color, 0.18));
+          ring.addColorStop(0.58, "rgba(255, 255, 255, 0.72)");
+          ring.addColorStop(0.72, rgba(color, 0.72));
+          ring.addColorStop(1, "rgba(255, 255, 255, 0)");
+          tempCtx.fillStyle = ring;
+          tempCtx.fillRect(0, 0, temp.width, temp.height);
+
+          tempCtx.globalCompositeOperation = "destination-in";
+          tempCtx.drawImage(region.alphaCanvas, 0, 0);
+          tempCtx.globalCompositeOperation = "source-over";
+
+          ctx.wave.drawImage(temp, region.bounds.minX, region.bounds.minY);
+
+          if (t < 1) {
+            requestAnimationFrame(frame);
+          } else {
+            ctx.wave.clearRect(0, 0, els.waveCanvas.width, els.waveCanvas.height);
+            resolve();
+          }
+        }
+
+        requestAnimationFrame(frame);
+      });
+    }
+
+    async function fillAtCanvasPoint(x, y) {
+      if (!state.pdfDoc || state.animating) return;
+      setBusy(true);
+      setStatus("Tracing room...");
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const started = performance.now();
+      try {
+        const region = floodFill(x, y);
+        if (!region) {
+          setStatus("Click a blank area inside a room");
+          return;
+        }
+        const color = currentColor();
+        const opacity = Number(els.opacityRange.value) / 100;
+        const elapsed = Math.round(performance.now() - started);
+        setStatus(`Animating ${region.count.toLocaleString()} pixels`);
+        await animateWave(region, color, opacity);
+        commitRoom(region, color, opacity);
+        console.info("Room fill", { pixels: region.count, elapsedMs: elapsed, bounds: region.bounds });
+      } catch (error) {
+        console.error(error);
+        setStatus("Could not fill this area");
+      } finally {
+        setBusy(false);
+        updateControls();
+      }
+    }
+
+    function removeRoom(id) {
+      for (const [page, rooms] of state.roomsByPage.entries()) {
+        const index = rooms.findIndex((room) => room.id === id);
+        if (index >= 0) {
+          rooms.splice(index, 1);
+          state.history = state.history.filter((roomId) => roomId !== id);
+          if (page === state.currentPage) redrawMasks();
+          setStatus("Room removed");
+          updateControls();
+          return;
+        }
+      }
+    }
+
+    function undoLastRoom() {
+      const id = state.history.pop();
+      if (!id) return;
+      for (const [page, rooms] of state.roomsByPage.entries()) {
+        const index = rooms.findIndex((room) => room.id === id);
+        if (index >= 0) {
+          rooms.splice(index, 1);
+          if (page === state.currentPage) redrawMasks();
+          setStatus("Undo complete");
+          updateControls();
+          return;
+        }
+      }
+      updateControls();
+    }
+
+    function clearCurrentPage() {
+      currentRooms().splice(0);
+      state.history = state.history.filter((id) => {
+        for (const rooms of state.roomsByPage.values()) {
+          if (rooms.some((room) => room.id === id)) return true;
+        }
+        return false;
+      });
+      redrawMasks();
+      setStatus("Page masks cleared");
+      updateControls();
+    }
+
+    function downloadCanvas(canvas, filename) {
+      const link = document.createElement("a");
+      link.download = filename;
+      link.href = canvas.toDataURL("image/png");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+
+    function exportComposite() {
+      const canvas = document.createElement("canvas");
+      canvas.width = els.pdfCanvas.width;
+      canvas.height = els.pdfCanvas.height;
+      const exportCtx = canvas.getContext("2d");
+      exportCtx.drawImage(els.pdfCanvas, 0, 0);
+      exportCtx.drawImage(els.maskCanvas, 0, 0);
+      const base = (state.fileName || "floor-plan").replace(/\.pdf$/i, "").replace(/[^\w-]+/g, "-");
+      downloadCanvas(canvas, `${base}-page-${state.currentPage}-rooms.png`);
+    }
+
+    function exportMasks() {
+      const canvas = document.createElement("canvas");
+      canvas.width = els.maskCanvas.width;
+      canvas.height = els.maskCanvas.height;
+      const exportCtx = canvas.getContext("2d");
+      exportCtx.drawImage(els.maskCanvas, 0, 0);
+      const base = (state.fileName || "floor-plan").replace(/\.pdf$/i, "").replace(/[^\w-]+/g, "-");
+      downloadCanvas(canvas, `${base}-page-${state.currentPage}-mask.png`);
+    }
+
+    function onStagePointerDown(event) {
+      if (event.button !== 0) return;
+      const rect = els.stage.getBoundingClientRect();
+      const x = Math.floor((event.clientX - rect.left) * (els.pdfCanvas.width / rect.width));
+      const y = Math.floor((event.clientY - rect.top) * (els.pdfCanvas.height / rect.height));
+      if (x < 0 || y < 0 || x >= els.pdfCanvas.width || y >= els.pdfCanvas.height) return;
+      fillAtCanvasPoint(x, y);
+    }
+
+    function setZoomFromControl() {
+      state.zoom = Number(els.zoomRange.value) / 100;
+      applyStageSize();
+      updateControls();
+    }
+
+    function invalidateWallMap() {
+      state.wallMap = null;
+      state.wallKey = "";
+      updateControls();
+      setStatus("Wall settings updated");
+    }
+
+    els.importBtn.addEventListener("click", () => els.fileInput.click());
+    els.emptyImportBtn.addEventListener("click", () => els.fileInput.click());
+    els.fileInput.addEventListener("change", () => loadPdfFile(els.fileInput.files[0]));
+    els.sampleBtn.addEventListener("click", loadSamplePdf);
+    els.sample2Btn.addEventListener("click", loadSample2Pdf);
+    els.sample3Btn.addEventListener("click", loadSample3Pdf);
+    els.emptySampleBtn.addEventListener("click", loadSamplePdf);
+    els.emptySample2Btn.addEventListener("click", loadSample2Pdf);
+    els.emptySample3Btn.addEventListener("click", loadSample3Pdf);
+    els.undoBtn.addEventListener("click", undoLastRoom);
+    els.clearBtn.addEventListener("click", clearCurrentPage);
+    els.exportBtn.addEventListener("click", exportComposite);
+    els.exportMaskBtn.addEventListener("click", exportMasks);
+    els.prevPageBtn.addEventListener("click", () => renderPage(state.currentPage - 1));
+    els.nextPageBtn.addEventListener("click", () => renderPage(state.currentPage + 1));
+    els.stage.addEventListener("pointerdown", onStagePointerDown);
+    els.zoomRange.addEventListener("input", setZoomFromControl);
+    els.opacityRange.addEventListener("input", updateControls);
+    els.thresholdRange.addEventListener("input", invalidateWallMap);
+    els.inflateRange.addEventListener("input", invalidateWallMap);
+    els.gapRange.addEventListener("input", invalidateWallMap);
+    els.dashRange.addEventListener("input", invalidateWallMap);
+
+    updateControls();
+    if (location.protocol !== "file:" && window.pdfjsLib) {
+      loadSamplePdf();
+    } else if (!window.pdfjsLib) {
+      setStatus("PDF renderer failed to load");
+    }
+  </script>
+</body>
+</html>

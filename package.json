@@ -1,0 +1,13 @@
+{
+  "name": "soul-prospect-qualifier",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @soul/web",
+    "build": "npm run build --workspace @soul/web",
+    "preview": "npm run preview --workspace @soul/web"
+  }
+}
