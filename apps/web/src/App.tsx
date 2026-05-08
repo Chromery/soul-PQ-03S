@@ -38,6 +38,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import PlanimetriaEditor from "./PlanimetriaEditor";
 
 type StudyStatus =
   | "Favorevole"
@@ -1106,6 +1107,12 @@ function App() {
   const [appointmentOnly, setAppointmentOnly] = useState(false);
   const [expandedStudy, setExpandedStudy] = useState(studies[0].id);
   const [activeStudyId, setActiveStudyId] = useState<string | null>(null);
+  const [editorContext, setEditorContext] = useState<{ studyId: string; propertyId: string } | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const studyId = params.get("editorStudy");
+    const propertyId = params.get("editorProperty");
+    return studyId && propertyId ? { studyId, propertyId } : null;
+  });
   const [toast, setToast] = useState("");
 
   const filteredStudies = useMemo(() => {
@@ -1136,6 +1143,12 @@ function App() {
   const activeStudy = activeStudyId
     ? studies.find((study) => study.id === activeStudyId)
     : undefined;
+  const editorStudy = editorContext
+    ? studies.find((study) => study.id === editorContext.studyId)
+    : undefined;
+  const editorProperty = editorStudy?.properties.find(
+    (property) => property.id === editorContext?.propertyId,
+  );
 
   const totals = useMemo(() => {
     const visible = filteredStudies.length ? filteredStudies : studies;
@@ -1236,6 +1249,18 @@ function App() {
     setAppointmentOnly(false);
   }
 
+  if (editorStudy && editorProperty) {
+    return (
+      <Shell query={query} setQuery={setQuery} toast={toast} activeSection="Immobili">
+        <PlanimetriaEditor
+          study={editorStudy}
+          property={editorProperty}
+          onBack={() => setEditorContext(null)}
+        />
+      </Shell>
+    );
+  }
+
   if (activeStudy) {
     return (
       <Shell
@@ -1252,6 +1277,9 @@ function App() {
             setActiveStudyId(null);
             window.setTimeout(downloadFilteredExcel, 0);
           }}
+          onOpenEditor={(property) =>
+            setEditorContext({ studyId: activeStudy.id, propertyId: property.id })
+          }
         />
       </Shell>
     );
@@ -1485,6 +1513,9 @@ function App() {
                       }
                       onOpenDetail={() => setActiveStudyId(study.id)}
                       onOpenErp={() => openErp(study)}
+                      onOpenEditor={(property) =>
+                        setEditorContext({ studyId: study.id, propertyId: property.id })
+                      }
                     />
                   ))}
                 </tbody>
@@ -1599,7 +1630,7 @@ function Shell({
             icon={<ClipboardList size={21} />}
             label="Studi di fattibilita"
           />
-          <NavItem icon={<Building2 size={21} />} label="Immobili" />
+          <NavItem active={activeSection === "Immobili"} icon={<Building2 size={21} />} label="Immobili" />
           <NavItem icon={<BarChart3 size={21} />} label="Analisi" />
           <NavItem icon={<FileText size={21} />} label="Report" />
           <NavItem icon={<Settings size={21} />} label="Impostazioni" />
@@ -1706,12 +1737,14 @@ function StudyRows({
   onToggle,
   onOpenDetail,
   onOpenErp,
+  onOpenEditor,
 }: {
   study: FeasibilityStudy;
   expanded: boolean;
   onToggle: () => void;
   onOpenDetail: () => void;
   onOpenErp: () => void;
+  onOpenEditor: (property: PropertyItem) => void;
 }) {
   const counts = getCounts(study);
 
@@ -1847,7 +1880,11 @@ function StudyRows({
                     </thead>
                     <tbody>
                       {study.properties.slice(0, 6).map((property) => (
-                        <PropertyRow key={property.id} property={property} />
+                        <PropertyRow
+                          key={property.id}
+                          property={property}
+                          onOpenEditor={() => onOpenEditor(property)}
+                        />
                       ))}
                     </tbody>
                   </table>
@@ -1861,7 +1898,13 @@ function StudyRows({
   );
 }
 
-function PropertyRow({ property }: { property: PropertyItem }) {
+function PropertyRow({
+  property,
+  onOpenEditor,
+}: {
+  property: PropertyItem;
+  onOpenEditor?: () => void;
+}) {
   return (
     <tr>
       <td>
@@ -1881,9 +1924,9 @@ function PropertyRow({ property }: { property: PropertyItem }) {
       </td>
       <td>
         <div className="document-actions">
-          <button>
+          <button onClick={onOpenEditor}>
             <File size={14} />
-            Planimetria PDF
+            Apri editor
           </button>
           <button>
             <FileText size={14} />
@@ -1900,11 +1943,13 @@ function StudyDetail({
   onBack,
   onOpenErp,
   onExport,
+  onOpenEditor,
 }: {
   study: FeasibilityStudy;
   onBack: () => void;
   onOpenErp: () => void;
   onExport: () => void;
+  onOpenEditor: (property: PropertyItem) => void;
 }) {
   const counts = getCounts(study);
   const positiveShare = Math.round((counts.positive / Math.max(counts.total, 1)) * 100);
@@ -2036,9 +2081,9 @@ function StudyDetail({
                   </td>
                   <td>
                     <div className="document-actions">
-                      <button>
+                      <button onClick={() => onOpenEditor(property)}>
                         <File size={14} />
-                        Planimetria
+                        Editor planimetria
                       </button>
                       <button>
                         <FileText size={14} />
