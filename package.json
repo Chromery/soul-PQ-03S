@@ -1,5 +1,6 @@
 {
   "name": "soul-prospect-qualifier",
+  "description": "Internal dashboard and planimetria editor for Soul's feasibility studies and cadastral rent recalculation workflow.",
   "private": true,
   "version": "0.1.0",
   "workspaces": [
