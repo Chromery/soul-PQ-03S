@@ -73,8 +73,45 @@ type AreaSelection = {
   usageId: UsageId;
   color: string;
   opacity: number;
+  totalPixels: number;
   region: Region;
   bitmap: HTMLCanvasElement;
+};
+
+type DocumentSource =
+  | { kind: "sample"; fileName: string; url: string }
+  | { kind: "upload"; fileName: string };
+
+type SavedSelection = {
+  id: string;
+  page: number;
+  usageId: UsageId;
+  opacity: number;
+  totalPixels: number;
+  region: {
+    bounds: MaskBounds;
+    seed: { x: number; y: number };
+    count: number;
+    width: number;
+    height: number;
+    alphaDataUrl: string;
+  };
+};
+
+type SavedDraft = {
+  version: 1;
+  propertyId: string;
+  document: DocumentSource;
+  savedAt: string;
+  sheetSize: SheetSize;
+  scaleDenominator: number;
+  activeUsage: UsageId;
+  opacityPercent: number;
+  threshold: number;
+  inflate: number;
+  gap: number;
+  dash: number;
+  selections: SavedSelection[];
 };
 
 type Runtime = {
@@ -110,6 +147,7 @@ type PlanimetriaEditorProps = {
   study: EditorStudy;
   property: EditorProperty;
   onBack: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
 const USAGES: Array<{
@@ -150,6 +188,14 @@ const SAMPLE_PLANS = [
     url: "/planimetrie/floor-plant-example-3.pdf",
   },
 ];
+
+const SAMPLE_PLANS_BY_PROPERTY: Record<string, (typeof SAMPLE_PLANS)[number]> = {
+  "AU-01": SAMPLE_PLANS[0],
+  "AU-02": SAMPLE_PLANS[1],
+  "AU-03": SAMPLE_PLANS[2],
+};
+
+const DRAFT_KEY_PREFIX = "soul-planimetria-draft:";
 
 const SHEET_SIZES: Record<SheetSize, { widthMm: number; heightMm: number }> = {
   A3: { widthMm: 420, heightMm: 297 },
@@ -230,9 +276,8 @@ function areaFromPixels(
   return (pixelCount / totalPixels) * pageRealAreaM2(sheetSize, scaleDenominator);
 }
 
-function sampleForProperty(propertyId: string) {
-  const sum = propertyId.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return SAMPLE_PLANS[sum % SAMPLE_PLANS.length];
+function linkedSampleForProperty(propertyId: string) {
+  return SAMPLE_PLANS_BY_PROPERTY[propertyId] ?? null;
 }
 
 function downloadCanvas(canvas: HTMLCanvasElement, filename: string) {
@@ -248,7 +293,27 @@ function safeFilename(name: string) {
   return name.replace(/\.pdf$/i, "").replace(/[^\w-]+/g, "-");
 }
 
-export default function PlanimetriaEditor({ study, property, onBack }: PlanimetriaEditorProps) {
+function draftKey(propertyId: string) {
+  return `${DRAFT_KEY_PREFIX}${propertyId}`;
+}
+
+function readSavedDraft(propertyId: string) {
+  try {
+    const serialized = window.localStorage.getItem(draftKey(propertyId));
+    if (!serialized) return null;
+    const draft = JSON.parse(serialized) as SavedDraft;
+    return draft.version === 1 && draft.propertyId === propertyId ? draft : null;
+  } catch {
+    return null;
+  }
+}
+
+export default function PlanimetriaEditor({
+  study,
+  property,
+  onBack,
+  onDirtyChange,
+}: PlanimetriaEditorProps) {
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const waveCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -256,6 +321,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
   const canvasShellRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const runtimeRef = useRef<Runtime>(createRuntime());
+  const pendingDraftRef = useRef<SavedDraft | null>(null);
 
   const [status, setStatus] = useState("Caricamento planimetria");
   const [busy, setBusy] = useState(false);
@@ -272,21 +338,26 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
   const [inflate, setInflate] = useState(1);
   const [gap, setGap] = useState(3);
   const [dash, setDash] = useState(42);
+  const [documentSource, setDocumentSource] = useState<DocumentSource | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [savedAt, setSavedAt] = useState("");
   const [revision, setRevision] = useState(0);
 
-  const sample = useMemo(() => sampleForProperty(property.id), [property.id]);
+  const linkedSample = useMemo(() => linkedSampleForProperty(property.id), [property.id]);
   const activeUsageOption = usageById(activeUsage);
   const hasPdf = pageCount > 0;
   const selections = hasPdf ? currentSelections() : [];
-  const canvasTotalPixels = getCanvasTotalPixels();
+  const allSelections = hasPdf
+    ? Array.from(runtimeRef.current.selectionsByPage.values()).flat()
+    : [];
 
   const selectedAreas = useMemo(
     () =>
-      selections.map((selection, index) => {
+      allSelections.map((selection, index) => {
         const usage = usageById(selection.usageId);
         const area = areaFromPixels(
           selection.region.count,
-          canvasTotalPixels,
+          selection.totalPixels,
           sheetSize,
           scaleDenominator,
         );
@@ -298,7 +369,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
           amount: area * usage.rate,
         };
       }),
-    [canvasTotalPixels, scaleDenominator, selections, sheetSize, revision],
+    [allSelections, scaleDenominator, sheetSize, revision],
   );
 
   const totals = useMemo(() => {
@@ -313,13 +384,51 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
   }, [selectedAreas]);
 
   useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => {
+    function warnBeforeUnload(event: BeforeUnloadEvent) {
+      if (!dirty) return;
+      event.preventDefault();
+    }
+
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [dirty]);
+
+  useEffect(() => {
+    const draft = readSavedDraft(property.id);
+    pendingDraftRef.current = draft;
     runtimeRef.current = createRuntime();
     setCurrentPage(0);
     setPageCount(0);
     setFileName("");
     setCanvasPixels("0 x 0");
+    setDocumentSource(draft?.document ?? null);
+    setDirty(false);
+    setSavedAt(draft?.savedAt ?? "");
     setRevision((value) => value + 1);
-    void loadSample(sample.url, sample.fileName);
+
+    if (draft) {
+      setSheetSize(draft.sheetSize);
+      setScaleDenominator(draft.scaleDenominator);
+      setActiveUsage(draft.activeUsage);
+      setOpacityPercent(draft.opacityPercent);
+      setThreshold(draft.threshold);
+      setInflate(draft.inflate);
+      setGap(draft.gap);
+      setDash(draft.dash);
+      if (draft.document.kind === "sample") {
+        void loadSample(draft.document.url, draft.document.fileName, draft, true);
+      } else {
+        setStatus(`Bozza salvata: ricarica ${draft.document.fileName}`);
+      }
+    } else if (linkedSample) {
+      void loadSample(linkedSample.url, linkedSample.fileName, undefined, true);
+    } else {
+      setStatus("Carica una planimetria o apri un esempio");
+    }
 
     return () => {
       const renderTask = runtimeRef.current.renderTask;
@@ -331,9 +440,12 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
         }
       }
     };
-    // The sample is derived from the currently selected property.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [property.id]);
+
+  function markDirty() {
+    setDirty(true);
+  }
 
   function getCanvases(): CanvasBundle {
     const pdfCanvas = pdfCanvasRef.current;
@@ -372,13 +484,26 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
     setRevision((value) => value + 1);
   }
 
-  async function loadSample(url: string, name: string) {
+  async function loadSample(
+    url: string,
+    name: string,
+    draft?: SavedDraft,
+    initialLoad = false,
+  ) {
     try {
       setStatus("Caricamento PDF");
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.arrayBuffer();
       await loadPdfFromData(data, name);
+      setDocumentSource({ kind: "sample", fileName: name, url });
+      if (draft) {
+        await restoreDraftSelections(draft);
+        setStatus("Bozza ripristinata");
+      } else if (!initialLoad) {
+        pendingDraftRef.current = null;
+        markDirty();
+      }
     } catch (error) {
       console.error(error);
       setStatus("PDF non caricato");
@@ -388,8 +513,19 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
   async function loadPdfFile(file: File | undefined) {
     if (!file) return;
     try {
+      const draft = pendingDraftRef.current;
+      const restoresUpload =
+        draft?.document.kind === "upload" && draft.document.fileName === file.name;
       const data = await file.arrayBuffer();
       await loadPdfFromData(data, file.name || "Planimetria importata.pdf");
+      setDocumentSource({ kind: "upload", fileName: file.name || "Planimetria importata.pdf" });
+      if (restoresUpload && draft) {
+        await restoreDraftSelections(draft);
+        setStatus("Bozza ripristinata");
+      } else {
+        pendingDraftRef.current = null;
+        markDirty();
+      }
     } catch (error) {
       console.error(error);
       setStatus("PDF non caricato");
@@ -418,6 +554,113 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
     } finally {
       setEditorBusy(false);
       bumpRevision();
+    }
+  }
+
+  function canvasFromDataUrl(dataUrl: string, width: number, height: number) {
+    return new Promise<HTMLCanvasElement>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          reject(new Error("Contesto maschera non disponibile"));
+          return;
+        }
+        context.drawImage(image, 0, 0);
+        resolve(canvas);
+      };
+      image.onerror = () => reject(new Error("Maschera bozza non leggibile"));
+      image.src = dataUrl;
+    });
+  }
+
+  async function restoreDraftSelections(draft: SavedDraft) {
+    const restored = new Map<number, AreaSelection[]>();
+    for (const saved of draft.selections) {
+      const usage = usageById(saved.usageId);
+      const alphaCanvas = await canvasFromDataUrl(
+        saved.region.alphaDataUrl,
+        saved.region.width,
+        saved.region.height,
+      );
+      const region: Region = {
+        bounds: saved.region.bounds,
+        seed: saved.region.seed,
+        count: saved.region.count,
+        alphaCanvas,
+        width: saved.region.width,
+        height: saved.region.height,
+      };
+      const selection: AreaSelection = {
+        id: saved.id,
+        page: saved.page,
+        usageId: saved.usageId,
+        color: usage.color,
+        opacity: saved.opacity,
+        totalPixels: saved.totalPixels,
+        region,
+        bitmap: createTintedCanvas(region, usage.color, saved.opacity),
+      };
+      const pageSelections = restored.get(saved.page) ?? [];
+      pageSelections.push(selection);
+      restored.set(saved.page, pageSelections);
+    }
+    runtimeRef.current.selectionsByPage = restored;
+    runtimeRef.current.history = draft.selections.map((selection) => selection.id);
+    pendingDraftRef.current = null;
+    redrawMasks();
+    setDirty(false);
+    bumpRevision();
+  }
+
+  function saveDraft() {
+    if (!documentSource || !hasPdf) return;
+    const selectionsToSave = Array.from(runtimeRef.current.selectionsByPage.values())
+      .flat()
+      .map<SavedSelection>((selection) => ({
+        id: selection.id,
+        page: selection.page,
+        usageId: selection.usageId,
+        opacity: selection.opacity,
+        totalPixels: selection.totalPixels,
+        region: {
+          bounds: selection.region.bounds,
+          seed: selection.region.seed,
+          count: selection.region.count,
+          width: selection.region.width,
+          height: selection.region.height,
+          alphaDataUrl: selection.region.alphaCanvas.toDataURL("image/png"),
+        },
+      }));
+    const savedTime = new Date().toISOString();
+    const draft: SavedDraft = {
+      version: 1,
+      propertyId: property.id,
+      document: documentSource,
+      savedAt: savedTime,
+      sheetSize,
+      scaleDenominator,
+      activeUsage,
+      opacityPercent,
+      threshold,
+      inflate,
+      gap,
+      dash,
+      selections: selectionsToSave,
+    };
+
+    try {
+      window.localStorage.setItem(draftKey(property.id), JSON.stringify(draft));
+      pendingDraftRef.current = draft;
+      setSavedAt(savedTime);
+      setDirty(false);
+      setStatus("Bozza salvata localmente");
+    } catch (error) {
+      console.error(error);
+      setStatus("Bozza troppo grande per il salvataggio locale");
     }
   }
 
@@ -1489,6 +1732,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
       selection.bitmap = createTintedCanvas(region, usage.color, opacity);
       redrawMasks();
       setStatus(`Area ${duplicateIndex + 1} aggiornata`);
+      markDirty();
       bumpRevision();
       return;
     }
@@ -1499,6 +1743,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
       usageId,
       color: usage.color,
       opacity,
+      totalPixels: getCanvasTotalPixels(),
       region,
       bitmap: createTintedCanvas(region, usage.color, opacity),
     };
@@ -1506,6 +1751,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
     runtimeRef.current.history.push(selection.id);
     redrawMasks();
     setStatus(`Area ${selectionsForPage.length} tracciata`);
+    markDirty();
     bumpRevision();
   }
 
@@ -1617,6 +1863,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
         runtimeRef.current.history = runtimeRef.current.history.filter((selectionId) => selectionId !== id);
         if (page === runtimeRef.current.currentPage) redrawMasks();
         setStatus("Area rimossa");
+        markDirty();
         bumpRevision();
         return;
       }
@@ -1632,6 +1879,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
         pageSelections.splice(index, 1);
         if (page === runtimeRef.current.currentPage) redrawMasks();
         setStatus("Annullamento completato");
+        markDirty();
         bumpRevision();
         return;
       }
@@ -1649,6 +1897,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
     });
     redrawMasks();
     setStatus("Pagina pulita");
+    markDirty();
     bumpRevision();
   }
 
@@ -1661,9 +1910,24 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
       selection.color = usage.color;
       selection.bitmap = createTintedCanvas(selection.region, usage.color, selection.opacity);
       redrawMasks();
+      markDirty();
       bumpRevision();
       return;
     }
+  }
+
+  function updateMaskOpacity(nextOpacityPercent: number) {
+    const opacity = nextOpacityPercent / 100;
+    setOpacityPercent(nextOpacityPercent);
+    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
+      pageSelections.forEach((selection) => {
+        selection.opacity = opacity;
+        selection.bitmap = createTintedCanvas(selection.region, selection.color, opacity);
+      });
+    }
+    if (hasPdf) redrawMasks();
+    markDirty();
+    bumpRevision();
   }
 
   function exportComposite() {
@@ -1720,6 +1984,13 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
             </p>
           </div>
           <div className="plan-editor-actions">
+            <span className={`draft-state ${dirty ? "unsaved" : savedAt ? "saved" : ""}`}>
+              {dirty
+                ? "Modifiche non salvate"
+                : savedAt
+                  ? `Bozza salvata ${new Date(savedAt).toLocaleString("it-IT")}`
+                  : "Nessuna bozza salvata"}
+            </span>
             <button className="button secondary" onClick={() => fileInputRef.current?.click()}>
               <Upload size={17} />
               Carica planimetria
@@ -1728,7 +1999,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
               <Download size={17} />
               Esporta PNG
             </button>
-            <button className="button primary">
+            <button className="button primary" onClick={saveDraft} disabled={!hasPdf}>
               <FileText size={17} />
               Salva bozza
             </button>
@@ -1757,7 +2028,10 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
                   key={usage.id}
                   className={`usage-button ${activeUsage === usage.id ? "active" : ""}`}
                   style={{ "--usage-color": usage.color } as CSSProperties}
-                  onClick={() => setActiveUsage(usage.id)}
+                  onClick={() => {
+                    setActiveUsage(usage.id);
+                    markDirty();
+                  }}
                 >
                   <span />
                   {usage.label}
@@ -1781,7 +2055,10 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
                   max={5000}
                   step={10}
                   value={scaleDenominator}
-                  onChange={(event) => setScaleDenominator(Math.max(1, Number(event.target.value) || 1))}
+                  onChange={(event) => {
+                    setScaleDenominator(Math.min(5000, Math.max(50, Number(event.target.value) || 50)));
+                    markDirty();
+                  }}
                 />
               </div>
             </label>
@@ -1790,7 +2067,10 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
                 <button
                   key={size}
                   className={sheetSize === size ? "active" : ""}
-                  onClick={() => setSheetSize(size)}
+                  onClick={() => {
+                    setSheetSize(size);
+                    markDirty();
+                  }}
                 >
                   {size}
                 </button>
@@ -1822,7 +2102,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
               <FileText size={18} />
               <div>
                 <span>PDF aperto</span>
-                <strong>{fileName || sample.fileName}</strong>
+                <strong>{fileName || "Nessun documento"}</strong>
               </div>
             </div>
           </section>
@@ -1885,7 +2165,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
                 min={15}
                 max={75}
                 value={opacityPercent}
-                onChange={(event) => setOpacityPercent(Number(event.target.value))}
+                onChange={(event) => updateMaskOpacity(Number(event.target.value))}
               />
             </label>
             <button className="button soft full-width" disabled={!hasPdf} onClick={fitPageToViewport}>
@@ -1908,6 +2188,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
                 onChange={(event) => {
                   setThreshold(Number(event.target.value));
                   invalidateWallMap();
+                  markDirty();
                 }}
               />
             </label>
@@ -1921,6 +2202,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
                 onChange={(event) => {
                   setInflate(Number(event.target.value));
                   invalidateWallMap();
+                  markDirty();
                 }}
               />
             </label>
@@ -1934,6 +2216,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
                 onChange={(event) => {
                   setGap(Number(event.target.value));
                   invalidateWallMap();
+                  markDirty();
                 }}
               />
             </label>
@@ -1947,6 +2230,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
                 onChange={(event) => {
                   setDash(Number(event.target.value));
                   invalidateWallMap();
+                  markDirty();
                 }}
               />
             </label>
@@ -2005,8 +2289,9 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
               <strong>{formatM2(totals.area)}</strong>
             </div>
             <div>
-              <span>Rendita stimata aree</span>
+              <span>Stima prototipo aree</span>
               <strong>{moneyFormatter.format(totals.amount)}</strong>
+              <small>Coefficienti da validare</small>
             </div>
           </section>
 
@@ -2025,7 +2310,7 @@ export default function PlanimetriaEditor({ study, property, onBack }: Planimetr
                 <article key={selection.id} className="area-row">
                   <div className="area-row-head">
                     <span style={{ background: usage.color }} />
-                    <strong>Area {index + 1}</strong>
+                    <strong>Area {index + 1} - pagina {selection.page}</strong>
                     <button title="Rimuovi area" onClick={() => removeSelection(selection.id)}>
                       <X size={15} />
                     </button>

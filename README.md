@@ -12,15 +12,18 @@ Implemented:
 
 - Vite + React frontend inside an npm workspaces monorepo.
 - Dashboard for ERP-imported `studi di fattibilita`.
+- URL-based navigation between dashboard, studies, immobili, study detail, and editor views.
 - Filtering and sorting by commercial and technical metrics.
 - Expandable company rows with real estate asset details.
 - Study detail view.
+- Immobili overview with direct editor entry.
 - Planimetria editor opened from a selected real estate item.
 - PDF rendering with PDF.js.
 - Smart area selection for planimetria PDFs.
 - Area calculation from selected mask pixels, sheet size, and scale.
 - Assignment of `destinazione d'uso` to selected areas.
-- Prototype export actions and mocked data.
+- Local saved editor drafts, including masks and calibration settings.
+- CSV export actions and mocked data.
 
 Not implemented yet:
 
@@ -29,7 +32,7 @@ Not implemented yet:
 - PostgreSQL and Prisma persistence.
 - S3-compatible object storage integration.
 - ERP API integration.
-- Server-side saving of selected planimetria masks.
+- Server-side saving and versioning of selected planimetria masks.
 
 ## Product Workflow
 
@@ -64,16 +67,16 @@ Current filtering and sorting supports:
 - Commercial owner.
 - Technical owner.
 
-Available prototype actions:
+Available frontend action:
 
-- `Invia a ERP`
-- `Download presentazione`
-- `Link allo studio sull'ERP`
-- `Scarica lista Excel`
+- `Esporta lista CSV`
+- `Esporta immobili CSV` from a study detail
+
+ERP send/sync, ERP links, presentation generation, and protected document downloads are visible as disabled integration points until their services exist.
 
 ## Planimetria Editor
 
-The planimetria editor opens from a selected real estate object. For now, it uses the three sample PDFs in:
+The planimetria editor opens from a selected real estate object. The first three demo immobili (`AU-01`, `AU-02`, and `AU-03`) are explicitly linked to the three sample PDFs in:
 
 ```text
 apps/web/public/planimetrie/
@@ -96,6 +99,9 @@ The editor supports:
 - Area calculation in square meters for every selected mask.
 - Per-usage breakdown and estimated area contribution.
 - Undo, clear, and PNG export controls.
+- Local draft saving and restoration for sample planimetrie.
+
+Drafts for uploaded PDFs retain analysis data locally but require the operator to reload the uploaded PDF after refreshing the browser. Persistent document storage is deferred to the S3/backend integration.
 
 More detail is documented in:
 
@@ -173,7 +179,7 @@ http://localhost:5173/
 Direct editor test URL:
 
 ```text
-http://localhost:5173/?editorStudy=S-2026-0187&editorProperty=AU-01
+http://localhost:5173/studi/S-2026-0187/immobili/AU-01/planimetria
 ```
 
 Build:
@@ -192,4 +198,4 @@ npm run preview
 
 `pdfjs-dist` is pinned to `3.11.174` because newer PDF.js versions rendered the provided cadastral PDFs mostly blank during testing. This version matches the working functional reference.
 
-The current UI uses mocked studies and mocked document references. Backend persistence, ERP import, authentication, and object storage should be added in later phases.
+The current UI uses mocked studies, explicit demo planimetria links, and browser-local drafts. Backend persistence, ERP import, authentication, and object storage should be added in later phases.

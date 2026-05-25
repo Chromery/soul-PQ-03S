@@ -56,7 +56,7 @@ The dashboard also includes search, filters, sorting, summary metrics, and recen
 
 ### Planimetria Editor
 
-The editor opens from a selected real estate object and loads the corresponding planimetria PDF.
+The editor opens from a selected real estate object. In the frontend prototype, three demo immobili are explicitly mapped to the available planimetria PDFs; other immobili accept an uploaded PDF until document storage is integrated.
 
 The operator can:
 
@@ -68,6 +68,7 @@ The operator can:
 - review selected square meters
 - review estimated value by usage type
 - upload a replacement PDF
+- save and restore a browser-local draft of masks and calibration settings
 
 ## Smart Selection Approach
 
@@ -90,7 +91,7 @@ The intended full project architecture is a monorepo with:
 - S3-compatible object storage
 - Clerk authentication
 
-The frontend is currently implemented first. Backend integrations will later replace mocked data and local PDF examples.
+The frontend is currently implemented first. Backend integrations will later replace mocked data, local draft storage, and local PDF examples.
 
 ## Intended Users
 

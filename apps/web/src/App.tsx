@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -38,7 +38,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import PlanimetriaEditor from "./PlanimetriaEditor";
+const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 
 type StudyStatus =
   | "Favorevole"
@@ -103,6 +103,86 @@ type SortKey =
   | "propertiesCount"
   | "commercialOwner"
   | "technicalOwner";
+
+type AppRoute =
+  | { view: "dashboard" }
+  | { view: "studies" }
+  | { view: "properties" }
+  | { view: "analysis" }
+  | { view: "report" }
+  | { view: "settings" }
+  | { view: "activity" }
+  | { view: "study"; studyId: string }
+  | { view: "editor"; studyId: string; propertyId: string };
+
+function routeFromLocation(): AppRoute {
+  const params = new URLSearchParams(window.location.search);
+  const legacyStudyId = params.get("editorStudy");
+  const legacyPropertyId = params.get("editorProperty");
+  if (legacyStudyId && legacyPropertyId) {
+    return { view: "editor", studyId: legacyStudyId, propertyId: legacyPropertyId };
+  }
+
+  const parts = window.location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  if (parts.length === 0) return { view: "dashboard" };
+  if (parts[0] === "studi" && parts.length === 1) return { view: "studies" };
+  if (parts[0] === "studi" && parts[1] && parts.length === 2) {
+    return { view: "study", studyId: parts[1] };
+  }
+  if (parts[0] === "studi" && parts[1] && parts[2] === "immobili" && parts[3] && parts[4] === "planimetria") {
+    return { view: "editor", studyId: parts[1], propertyId: parts[3] };
+  }
+  if (parts[0] === "immobili") return { view: "properties" };
+  if (parts[0] === "analisi") return { view: "analysis" };
+  if (parts[0] === "report") return { view: "report" };
+  if (parts[0] === "impostazioni") return { view: "settings" };
+  if (parts[0] === "attivita") return { view: "activity" };
+  return { view: "dashboard" };
+}
+
+function pathForRoute(route: AppRoute) {
+  switch (route.view) {
+    case "dashboard":
+      return "/";
+    case "studies":
+      return "/studi";
+    case "properties":
+      return "/immobili";
+    case "analysis":
+      return "/analisi";
+    case "report":
+      return "/report";
+    case "settings":
+      return "/impostazioni";
+    case "activity":
+      return "/attivita";
+    case "study":
+      return `/studi/${encodeURIComponent(route.studyId)}`;
+    case "editor":
+      return `/studi/${encodeURIComponent(route.studyId)}/immobili/${encodeURIComponent(route.propertyId)}/planimetria`;
+  }
+}
+
+function navSectionForRoute(route: AppRoute) {
+  switch (route.view) {
+    case "dashboard":
+      return "Dashboard";
+    case "study":
+    case "studies":
+      return "Studi di fattibilita";
+    case "editor":
+    case "properties":
+      return "Immobili";
+    case "analysis":
+      return "Analisi";
+    case "report":
+      return "Report";
+    case "settings":
+      return "Impostazioni";
+    case "activity":
+      return "";
+  }
+}
 
 const studies: FeasibilityStudy[] = [
   {
@@ -1099,6 +1179,7 @@ function getSortValue(study: FeasibilityStudy, sortKey: SortKey) {
 }
 
 function App() {
+  const [route, setRoute] = useState<AppRoute>(routeFromLocation);
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("createdAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
@@ -1106,14 +1187,62 @@ function App() {
   const [regionFilter, setRegionFilter] = useState("Tutte");
   const [appointmentOnly, setAppointmentOnly] = useState(false);
   const [expandedStudy, setExpandedStudy] = useState(studies[0].id);
-  const [activeStudyId, setActiveStudyId] = useState<string | null>(null);
-  const [editorContext, setEditorContext] = useState<{ studyId: string; propertyId: string } | null>(() => {
-    const params = new URLSearchParams(window.location.search);
-    const studyId = params.get("editorStudy");
-    const propertyId = params.get("editorProperty");
-    return studyId && propertyId ? { studyId, propertyId } : null;
-  });
+  const [editorDirty, setEditorDirty] = useState(false);
   const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    function handleSearchShortcut(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        document.getElementById("global-search")?.focus();
+      }
+    }
+
+    window.addEventListener("keydown", handleSearchShortcut);
+    return () => {
+      window.removeEventListener("keydown", handleSearchShortcut);
+    };
+  }, []);
+
+  useEffect(() => {
+    function handlePopState() {
+      const nextRoute = routeFromLocation();
+      if (
+        route.view === "editor" &&
+        editorDirty &&
+        !window.confirm("Sono presenti modifiche alla planimetria non salvate. Uscire comunque?")
+      ) {
+        window.history.pushState({}, "", pathForRoute(route));
+        return;
+      }
+      setEditorDirty(false);
+      setRoute(nextRoute);
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [editorDirty, route]);
+
+  function navigate(nextRoute: AppRoute) {
+    if (
+      route.view === "editor" &&
+      editorDirty &&
+      !window.confirm("Sono presenti modifiche alla planimetria non salvate. Uscire comunque?")
+    ) {
+      return false;
+    }
+    window.history.pushState({}, "", pathForRoute(nextRoute));
+    setEditorDirty(false);
+    setRoute(nextRoute);
+    return true;
+  }
+
+  function handleGlobalQuery(nextQuery: string) {
+    if (route.view !== "dashboard" && route.view !== "studies") {
+      if (!navigate({ view: "studies" })) return;
+    }
+    setQuery(nextQuery);
+  }
 
   const filteredStudies = useMemo(() => {
     return studies
@@ -1140,18 +1269,18 @@ function App() {
       });
   }, [appointmentOnly, query, regionFilter, sortDirection, sortKey, statusFilter]);
 
-  const activeStudy = activeStudyId
-    ? studies.find((study) => study.id === activeStudyId)
+  const activeStudy = route.view === "study"
+    ? studies.find((study) => study.id === route.studyId)
     : undefined;
-  const editorStudy = editorContext
-    ? studies.find((study) => study.id === editorContext.studyId)
+  const editorStudy = route.view === "editor"
+    ? studies.find((study) => study.id === route.studyId)
     : undefined;
   const editorProperty = editorStudy?.properties.find(
-    (property) => property.id === editorContext?.propertyId,
+    (property) => property.id === (route.view === "editor" ? route.propertyId : ""),
   );
 
   const totals = useMemo(() => {
-    const visible = filteredStudies.length ? filteredStudies : studies;
+    const visible = filteredStudies;
     const active = visible.filter((study) => study.status !== "Non favorevole").length;
     const positive = visible.filter((study) => isPositiveStatus(study.status)).length;
     const potentialRendita = visible.reduce((sum, study) => sum + study.totalRendita, 0);
@@ -1177,7 +1306,25 @@ function App() {
     window.setTimeout(() => setToast(""), 2600);
   }
 
-  function downloadFilteredExcel() {
+  function downloadCsv(filename: string, headers: string[], rows: Array<Array<string | number>>) {
+    const csv = [headers, ...rows]
+      .map((row) =>
+        row
+          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+          .join(";"),
+      )
+      .join("\n");
+
+    const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadFilteredCsv() {
     const headers = [
       "ID studio",
       "Azienda",
@@ -1216,30 +1363,35 @@ function App() {
       study.technicalOwner,
     ]);
 
-    const csv = [headers, ...rows]
-      .map((row) =>
-        row
-          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-          .join(";"),
-      )
-      .join("\n");
-
-    const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "studi-fattibilita-filtrati.csv";
-    link.click();
-    URL.revokeObjectURL(url);
-    flash("Lista filtrata esportata per Excel.");
+    downloadCsv("studi-fattibilita-filtrati.csv", headers, rows);
+    flash("Lista filtrata esportata in CSV.");
   }
 
-  function openErp(study = filteredStudies[0]) {
-    if (!study) {
-      flash("Nessuno studio disponibile con i filtri correnti.");
-      return;
-    }
-    window.open(study.erpUrl, "_blank", "noopener,noreferrer");
+  function downloadStudyPropertiesCsv(study: FeasibilityStudy) {
+    const headers = [
+      "ID immobile",
+      "Indirizzo",
+      "Comune",
+      "Categoria",
+      "Rendita attuale",
+      "Rendita prospettata",
+      "Differenza rendita",
+      "Differenza IMU",
+      "Esito",
+    ];
+    const rows = study.properties.map((property) => [
+      property.id,
+      property.address,
+      property.comune,
+      property.categoria,
+      property.currentRendita,
+      property.estimatedRendita,
+      property.diffPercent,
+      property.imuDiff,
+      property.outcome,
+    ]);
+    downloadCsv(`${study.id.toLowerCase()}-immobili.csv`, headers, rows);
+    flash("Immobili dello studio esportati in CSV.");
   }
 
   function resetFilters() {
@@ -1249,56 +1401,138 @@ function App() {
     setAppointmentOnly(false);
   }
 
-  if (editorStudy && editorProperty) {
+  if (route.view === "editor" && editorStudy && editorProperty) {
     return (
-      <Shell query={query} setQuery={setQuery} toast={toast} activeSection="Immobili">
-        <PlanimetriaEditor
-          study={editorStudy}
-          property={editorProperty}
-          onBack={() => setEditorContext(null)}
-        />
+      <Shell
+        query={query}
+        setQuery={handleGlobalQuery}
+        toast={toast}
+        activeSection={navSectionForRoute(route)}
+        onNavigate={navigate}
+      >
+        <Suspense fallback={<div className="editor-loading">Caricamento editor planimetrie...</div>}>
+          <PlanimetriaEditor
+            study={editorStudy}
+            property={editorProperty}
+            onBack={() => navigate({ view: "study", studyId: editorStudy.id })}
+            onDirtyChange={setEditorDirty}
+          />
+        </Suspense>
       </Shell>
     );
   }
 
-  if (activeStudy) {
+  if (route.view === "study" && activeStudy) {
     return (
       <Shell
         query={query}
-        setQuery={setQuery}
+        setQuery={handleGlobalQuery}
         toast={toast}
-        activeSection="Studi di fattibilita"
+        activeSection={navSectionForRoute(route)}
+        onNavigate={navigate}
       >
         <StudyDetail
           study={activeStudy}
-          onBack={() => setActiveStudyId(null)}
-          onOpenErp={() => openErp(activeStudy)}
-          onExport={() => {
-            setActiveStudyId(null);
-            window.setTimeout(downloadFilteredExcel, 0);
-          }}
+          onBack={() => navigate({ view: "studies" })}
+          onExport={() => downloadStudyPropertiesCsv(activeStudy)}
           onOpenEditor={(property) =>
-            setEditorContext({ studyId: activeStudy.id, propertyId: property.id })
+            navigate({ view: "editor", studyId: activeStudy.id, propertyId: property.id })
           }
         />
       </Shell>
     );
   }
 
+  if (route.view === "properties") {
+    return (
+      <Shell
+        query={query}
+        setQuery={handleGlobalQuery}
+        toast={toast}
+        activeSection={navSectionForRoute(route)}
+        onNavigate={navigate}
+      >
+        <PropertiesPage
+          studies={studies}
+          onOpenStudy={(study) => navigate({ view: "study", studyId: study.id })}
+          onOpenEditor={(study, property) =>
+            navigate({ view: "editor", studyId: study.id, propertyId: property.id })
+          }
+        />
+      </Shell>
+    );
+  }
+
+  if (route.view === "analysis" || route.view === "report" || route.view === "settings" || route.view === "activity") {
+    const sections = {
+      analysis: {
+        title: "Analisi",
+        description: "I pannelli analitici saranno collegati ai dati consolidati degli studi.",
+      },
+      report: {
+        title: "Report",
+        description: "La generazione di report e presentazioni richiede il servizio documentale.",
+      },
+      settings: {
+        title: "Impostazioni",
+        description: "Configurazioni e permessi saranno disponibili con l'autenticazione aziendale.",
+      },
+      activity: {
+        title: "Registro attivita",
+        description: "Gli eventi operativi saranno popolati dall'integrazione ERP e dalle versioni salvate.",
+      },
+    } as const;
+    return (
+      <Shell
+        query={query}
+        setQuery={handleGlobalQuery}
+        toast={toast}
+        activeSection={navSectionForRoute(route)}
+        onNavigate={navigate}
+      >
+        <PendingPage {...sections[route.view]} onOpenStudies={() => navigate({ view: "studies" })} />
+      </Shell>
+    );
+  }
+
+  if ((route.view === "study" && !activeStudy) || (route.view === "editor" && (!editorStudy || !editorProperty))) {
+    return (
+      <Shell
+        query={query}
+        setQuery={handleGlobalQuery}
+        toast={toast}
+        activeSection="Studi di fattibilita"
+        onNavigate={navigate}
+      >
+        <PendingPage
+          title="Elemento non trovato"
+          description="Lo studio o l'immobile richiesto non e disponibile nella vista corrente."
+          onOpenStudies={() => navigate({ view: "studies" })}
+        />
+      </Shell>
+    );
+  }
+
   return (
-    <Shell query={query} setQuery={setQuery} toast={toast} activeSection="Dashboard">
+    <Shell
+      query={query}
+      setQuery={handleGlobalQuery}
+      toast={toast}
+      activeSection={navSectionForRoute(route)}
+      onNavigate={navigate}
+    >
       <main className="dashboard-grid">
         <section className="workspace">
           <div className="page-heading">
             <div>
               <p className="eyebrow">Import ERP</p>
-              <h1>Dashboard studi di fattibilita</h1>
+              <h1>{route.view === "studies" ? "Studi di fattibilita" : "Dashboard studi di fattibilita"}</h1>
               <p>
                 Monitora gli studi importati dall'ERP, le priorita commerciali e le differenze
                 di rendita catastale.
               </p>
             </div>
-            <button className="button primary" onClick={() => flash("Sincronizzazione ERP avviata.")}>
+            <button className="button primary" disabled title="Disponibile dopo integrazione ERP">
               <RefreshCw size={18} />
               Sincronizza ERP
             </button>
@@ -1339,7 +1573,7 @@ function App() {
                   <span className="muted-chip">Nessun filtro, ultimi studi importati</span>
                 )}
               </div>
-              <button className="icon-button" title="Reimposta filtri" onClick={resetFilters}>
+              <button className="icon-button" title="Reimposta filtri" aria-label="Reimposta filtri" onClick={resetFilters}>
                 <RefreshCw size={17} />
               </button>
             </div>
@@ -1348,6 +1582,7 @@ function App() {
               <label className="search-field table-search">
                 <Search size={17} />
                 <input
+                  aria-label="Cerca studi per azienda, partita IVA o comune"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Cerca per azienda, P. IVA, comune..."
@@ -1412,22 +1647,23 @@ function App() {
           <div className="toolbar">
             <button
               className="button primary"
-              onClick={() => flash(`${filteredStudies.length} studi pronti per l'invio a ERP.`)}
+              disabled
+              title="Disponibile dopo integrazione ERP"
             >
               <Send size={17} />
               Invia a ERP
             </button>
-            <button className="button secondary" onClick={() => flash("Preparazione PPTX in coda.")}>
+            <button className="button secondary" disabled title="Disponibile con il servizio documentale">
               <Presentation size={17} />
               Download presentazione
             </button>
-            <button className="button secondary" onClick={() => openErp()}>
+            <button className="button secondary" disabled title="Disponibile dopo integrazione ERP">
               <ExternalLink size={17} />
               Link allo studio sull'ERP
             </button>
-            <button className="button secondary" onClick={downloadFilteredExcel}>
+            <button className="button secondary" onClick={downloadFilteredCsv}>
               <FileSpreadsheet size={17} />
-              Scarica lista Excel
+              Esporta lista CSV
             </button>
           </div>
 
@@ -1511,10 +1747,9 @@ function App() {
                       onToggle={() =>
                         setExpandedStudy((current) => (current === study.id ? "" : study.id))
                       }
-                      onOpenDetail={() => setActiveStudyId(study.id)}
-                      onOpenErp={() => openErp(study)}
+                      onOpenDetail={() => navigate({ view: "study", studyId: study.id })}
                       onOpenEditor={(property) =>
-                        setEditorContext({ studyId: study.id, propertyId: property.id })
+                        navigate({ view: "editor", studyId: study.id, propertyId: property.id })
                       }
                     />
                   ))}
@@ -1539,35 +1774,35 @@ function App() {
               label="Studi attivi"
               value={numberFormatter.format(totals.active)}
               tone="blue"
-              delta="+12% vs periodo precedente"
+              delta="Nella vista corrente"
             />
             <MetricCard
               icon={<CheckCircle2 size={24} />}
               label="Con esito positivo"
               value={numberFormatter.format(totals.positive)}
               tone="green"
-              delta="+8% vs periodo precedente"
+              delta="Nella vista corrente"
             />
             <MetricCard
               icon={<BarChart3 size={24} />}
               label="Diff. rendita media"
               value={formatPercent(totals.averageDiff)}
               tone="purple"
-              delta="+3,4 pp vs mese precedente"
+              delta="Nella vista corrente"
             />
             <MetricCard
               icon={<Euro size={24} />}
               label="Rendita potenziale totale"
               value={formatEuro(totals.potentialRendita)}
               tone="orange"
-              delta="+10,7% vs periodo precedente"
+              delta="Nella vista corrente"
             />
           </section>
 
           <section className="activity-card">
             <div className="activity-header">
               <h2>Attivita recenti</h2>
-              <button>Vedi tutto</button>
+              <button onClick={() => navigate({ view: "activity" })}>Vedi tutto</button>
             </div>
             <ActivityItem
               tone="green"
@@ -1593,7 +1828,7 @@ function App() {
               subtitle="Via Manzoni 12, Milano"
               time="Ieri 14:02"
             />
-            <button className="button soft full-width">
+            <button className="button soft full-width" onClick={() => navigate({ view: "activity" })}>
               Vai al registro attivita
               <ChevronRight size={16} />
             </button>
@@ -1610,12 +1845,14 @@ function Shell({
   setQuery,
   toast,
   activeSection,
+  onNavigate,
 }: {
   children: React.ReactNode;
   query: string;
   setQuery: (query: string) => void;
   toast: string;
   activeSection: string;
+  onNavigate: (route: AppRoute) => void;
 }) {
   return (
     <div className="app-shell">
@@ -1624,19 +1861,45 @@ function Shell({
           <img src="/soul_logo_blu.png" alt="Soul Prospect Qualifier" />
         </div>
         <nav className="nav-menu" aria-label="Navigazione principale">
-          <NavItem active={activeSection === "Dashboard"} icon={<LayoutDashboard size={21} />} label="Dashboard" />
+          <NavItem
+            active={activeSection === "Dashboard"}
+            icon={<LayoutDashboard size={21} />}
+            label="Dashboard"
+            onClick={() => onNavigate({ view: "dashboard" })}
+          />
           <NavItem
             active={activeSection === "Studi di fattibilita"}
             icon={<ClipboardList size={21} />}
             label="Studi di fattibilita"
+            onClick={() => onNavigate({ view: "studies" })}
           />
-          <NavItem active={activeSection === "Immobili"} icon={<Building2 size={21} />} label="Immobili" />
-          <NavItem icon={<BarChart3 size={21} />} label="Analisi" />
-          <NavItem icon={<FileText size={21} />} label="Report" />
-          <NavItem icon={<Settings size={21} />} label="Impostazioni" />
+          <NavItem
+            active={activeSection === "Immobili"}
+            icon={<Building2 size={21} />}
+            label="Immobili"
+            onClick={() => onNavigate({ view: "properties" })}
+          />
+          <NavItem
+            active={activeSection === "Analisi"}
+            icon={<BarChart3 size={21} />}
+            label="Analisi"
+            onClick={() => onNavigate({ view: "analysis" })}
+          />
+          <NavItem
+            active={activeSection === "Report"}
+            icon={<FileText size={21} />}
+            label="Report"
+            onClick={() => onNavigate({ view: "report" })}
+          />
+          <NavItem
+            active={activeSection === "Impostazioni"}
+            icon={<Settings size={21} />}
+            label="Impostazioni"
+            onClick={() => onNavigate({ view: "settings" })}
+          />
         </nav>
 
-        <div className="operator-card">
+        <div className="operator-card" aria-label="Operatore corrente">
           <div className="avatar">MG</div>
           <div>
             <strong>Marco Giordani</strong>
@@ -1651,6 +1914,8 @@ function Shell({
           <label className="search-field global-search">
             <Search size={18} />
             <input
+              id="global-search"
+              aria-label="Cerca aziende, immobili o studi"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Cerca aziende, immobili, studi..."
@@ -1658,29 +1923,29 @@ function Shell({
             <kbd>Ctrl K</kbd>
           </label>
 
-          <button className="date-picker">
+          <button className="date-picker" disabled title="Filtro periodo in preparazione">
             <CalendarDays size={18} />
             01 Mag 2026 - 31 Mag 2026
             <ChevronDown size={15} />
           </button>
 
-          <button className="button primary top-action">
+          <button className="button primary top-action" disabled title="Disponibile dopo integrazione ERP">
             <UploadCloud size={18} />
             Importa ERP
           </button>
 
           <div className="top-icons">
-            <button className="icon-button notification" title="Notifiche">
+            <button className="icon-button notification" title="Notifiche in preparazione" disabled aria-label="Notifiche in preparazione">
               <Bell size={19} />
               <span>8</span>
             </button>
-            <button className="icon-button" title="Aiuto">
+            <button className="icon-button" title="Aiuto in preparazione" disabled aria-label="Aiuto in preparazione">
               <CircleHelp size={19} />
             </button>
-            <button className="icon-button" title="Impostazioni vista">
+            <button className="icon-button" title="Impostazioni" onClick={() => onNavigate({ view: "settings" })} aria-label="Impostazioni">
               <SlidersHorizontal size={19} />
             </button>
-            <button className="icon-button" title="Altre azioni">
+            <button className="icon-button" title="Altre azioni in preparazione" disabled aria-label="Altre azioni in preparazione">
               <MoreVertical size={19} />
             </button>
           </div>
@@ -1697,13 +1962,15 @@ function NavItem({
   icon,
   label,
   active = false,
+  onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   active?: boolean;
+  onClick: () => void;
 }) {
   return (
-    <button className={`nav-item ${active ? "active" : ""}`}>
+    <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick} aria-current={active ? "page" : undefined}>
       {icon}
       <span>{label}</span>
     </button>
@@ -1731,19 +1998,124 @@ function SortableHeader({
   );
 }
 
+function PropertiesPage({
+  studies,
+  onOpenStudy,
+  onOpenEditor,
+}: {
+  studies: FeasibilityStudy[];
+  onOpenStudy: (study: FeasibilityStudy) => void;
+  onOpenEditor: (study: FeasibilityStudy, property: PropertyItem) => void;
+}) {
+  const properties = studies.flatMap((study) =>
+    study.properties.map((property) => ({ property, study })),
+  );
+
+  return (
+    <main className="detail-page">
+      <section className="detail-hero section-hero">
+        <div>
+          <p className="eyebrow">Archivio immobili</p>
+          <h1>Immobili da analizzare</h1>
+          <p>{properties.length} immobili associati agli studi importati nella demo corrente.</p>
+        </div>
+      </section>
+      <section className="detail-card property-detail-card properties-index">
+        <div className="section-title">
+          <h2>Planimetrie e analisi</h2>
+          <span>Seleziona un immobile per aprire l'editor</span>
+        </div>
+        <div className="compact-table-wrap">
+          <table className="compact-table">
+            <thead>
+              <tr>
+                <th>Immobile</th>
+                <th>Azienda</th>
+                <th>Categoria</th>
+                <th>Rendita attuale</th>
+                <th>Esito</th>
+                <th>Studio</th>
+                <th>Planimetria</th>
+              </tr>
+            </thead>
+            <tbody>
+              {properties.map(({ property, study }) => (
+                <tr key={`${study.id}-${property.id}`}>
+                  <td>
+                    <div className="company-cell">
+                      <strong>{property.address}</strong>
+                      <span>{property.comune}</span>
+                    </div>
+                  </td>
+                  <td>{study.company}</td>
+                  <td>{property.categoria}</td>
+                  <td>{formatEuro(property.currentRendita)}</td>
+                  <td>
+                    <OutcomeBadge outcome={property.outcome} />
+                  </td>
+                  <td>
+                    <button className="inline-link" onClick={() => onOpenStudy(study)}>
+                      {study.id}
+                    </button>
+                  </td>
+                  <td>
+                    <button className="button secondary compact-button" onClick={() => onOpenEditor(study, property)}>
+                      <File size={14} />
+                      Apri editor
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function PendingPage({
+  title,
+  description,
+  onOpenStudies,
+}: {
+  title: string;
+  description: string;
+  onOpenStudies: () => void;
+}) {
+  return (
+    <main className="detail-page pending-page">
+      <section className="detail-hero section-hero">
+        <div>
+          <p className="eyebrow">Integrazione prevista</p>
+          <h1>{title}</h1>
+          <p>{description}</p>
+        </div>
+        <button className="button primary" onClick={onOpenStudies}>
+          <ClipboardList size={17} />
+          Apri studi
+        </button>
+      </section>
+      <section className="detail-card pending-state">
+        <AlertTriangle size={24} />
+        <strong>Funzione non ancora operativa</strong>
+        <p>Questa sezione sara abilitata quando i servizi applicativi richiesti saranno collegati.</p>
+      </section>
+    </main>
+  );
+}
+
 function StudyRows({
   study,
   expanded,
   onToggle,
   onOpenDetail,
-  onOpenErp,
   onOpenEditor,
 }: {
   study: FeasibilityStudy;
   expanded: boolean;
   onToggle: () => void;
   onOpenDetail: () => void;
-  onOpenErp: () => void;
   onOpenEditor: (property: PropertyItem) => void;
 }) {
   const counts = getCounts(study);
@@ -1752,7 +2124,12 @@ function StudyRows({
     <>
       <tr className={`study-row ${expanded ? "expanded" : ""}`}>
         <td>
-          <button className="expand-button" aria-expanded={expanded} onClick={onToggle}>
+          <button
+            className="expand-button"
+            aria-expanded={expanded}
+            aria-label={expanded ? "Comprimi dettagli studio" : "Espandi dettagli studio"}
+            onClick={onToggle}
+          >
             {expanded ? <ChevronUp size={17} /> : <ChevronRight size={17} />}
           </button>
         </td>
@@ -1786,7 +2163,7 @@ function StudyRows({
           <Owner owner={study.commercialOwner} />
         </td>
         <td>
-          <button className="icon-button" title="Apri su ERP" onClick={onOpenErp}>
+          <button className="icon-button" title="Disponibile dopo integrazione ERP" disabled aria-label="Link ERP non disponibile">
             <ExternalLink size={17} />
           </button>
         </td>
@@ -1849,7 +2226,7 @@ function StudyRows({
                   <p>{study.notes}</p>
                 </div>
                 <div className="summary-actions">
-                  <button className="button secondary" onClick={onOpenErp}>
+                  <button className="button secondary" disabled title="Disponibile dopo integrazione ERP">
                     Link ERP
                     <ExternalLink size={16} />
                   </button>
@@ -1863,7 +2240,7 @@ function StudyRows({
               <section className="property-table-section">
                 <div className="section-title">
                   <h3>Dettaglio immobili ({counts.total})</h3>
-                  <span>Planimetrie e visure catastali da S3</span>
+                  <span>Documenti associati agli immobili</span>
                 </div>
                 <div className="compact-table-wrap">
                   <table className="compact-table">
@@ -1879,7 +2256,7 @@ function StudyRows({
                       </tr>
                     </thead>
                     <tbody>
-                      {study.properties.slice(0, 6).map((property) => (
+                      {study.properties.map((property) => (
                         <PropertyRow
                           key={property.id}
                           property={property}
@@ -1928,7 +2305,7 @@ function PropertyRow({
             <File size={14} />
             Apri editor
           </button>
-          <button>
+          <button disabled title="Documento disponibile dopo integrazione storage">
             <FileText size={14} />
             Visura PDF
           </button>
@@ -1941,13 +2318,11 @@ function PropertyRow({
 function StudyDetail({
   study,
   onBack,
-  onOpenErp,
   onExport,
   onOpenEditor,
 }: {
   study: FeasibilityStudy;
   onBack: () => void;
-  onOpenErp: () => void;
   onExport: () => void;
   onOpenEditor: (property: PropertyItem) => void;
 }) {
@@ -1975,13 +2350,13 @@ function StudyDetail({
         <div className="detail-actions">
           <button className="button secondary" onClick={onExport}>
             <FileSpreadsheet size={17} />
-            Esporta Excel
+            Esporta immobili CSV
           </button>
-          <button className="button secondary" onClick={onOpenErp}>
+          <button className="button secondary" disabled title="Disponibile dopo integrazione ERP">
             <ExternalLink size={17} />
             Link ERP
           </button>
-          <button className="button primary">
+          <button className="button primary" disabled title="Disponibile dopo integrazione ERP">
             <Send size={17} />
             Invia a ERP
           </button>
@@ -2085,7 +2460,7 @@ function StudyDetail({
                         <File size={14} />
                         Editor planimetria
                       </button>
-                      <button>
+                      <button disabled title="Documento disponibile dopo integrazione storage">
                         <FileText size={14} />
                         Visura
                       </button>
