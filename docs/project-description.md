@@ -69,6 +69,7 @@ The operator can:
 - review estimated value by usage type
 - upload a replacement PDF
 - save and restore a browser-local draft of masks and calibration settings
+- collapse tool and results panels while the planimetria remains in a fixed central workspace
 
 ## Smart Selection Approach
 

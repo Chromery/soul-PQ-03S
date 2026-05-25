@@ -13,6 +13,7 @@ Implemented:
 - Vite + React frontend inside an npm workspaces monorepo.
 - Dashboard for ERP-imported `studi di fattibilita`.
 - URL-based navigation between dashboard, studies, immobili, study detail, and editor views.
+- Collapsible primary navigation sidebar.
 - Filtering and sorting by commercial and technical metrics.
 - Expandable company rows with real estate asset details.
 - Study detail view.
@@ -23,6 +24,7 @@ Implemented:
 - Area calculation from selected mask pixels, sheet size, and scale.
 - Assignment of `destinazione d'uso` to selected areas.
 - Local saved editor drafts, including masks and calibration settings.
+- Collapsible editor panels with an anchored plan workspace and independently scrolling controls.
 - CSV export actions and mocked data.
 
 Not implemented yet:
@@ -100,6 +102,7 @@ The editor supports:
 - Per-usage breakdown and estimated area contribution.
 - Undo, clear, and PNG export controls.
 - Local draft saving and restoration for sample planimetrie.
+- Collapsible tools/results panels so the planimetria remains the primary work surface.
 
 Drafts for uploaded PDFs retain analysis data locally but require the operator to reload the uploaded PDF after refreshing the browser. Persistent document storage is deferred to the S3/backend integration.
 

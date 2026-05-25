@@ -12,6 +12,10 @@ import {
   Home,
   Layers,
   MousePointer2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   RotateCcw,
   Ruler,
   Trash2,
@@ -196,6 +200,10 @@ const SAMPLE_PLANS_BY_PROPERTY: Record<string, (typeof SAMPLE_PLANS)[number]> = 
 };
 
 const DRAFT_KEY_PREFIX = "soul-planimetria-draft:";
+const PANEL_STORAGE_KEYS = {
+  left: "soul-editor-left-panel-open",
+  right: "soul-editor-right-panel-open",
+};
 
 const SHEET_SIZES: Record<SheetSize, { widthMm: number; heightMm: number }> = {
   A3: { widthMm: 420, heightMm: 297 },
@@ -308,6 +316,10 @@ function readSavedDraft(propertyId: string) {
   }
 }
 
+function readPanelState(key: string) {
+  return window.localStorage.getItem(key) !== "false";
+}
+
 export default function PlanimetriaEditor({
   study,
   property,
@@ -341,6 +353,8 @@ export default function PlanimetriaEditor({
   const [documentSource, setDocumentSource] = useState<DocumentSource | null>(null);
   const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState("");
+  const [leftPanelOpen, setLeftPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.left));
+  const [rightPanelOpen, setRightPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.right));
   const [revision, setRevision] = useState(0);
 
   const linkedSample = useMemo(() => linkedSampleForProperty(property.id), [property.id]);
@@ -386,6 +400,11 @@ export default function PlanimetriaEditor({
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
+
+  useEffect(() => {
+    window.localStorage.setItem(PANEL_STORAGE_KEYS.left, String(leftPanelOpen));
+    window.localStorage.setItem(PANEL_STORAGE_KEYS.right, String(rightPanelOpen));
+  }, [leftPanelOpen, rightPanelOpen]);
 
   useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
@@ -2015,8 +2034,22 @@ export default function PlanimetriaEditor({
         onChange={(event) => void loadPdfFile(event.target.files?.[0])}
       />
 
-      <section className="plan-editor-grid">
-        <aside className="plan-tool-panel">
+      <section
+        className={`plan-editor-grid ${leftPanelOpen ? "" : "left-collapsed"} ${rightPanelOpen ? "" : "right-collapsed"}`}
+      >
+        {leftPanelOpen && (
+          <aside className="plan-tool-panel" aria-label="Strumenti planimetria">
+          <div className="aside-panel-head">
+            <strong>Strumenti</strong>
+            <button
+              className="icon-button"
+              onClick={() => setLeftPanelOpen(false)}
+              title="Nascondi strumenti"
+              aria-label="Nascondi strumenti"
+            >
+              <PanelLeftClose size={18} />
+            </button>
+          </div>
           <section className="tool-block">
             <div className="tool-block-head">
               <h2>Destinazione d'uso</h2>
@@ -2235,17 +2268,38 @@ export default function PlanimetriaEditor({
               />
             </label>
           </section>
-        </aside>
+          </aside>
+        )}
 
         <section className="plan-canvas-panel">
           <div className="canvas-toolbar">
-            <div className="status-pill">
-              <span className={busy ? "busy-dot" : ""} />
-              {status}
+            <div className="canvas-toolbar-controls">
+              <button
+                className="icon-button panel-toggle"
+                onClick={() => setLeftPanelOpen((open) => !open)}
+                title={leftPanelOpen ? "Nascondi strumenti" : "Mostra strumenti"}
+                aria-label={leftPanelOpen ? "Nascondi strumenti" : "Mostra strumenti"}
+                aria-expanded={leftPanelOpen}
+              >
+                {leftPanelOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+              </button>
+              <div className="status-pill">
+                <span className={busy ? "busy-dot" : ""} />
+                {status}
+              </div>
             </div>
-            <div>
+            <div className="canvas-toolbar-meta">
               <span>{canvasPixels}</span>
               <span>{sheetSize} 1:{scaleDenominator}</span>
+              <button
+                className="icon-button panel-toggle"
+                onClick={() => setRightPanelOpen((open) => !open)}
+                title={rightPanelOpen ? "Nascondi riepilogo aree" : "Mostra riepilogo aree"}
+                aria-label={rightPanelOpen ? "Nascondi riepilogo aree" : "Mostra riepilogo aree"}
+                aria-expanded={rightPanelOpen}
+              >
+                {rightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+              </button>
             </div>
           </div>
           <div ref={canvasShellRef} className="plan-canvas-shell">
@@ -2269,7 +2323,19 @@ export default function PlanimetriaEditor({
           </div>
         </section>
 
-        <aside className="areas-panel">
+        {rightPanelOpen && (
+          <aside className="areas-panel" aria-label="Riepilogo aree">
+          <div className="aside-panel-head">
+            <strong>Riepilogo aree</strong>
+            <button
+              className="icon-button"
+              onClick={() => setRightPanelOpen(false)}
+              title="Nascondi riepilogo aree"
+              aria-label="Nascondi riepilogo aree"
+            >
+              <PanelRightClose size={18} />
+            </button>
+          </div>
           <section className="selected-property-card">
             <div className="property-symbol">
               {property.categoria.startsWith("D/") ? <Factory size={22} /> : <Home size={22} />}
@@ -2365,7 +2431,8 @@ export default function PlanimetriaEditor({
               );
             })}
           </section>
-        </aside>
+          </aside>
+        )}
       </section>
     </main>
   );

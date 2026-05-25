@@ -26,6 +26,8 @@ import {
   Home,
   LayoutDashboard,
   MoreVertical,
+  PanelLeftClose,
+  PanelLeftOpen,
   Presentation,
   RefreshCw,
   Search,
@@ -1409,6 +1411,7 @@ function App() {
         toast={toast}
         activeSection={navSectionForRoute(route)}
         onNavigate={navigate}
+        editorMode
       >
         <Suspense fallback={<div className="editor-loading">Caricamento editor planimetrie...</div>}>
           <PlanimetriaEditor
@@ -1846,6 +1849,7 @@ function Shell({
   toast,
   activeSection,
   onNavigate,
+  editorMode = false,
 }: {
   children: React.ReactNode;
   query: string;
@@ -1853,12 +1857,33 @@ function Shell({
   toast: string;
   activeSection: string;
   onNavigate: (route: AppRoute) => void;
+  editorMode?: boolean;
 }) {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    return window.localStorage.getItem("soul-sidebar-collapsed") === "true";
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem("soul-sidebar-collapsed", String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
+
   return (
-    <div className="app-shell">
+    <div
+      className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${editorMode ? "editor-shell" : ""}`}
+    >
       <aside className="sidebar">
-        <div className="brand">
-          <img src="/soul_logo_blu.png" alt="Soul Prospect Qualifier" />
+        <div className="brand-row">
+          <div className="brand">
+            <img src="/soul_logo_blu.png" alt="Soul Prospect Qualifier" />
+          </div>
+          <button
+            className="sidebar-toggle"
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            aria-label={sidebarCollapsed ? "Espandi navigazione" : "Comprimi navigazione"}
+            title={sidebarCollapsed ? "Espandi navigazione" : "Comprimi navigazione"}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}
+          </button>
         </div>
         <nav className="nav-menu" aria-label="Navigazione principale">
           <NavItem
@@ -1909,7 +1934,7 @@ function Shell({
         </div>
       </aside>
 
-      <div className="content-shell">
+      <div className={`content-shell ${editorMode ? "editor-layout" : ""}`}>
         <header className="topbar">
           <label className="search-field global-search">
             <Search size={18} />
@@ -1970,7 +1995,12 @@ function NavItem({
   onClick: () => void;
 }) {
   return (
-    <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick} aria-current={active ? "page" : undefined}>
+    <button
+      className={`nav-item ${active ? "active" : ""}`}
+      onClick={onClick}
+      aria-current={active ? "page" : undefined}
+      title={label}
+    >
       {icon}
       <span>{label}</span>
     </button>
