@@ -6,9 +6,21 @@
   "workspaces": [
     "apps/*"
   ],
+  "overrides": {
+    "@hono/node-server": "^1.19.13"
+  },
   "scripts": {
     "dev": "npm run dev --workspace @soul/web",
-    "build": "npm run build --workspace @soul/web",
-    "preview": "npm run preview --workspace @soul/web"
+    "dev:api": "npm run start:dev --workspace @soul/api",
+    "build": "npm run build --workspace @soul/api && npm run build --workspace @soul/web",
+    "build:web": "npm run build --workspace @soul/web",
+    "build:api": "npm run build --workspace @soul/api",
+    "preview": "npm run preview --workspace @soul/web",
+    "db:generate": "npm run prisma:generate --workspace @soul/api",
+    "db:migrate": "npm run db:migrate:dev --workspace @soul/api",
+    "db:seed": "npm run db:seed --workspace @soul/api",
+    "db:studio": "npm run db:studio --workspace @soul/api",
+    "compose:up": "docker compose up --build",
+    "compose:down": "docker compose down"
   }
 }

@@ -41,6 +41,7 @@ import {
   X,
 } from "lucide-react";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 
 type StudyStatus =
   | "Favorevole"
@@ -186,7 +187,7 @@ function navSectionForRoute(route: AppRoute) {
   }
 }
 
-const studies: FeasibilityStudy[] = [
+const demoStudies: FeasibilityStudy[] = [
   {
     id: "S-2026-0187",
     company: "Immobiliare Aurora Srl",
@@ -1076,8 +1077,6 @@ const statusOptions: Array<StudyStatus | "Tutti"> = [
   "In revisione",
 ];
 
-const regions = ["Tutte", ...Array.from(new Set(studies.map((study) => study.region)))];
-
 const euroFormatter = new Intl.NumberFormat("it-IT", {
   style: "currency",
   currency: "EUR",
@@ -1181,6 +1180,8 @@ function getSortValue(study: FeasibilityStudy, sortKey: SortKey) {
 }
 
 function App() {
+  const [studies, setStudies] = useState<FeasibilityStudy[]>(demoStudies);
+  const [dataSource, setDataSource] = useState<"loading" | "database" | "demo">("loading");
   const [route, setRoute] = useState<AppRoute>(routeFromLocation);
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("createdAt");
@@ -1188,9 +1189,38 @@ function App() {
   const [statusFilter, setStatusFilter] = useState<StudyStatus | "Tutti">("Tutti");
   const [regionFilter, setRegionFilter] = useState("Tutte");
   const [appointmentOnly, setAppointmentOnly] = useState(false);
-  const [expandedStudy, setExpandedStudy] = useState(studies[0].id);
+  const [expandedStudy, setExpandedStudy] = useState(demoStudies[0].id);
   const [editorDirty, setEditorDirty] = useState(false);
   const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    const abortController = new AbortController();
+
+    async function loadStudies() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/studies`, {
+          signal: abortController.signal,
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const importedStudies = (await response.json()) as FeasibilityStudy[];
+        if (!Array.isArray(importedStudies)) throw new Error("Risposta studi non valida");
+        setStudies(importedStudies);
+        setDataSource("database");
+        if (importedStudies.length > 0) {
+          setExpandedStudy((current) =>
+            importedStudies.some((study) => study.id === current) ? current : importedStudies[0].id,
+          );
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setStudies(demoStudies);
+        setDataSource("demo");
+      }
+    }
+
+    void loadStudies();
+    return () => abortController.abort();
+  }, []);
 
   useEffect(() => {
     function handleSearchShortcut(event: KeyboardEvent) {
@@ -1269,7 +1299,12 @@ function App() {
 
         return sortDirection === "asc" ? comparison : -comparison;
       });
-  }, [appointmentOnly, query, regionFilter, sortDirection, sortKey, statusFilter]);
+  }, [appointmentOnly, query, regionFilter, sortDirection, sortKey, statusFilter, studies]);
+
+  const regions = useMemo(
+    () => ["Tutte", ...Array.from(new Set(studies.map((study) => study.region)))],
+    [studies],
+  );
 
   const activeStudy = route.view === "study"
     ? studies.find((study) => study.id === route.studyId)
@@ -1528,7 +1563,16 @@ function App() {
         <section className="workspace">
           <div className="page-heading">
             <div>
-              <p className="eyebrow">Import ERP</p>
+              <div className="heading-meta">
+                <p className="eyebrow">Import ERP</p>
+                <span className={`data-source ${dataSource}`}>
+                  {dataSource === "database"
+                    ? "Database collegato"
+                    : dataSource === "demo"
+                      ? "Dati dimostrativi"
+                      : "Caricamento dati"}
+                </span>
+              </div>
               <h1>{route.view === "studies" ? "Studi di fattibilita" : "Dashboard studi di fattibilita"}</h1>
               <p>
                 Monitora gli studi importati dall'ERP, le priorita commerciali e le differenze

@@ -6,11 +6,14 @@ The product helps operators review feasibility studies imported from Soul's ERP,
 
 ## Current Scope
 
-This repository currently focuses on the frontend prototype.
+This repository contains the operational frontend and its initial persistence backend.
 
 Implemented:
 
 - Vite + React frontend inside an npm workspaces monorepo.
+- NestJS API inside `apps/api`.
+- PostgreSQL persistence through Prisma 7, including an initial migration and idempotent seed data.
+- Docker Compose runtime for the web app, API, and PostgreSQL database.
 - Dashboard for ERP-imported `studi di fattibilita`.
 - URL-based navigation between dashboard, studies, immobili, study detail, and editor views.
 - Collapsible primary navigation sidebar.
@@ -23,18 +26,18 @@ Implemented:
 - Smart area selection for planimetria PDFs.
 - Area calculation from selected mask pixels, sheet size, and scale.
 - Assignment of `destinazione d'uso` to selected areas.
-- Local saved editor drafts, including masks and calibration settings.
+- Server-persisted editor drafts, including masks and calibration settings, with a local fallback when the API is unavailable.
 - Collapsible editor panels with an anchored plan workspace and independently scrolling controls.
-- CSV export actions and mocked data.
+- CSV export actions.
+- Database-loaded studies with a demonstration data fallback for frontend-only development.
 
 Not implemented yet:
 
 - Clerk authentication.
-- NestJS backend.
-- PostgreSQL and Prisma persistence.
 - S3-compatible object storage integration.
 - ERP API integration.
-- Server-side saving and versioning of selected planimetria masks.
+- Document upload/download endpoints and signed storage access.
+- Full version-management UI for study analysis revisions.
 
 ## Product Workflow
 
@@ -101,10 +104,10 @@ The editor supports:
 - Area calculation in square meters for every selected mask.
 - Per-usage breakdown and estimated area contribution.
 - Undo, clear, and PNG export controls.
-- Local draft saving and restoration for sample planimetrie.
+- Database draft saving and restoration for sample planimetrie, with local fallback.
 - Collapsible tools/results panels so the planimetria remains the primary work surface.
 
-Drafts for uploaded PDFs retain analysis data locally but require the operator to reload the uploaded PDF after refreshing the browser. Persistent document storage is deferred to the S3/backend integration.
+Drafts for uploaded PDFs retain the selection analysis but require the operator to reload the uploaded PDF after refreshing the browser. Persistent source-document storage is deferred to the S3-compatible object storage integration.
 
 More detail is documented in:
 
@@ -128,12 +131,16 @@ Frontend:
 - Lucide React icons
 - PDF.js via `pdfjs-dist@3.11.174`
 
-Planned backend stack:
+Backend and runtime:
 
 - NestJS
 - PostgreSQL
-- Prisma
-- S3-compatible object storage
+- Prisma 7
+- Docker Compose
+
+Planned integrations:
+
+- S3-compatible object storage for PDF documents
 - Clerk authentication
 
 ## Repository Structure
@@ -141,6 +148,12 @@ Planned backend stack:
 ```text
 .
 ├── apps/
+│   ├── api/
+│   │   ├── prisma/
+│   │   │   ├── migrations/
+│   │   │   ├── schema.prisma
+│   │   │   └── seed.ts
+│   │   └── src/
 │   └── web/
 │       ├── public/
 │       │   ├── planimetrie/
@@ -152,7 +165,9 @@ Planned backend stack:
 │           └── styles.css
 ├── docs/
 │   ├── project-description.md
+│   ├── backend.md
 │   └── smart-selection.md
+├── compose.yaml
 ├── editor planimetrie functional reference/
 ├── visual reference/
 ├── package.json
@@ -167,27 +182,59 @@ Install dependencies:
 npm install
 ```
 
-Run the frontend:
+Run the complete stack:
 
 ```sh
-npm run dev
+docker compose up --build
 ```
 
 Open:
 
 ```text
-http://localhost:5173/
+Web app:       http://localhost:8080/
+API health:    http://localhost:3000/api/health
 ```
 
-Direct editor test URL:
+The API container applies migrations and seeds demonstration ERP studies on startup.
+
+Open Prisma Studio against the Compose database from another terminal:
+
+```sh
+cp apps/api/.env.example apps/api/.env
+npm run db:studio
+```
+
+For local frontend/API development, start only PostgreSQL through Compose and prepare the database:
+
+```sh
+docker compose up -d postgres
+cp apps/api/.env.example apps/api/.env
+npm run db:migrate
+npm run db:seed
+```
+
+Run the API and frontend with hot reload in separate terminals:
+
+```sh
+# Terminal 1
+npm run dev:api
+
+# Terminal 2
+npm run dev
+```
+
+Vite serves the frontend at `http://localhost:5173/` and proxies `/api` to the NestJS application at port `3000`.
+
+Direct editor test URL in local frontend development:
 
 ```text
 http://localhost:5173/studi/S-2026-0187/immobili/AU-01/planimetria
 ```
 
-Build:
+Generate the Prisma client and build:
 
 ```sh
+cp apps/api/.env.example apps/api/.env
 npm run build
 ```
 
@@ -199,6 +246,8 @@ npm run preview
 
 ## Notes
 
-`pdfjs-dist` is pinned to `3.11.174` because newer PDF.js versions rendered the provided cadastral PDFs mostly blank during testing. This version matches the working functional reference.
+`pdfjs-dist` is pinned to `3.11.174` because newer PDF.js versions rendered the provided cadastral PDFs mostly blank during testing. This version matches the working functional reference. Document loading sets `isEvalSupported: false` as the published mitigation for the JavaScript-execution advisory affecting that version.
 
-The current UI uses mocked studies, explicit demo planimetria links, and browser-local drafts. Backend persistence, ERP import, authentication, and object storage should be added in later phases.
+The seed database uses explicit demo planimetria links stored with each property; actual PDFs are still served from frontend sample assets. ERP import, Clerk authentication, and S3-compatible document storage remain later integrations.
+
+Backend endpoints and database operations are documented in [Backend Foundation](docs/backend.md).

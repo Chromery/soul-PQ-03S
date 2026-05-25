@@ -33,9 +33,9 @@ The goal is to create a focused internal web app that helps operators:
 - calculate area totals from plan scale and sheet size
 - prepare results for ERP sync and presentation export
 
-## Current Prototype
+## Current Implementation
 
-The current frontend prototype includes two main work areas.
+The current application includes two main work areas and an initial persistence service.
 
 ### Dashboard
 
@@ -68,7 +68,7 @@ The operator can:
 - review selected square meters
 - review estimated value by usage type
 - upload a replacement PDF
-- save and restore a browser-local draft of masks and calibration settings
+- save and restore a database-backed draft of masks and calibration settings, with local fallback
 - collapse tool and results panels while the planimetria remains in a fixed central workspace
 
 ## Smart Selection Approach
@@ -81,18 +81,18 @@ Detailed implementation notes are in:
 
 - [Smart Selection for Planimetria Areas](smart-selection.md)
 
-## Intended Architecture
+### Backend Foundation
 
-The intended full project architecture is a monorepo with:
+The repository now includes:
 
 - Vite frontend
 - NestJS backend
 - PostgreSQL database
-- Prisma ORM
-- S3-compatible object storage
-- Clerk authentication
+- Prisma ORM schema, migration, and seed dataset
+- Docker Compose services for web, API, and PostgreSQL
+- endpoints for studies and editor draft persistence
 
-The frontend is currently implemented first. Backend integrations will later replace mocked data, local draft storage, and local PDF examples.
+The remaining architectural integrations are S3-compatible document storage, real ERP transfer, and Clerk authentication. Sample PDF assets remain frontend-served until object storage is implemented.
 
 ## Intended Users
 
@@ -108,10 +108,7 @@ The UI is designed in Italian because the operational workflow and cadastral ter
 
 Recommended next milestones:
 
-- Add Clerk authentication.
-- Add backend app scaffold.
-- Model feasibility studies, properties, documents, and planimetria masks in Prisma.
-- Persist selected areas and usage assignments.
+- Add Clerk authentication and permissions.
 - Load planimetrie and visure from S3-compatible storage.
 - Replace mocked ERP data with real import/sync workflows.
 - Generate presentation exports from study data.

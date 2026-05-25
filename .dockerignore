@@ -1,0 +1,10 @@
+.git
+.env
+**/.env
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+apps/api/src/generated/prisma
+editor planimetrie functional reference
+visual reference
+Assessments

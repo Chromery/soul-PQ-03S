@@ -459,6 +459,39 @@ kbd {
   text-transform: uppercase;
 }
 
+.heading-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.heading-meta .eyebrow {
+  margin-bottom: 0;
+}
+
+.data-source {
+  padding: 3px 8px;
+  border: 1px solid #d7e0eb;
+  border-radius: 999px;
+  color: #475569;
+  background: #f8fafc;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.data-source.database {
+  border-color: #b5e2cc;
+  color: #087443;
+  background: #eaf8f1;
+}
+
+.data-source.demo {
+  border-color: #f4d28d;
+  color: #96510d;
+  background: #fff8e9;
+}
+
 .filters-panel,
 .table-card,
 .summary-card,

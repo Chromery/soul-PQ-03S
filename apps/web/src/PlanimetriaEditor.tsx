@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 
 type PdfDocument = Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>;
 type PdfPage = Awaited<ReturnType<PdfDocument["getPage"]>>;
@@ -115,6 +116,8 @@ type SavedDraft = {
   inflate: number;
   gap: number;
   dash: number;
+  totalArea?: number;
+  totalEstimatedAmount?: number;
   selections: SavedSelection[];
 };
 
@@ -417,19 +420,34 @@ export default function PlanimetriaEditor({
   }, [dirty]);
 
   useEffect(() => {
-    const draft = readSavedDraft(property.id);
-    pendingDraftRef.current = draft;
+    const abortController = new AbortController();
+    let disposed = false;
+
     runtimeRef.current = createRuntime();
     setCurrentPage(0);
     setPageCount(0);
     setFileName("");
     setCanvasPixels("0 x 0");
-    setDocumentSource(draft?.document ?? null);
+    setDocumentSource(null);
     setDirty(false);
-    setSavedAt(draft?.savedAt ?? "");
+    setSavedAt("");
     setRevision((value) => value + 1);
+    setStatus("Recupero bozza e planimetria");
 
-    if (draft) {
+    function openInitialDocument(draft: SavedDraft | null) {
+      pendingDraftRef.current = draft;
+      setDocumentSource(draft?.document ?? null);
+      setSavedAt(draft?.savedAt ?? "");
+
+      if (!draft) {
+        if (linkedSample) {
+          void loadSample(linkedSample.url, linkedSample.fileName, undefined, true);
+        } else {
+          setStatus("Carica una planimetria o apri un esempio");
+        }
+        return;
+      }
+
       setSheetSize(draft.sheetSize);
       setScaleDenominator(draft.scaleDenominator);
       setActiveUsage(draft.activeUsage);
@@ -443,13 +461,39 @@ export default function PlanimetriaEditor({
       } else {
         setStatus(`Bozza salvata: ricarica ${draft.document.fileName}`);
       }
-    } else if (linkedSample) {
-      void loadSample(linkedSample.url, linkedSample.fileName, undefined, true);
-    } else {
-      setStatus("Carica una planimetria o apri un esempio");
     }
 
+    async function loadInitialDocument() {
+      let draft: SavedDraft | null = null;
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/analysis-draft`,
+          { signal: abortController.signal },
+        );
+        if (response.ok) {
+          const storedDraft = (await response.json()) as SavedDraft | null;
+          if (storedDraft?.version === 1 && storedDraft.propertyId === property.id) {
+            draft = storedDraft;
+            try {
+              window.localStorage.setItem(draftKey(property.id), JSON.stringify(storedDraft));
+            } catch {
+              // Server persistence remains available when the browser draft quota is exceeded.
+            }
+          }
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+      }
+
+      if (!draft) draft = readSavedDraft(property.id);
+      if (!disposed) openInitialDocument(draft);
+    }
+
+    void loadInitialDocument();
+
     return () => {
+      disposed = true;
+      abortController.abort();
       const renderTask = runtimeRef.current.renderTask;
       if (renderTask) {
         try {
@@ -554,7 +598,7 @@ export default function PlanimetriaEditor({
   }
 
   async function loadPdfFromData(data: ArrayBuffer, name: string) {
-    const loadingTask = pdfjsLib.getDocument({ data });
+    const loadingTask = pdfjsLib.getDocument({ data, isEvalSupported: false });
     setEditorBusy(true);
     setStatus("Analisi PDF");
     try {
@@ -635,7 +679,7 @@ export default function PlanimetriaEditor({
     bumpRevision();
   }
 
-  function saveDraft() {
+  async function saveDraft() {
     if (!documentSource || !hasPdf) return;
     const selectionsToSave = Array.from(runtimeRef.current.selectionsByPage.values())
       .flat()
@@ -668,18 +712,43 @@ export default function PlanimetriaEditor({
       inflate,
       gap,
       dash,
+      totalArea: totals.area,
+      totalEstimatedAmount: totals.amount,
       selections: selectionsToSave,
     };
 
+    let localSaved = false;
     try {
       window.localStorage.setItem(draftKey(property.id), JSON.stringify(draft));
       pendingDraftRef.current = draft;
-      setSavedAt(savedTime);
-      setDirty(false);
-      setStatus("Bozza salvata localmente");
+      localSaved = true;
     } catch (error) {
       console.error(error);
-      setStatus("Bozza troppo grande per il salvataggio locale");
+    }
+
+    setStatus("Salvataggio bozza");
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/analysis-draft`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(draft),
+        },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setSavedAt(savedTime);
+      setDirty(false);
+      setStatus("Bozza salvata nel database");
+    } catch (error) {
+      console.error(error);
+      if (localSaved) {
+        setSavedAt(savedTime);
+        setDirty(false);
+        setStatus("Bozza salvata localmente; database non disponibile");
+      } else {
+        setStatus("Salvataggio non riuscito");
+      }
     }
   }
 
@@ -2018,7 +2087,7 @@ export default function PlanimetriaEditor({
               <Download size={17} />
               Esporta PNG
             </button>
-            <button className="button primary" onClick={saveDraft} disabled={!hasPdf}>
+            <button className="button primary" onClick={() => void saveDraft()} disabled={!hasPdf}>
               <FileText size={17} />
               Salva bozza
             </button>

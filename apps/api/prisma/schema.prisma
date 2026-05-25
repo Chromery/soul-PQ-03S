@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum DocumentType {
+  PLANIMETRIA
+  VISURA
+}
+
+enum DraftStatus {
+  BOZZA
+  COMPLETATO
+}
+
+model FeasibilityStudy {
+  id                 String         @id
+  company            String
+  vat                String
+  comune             String
+  provincia          String
+  region             String
+  status             String
+  createdAt          DateTime       @db.Date
+  concludedAt        DateTime?      @db.Date
+  deadline           DateTime       @db.Date
+  nextAppointment    DateTime?
+  diffRendita        Decimal        @db.Decimal(12, 2)
+  diffImu            Decimal        @db.Decimal(14, 2)
+  originalRendita    Decimal        @db.Decimal(14, 2)
+  totalRendita       Decimal        @db.Decimal(14, 2)
+  catDRendita        Decimal        @db.Decimal(14, 2)
+  commercialOwner    String
+  technicalOwner     String
+  notes              String
+  erpUrl             String?
+  importedAt         DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  properties         Property[]
+  versions           StudyVersion[]
+}
+
+model StudyVersion {
+  id                 String              @id @default(cuid())
+  studyId            String
+  versionNumber      Int
+  status             String
+  technicalOwner     String
+  notes              String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  study              FeasibilityStudy    @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  analysisDrafts     PlanAnalysisDraft[]
+
+  @@unique([studyId, versionNumber])
+}
+
+model Property {
+  id                 String              @id
+  studyId            String
+  address            String
+  comune             String
+  categoria          String
+  currentRendita     Decimal             @db.Decimal(14, 2)
+  estimatedRendita   Decimal             @db.Decimal(14, 2)
+  diffPercent        Decimal             @db.Decimal(10, 2)
+  imuDiff            Decimal             @db.Decimal(14, 2)
+  outcome            String
+  hasStudy           Boolean             @default(false)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  study              FeasibilityStudy    @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  documents          PropertyDocument[]
+  analysisDraft      PlanAnalysisDraft?
+}
+
+model PropertyDocument {
+  id                 String        @id @default(cuid())
+  propertyId         String
+  type               DocumentType
+  fileName           String
+  storageKey         String
+  mimeType           String        @default("application/pdf")
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  property           Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, type])
+}
+
+model PlanAnalysisDraft {
+  id                    String        @id @default(cuid())
+  propertyId            String        @unique
+  studyVersionId        String?
+  status                DraftStatus   @default(BOZZA)
+  documentSource        Json
+  payload               Json
+  sheetSize             String
+  scaleDenominator      Int
+  totalArea             Decimal?      @db.Decimal(16, 2)
+  totalEstimatedValue   Decimal?      @db.Decimal(16, 2)
+  savedAt               DateTime
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  property              Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  studyVersion          StudyVersion? @relation(fields: [studyVersionId], references: [id], onDelete: SetNull)
+}
