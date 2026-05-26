@@ -2528,11 +2528,27 @@ function StudyRows({
 
               <section className="property-overview">
                 <div className="section-title property-overview-header">
-                  <div>
+                  <div className="property-overview-title">
                     <h3>Panoramica immobili</h3>
-                    <span>
-                      {counts.performed}/{counts.total} studi eseguiti
-                    </span>
+                    <div className="overview-status">
+                      <span className="study-progress">
+                        {counts.performed}/{counts.total} studi eseguiti
+                      </span>
+                      <div className="outcome-summary">
+                        <span>
+                          <i className="dot positive" />
+                          {counts.positive} positivi
+                        </span>
+                        <span>
+                          <i className="dot negative" />
+                          {counts.negative} negativi
+                        </span>
+                        <span>
+                          <i className="dot pending" />
+                          {counts.pending} non analizzati
+                        </span>
+                      </div>
+                    </div>
                   </div>
                   <button className="button secondary compact-button" onClick={onTogglePropertyDetails}>
                     {propertyDetailsOpen ? "Nascondi dettaglio immobili" : "Dettaglio immobili"}
@@ -2541,14 +2557,14 @@ function StudyRows({
                 </div>
                 <div className="property-icons" aria-label="Esiti degli immobili">
                   {study.properties.map((property) => (
-                    <button
-                      type="button"
+                    <div
                       key={property.id}
                       className={`property-tile ${outcomeClass(property.outcome)}`}
+                      tabIndex={0}
                       aria-label={`Dettagli immobile ${property.address}, ${property.comune}`}
                     >
                       {property.categoria.startsWith("D/") ? <Factory size={20} /> : <Home size={20} />}
-                      <span className="property-tooltip" role="tooltip">
+                      <div className="property-tooltip" role="tooltip">
                         <strong>{property.address}</strong>
                         <small>{property.comune}</small>
                         <span className="tooltip-grid">
@@ -2573,29 +2589,22 @@ function StudyRows({
                             <b>{property.outcome}</b>
                           </span>
                         </span>
-                        <span className="tooltip-documents">
-                          <File size={13} />
-                          Planimetria PDF
-                          <FileText size={13} />
-                          Visura PDF
-                        </span>
-                      </span>
-                    </button>
+                        <div className="tooltip-documents">
+                          <button type="button" onClick={() => onOpenEditor(property)}>
+                            <File size={13} />
+                            Planimetria PDF
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onNotice("La visura sara apribile quando il PDF sara importato nello storage documentale.")}
+                          >
+                            <FileText size={13} />
+                            Visura PDF
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   ))}
-                </div>
-                <div className="outcome-summary">
-                  <span>
-                    <i className="dot positive" />
-                    {counts.positive} positivi
-                  </span>
-                  <span>
-                    <i className="dot negative" />
-                    {counts.negative} negativi
-                  </span>
-                  <span>
-                    <i className="dot pending" />
-                    {counts.pending} non analizzati
-                  </span>
                 </div>
                 {propertyDetailsOpen && (
                   <div className="property-table-inline">
@@ -3004,11 +3013,11 @@ function SummaryStat({
 }) {
   return (
     <div className={`summary-stat ${icon ? "with-icon" : ""}`}>
-      {icon && <div className="summary-stat-icon">{icon}</div>}
-      <div className="summary-stat-copy">
+      <div className="summary-stat-label">
+        {icon && <span className="summary-stat-icon">{icon}</span>}
         <span>{label}</span>
-        <strong>{value}</strong>
       </div>
+      <strong>{value}</strong>
     </div>
   );
 }
