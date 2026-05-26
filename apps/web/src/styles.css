@@ -1180,6 +1180,22 @@ a.button {
   background: #fff;
 }
 
+.property-tile::after {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 3;
+  width: 284px;
+  height: 10px;
+  display: none;
+  content: "";
+}
+
+.property-tile:hover::after,
+.property-tile:focus-within::after {
+  display: block;
+}
+
 .property-tile:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
@@ -1218,7 +1234,8 @@ a.button {
 }
 
 .property-tile:hover .property-tooltip,
-.property-tile:focus-visible .property-tooltip {
+.property-tile:focus-visible .property-tooltip,
+.property-tile:focus-within .property-tooltip {
   display: grid;
 }
 
