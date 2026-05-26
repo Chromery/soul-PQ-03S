@@ -1,4 +1,5 @@
-import { Controller, Get, NotFoundException, Param } from "@nestjs/common";
+import { Body, Controller, Get, NotFoundException, Param, Patch } from "@nestjs/common";
+import { UpdateStudyDto } from "./dto/update-study.dto.js";
 import { StudiesService } from "./studies.service.js";
 
 @Controller("studies")
@@ -13,6 +14,13 @@ export class StudiesController {
   @Get(":id")
   async find(@Param("id") id: string) {
     const study = await this.studies.find(id);
+    if (!study) throw new NotFoundException("Studio non trovato");
+    return study;
+  }
+
+  @Patch(":id")
+  async update(@Param("id") id: string, @Body() input: UpdateStudyDto) {
+    const study = await this.studies.update(id, input);
     if (!study) throw new NotFoundException("Studio non trovato");
     return study;
   }

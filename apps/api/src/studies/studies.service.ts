@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { DocumentType } from "../generated/prisma/enums.js";
 import type { FeasibilityStudy, Property, PropertyDocument, StudyVersion } from "../generated/prisma/client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import type { UpdateStudyDto } from "./dto/update-study.dto.js";
 
 type PropertyWithDocuments = Property & { documents: PropertyDocument[] };
 type StudyWithRelations = FeasibilityStudy & {
@@ -33,6 +34,21 @@ export class StudiesService {
       },
     });
     return study ? this.toApiStudy(study) : null;
+  }
+
+  async update(id: string, input: UpdateStudyDto) {
+    const exists = await this.prisma.feasibilityStudy.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return null;
+
+    const study = await this.prisma.feasibilityStudy.update({
+      where: { id },
+      data: input,
+      include: {
+        properties: { include: { documents: true }, orderBy: { id: "asc" } },
+        versions: { orderBy: { versionNumber: "desc" } },
+      },
+    });
+    return this.toApiStudy(study);
   }
 
   private toApiStudy(study: StudyWithRelations) {

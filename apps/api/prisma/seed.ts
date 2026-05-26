@@ -50,7 +50,7 @@ const demoStudies: SeedStudy[] = [
     comune: "Milano",
     provincia: "MI",
     region: "Lombardia",
-    status: "Favorevole",
+    status: "Concluso",
     createdAt: "2026-04-29",
     concludedAt: "2026-05-04",
     deadline: "2026-05-24",
@@ -129,7 +129,7 @@ const demoStudies: SeedStudy[] = [
     comune: "Bergamo",
     provincia: "BG",
     region: "Lombardia",
-    status: "Con appuntamento",
+    status: "In lavorazione",
     createdAt: "2026-04-25",
     deadline: "2026-05-27",
     nextAppointment: "2026-05-28T09:30:00",
@@ -179,7 +179,7 @@ const demoStudies: SeedStudy[] = [
     comune: "Rimini",
     provincia: "RN",
     region: "Emilia-Romagna",
-    status: "Non favorevole",
+    status: "Concluso",
     createdAt: "2026-04-18",
     concludedAt: "2026-05-02",
     deadline: "2026-05-29",
@@ -219,13 +219,12 @@ function date(value: string) {
 
 async function seed() {
   for (const study of demoStudies) {
-    const baseStudy = {
+    const importedStudyData = {
       company: study.company,
       vat: study.vat,
       comune: study.comune,
       provincia: study.provincia,
       region: study.region,
-      status: study.status,
       createdAt: date(study.createdAt),
       concludedAt: study.concludedAt ? date(study.concludedAt) : null,
       deadline: date(study.deadline),
@@ -237,13 +236,12 @@ async function seed() {
       catDRendita: study.catDRendita,
       commercialOwner: study.commercialOwner,
       technicalOwner: study.technicalOwner,
-      notes: study.notes,
       erpUrl: `https://erp.soul.local/studi/${study.id}`,
     };
     await prisma.feasibilityStudy.upsert({
       where: { id: study.id },
-      create: { id: study.id, ...baseStudy },
-      update: baseStudy,
+      create: { id: study.id, ...importedStudyData, status: study.status, notes: study.notes },
+      update: importedStudyData,
     });
     await prisma.studyVersion.upsert({
       where: { studyId_versionNumber: { studyId: study.id, versionNumber: 1 } },

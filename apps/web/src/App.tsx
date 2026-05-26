@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -28,27 +28,26 @@ import {
   MoreVertical,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Pencil,
   Presentation,
   RefreshCw,
+  Save,
   Search,
   Send,
   Settings,
   SlidersHorizontal,
   TrendingDown,
   TrendingUp,
+  Upload,
   UserRound,
   X,
 } from "lucide-react";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 
-type StudyStatus =
-  | "Favorevole"
-  | "Non favorevole"
-  | "Da valutare"
-  | "In lavorazione"
-  | "Con appuntamento"
-  | "In revisione";
+type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
 type PropertyOutcome = "Positivo" | "Negativo" | "Non analizzato";
 
@@ -93,6 +92,8 @@ type FeasibilityStudy = {
   erpUrl: string;
   properties: PropertyItem[];
 };
+
+type StudyUpdate = Partial<Pick<FeasibilityStudy, "status" | "notes">>;
 
 type SortKey =
   | "id"
@@ -198,7 +199,7 @@ const demoStudies: FeasibilityStudy[] = [
     comune: "Milano",
     provincia: "MI",
     region: "Lombardia",
-    status: "Favorevole",
+    status: "Concluso",
     createdAt: "2026-04-29",
     importedAt: "2026-05-05T09:15:00",
     concludedAt: "2026-05-04",
@@ -416,7 +417,7 @@ const demoStudies: FeasibilityStudy[] = [
     comune: "Monza",
     provincia: "MB",
     region: "Lombardia",
-    status: "Da valutare",
+    status: "Da iniziare",
     createdAt: "2026-04-27",
     importedAt: "2026-05-05T09:10:00",
     deadline: "2026-05-31",
@@ -753,7 +754,7 @@ const demoStudies: FeasibilityStudy[] = [
     comune: "Brescia",
     provincia: "BS",
     region: "Lombardia",
-    status: "Con appuntamento",
+    status: "In lavorazione",
     createdAt: "2026-04-23",
     importedAt: "2026-05-02T09:48:00",
     deadline: "2026-05-18",
@@ -978,7 +979,7 @@ const demoStudies: FeasibilityStudy[] = [
     comune: "Rimini",
     provincia: "RN",
     region: "Emilia-Romagna",
-    status: "Non favorevole",
+    status: "Concluso",
     createdAt: "2026-04-18",
     importedAt: "2026-04-29T16:22:00",
     concludedAt: "2026-05-02",
@@ -1070,7 +1071,7 @@ const sortOptions: Array<{ value: SortKey; label: string }> = [
   { value: "nextAppointment", label: "Prossimo appuntamento" },
   { value: "diffRendita", label: "Differenza rendita" },
   { value: "diffImu", label: "Differenza IMU" },
-  { value: "appointment", label: "Con appuntamento" },
+  { value: "appointment", label: "Appuntamento presente" },
   { value: "originalRendita", label: "Rendita originale totale" },
   { value: "propertiesCount", label: "Numero immobili" },
   { value: "commercialOwner", label: "Commerciale" },
@@ -1079,12 +1080,17 @@ const sortOptions: Array<{ value: SortKey; label: string }> = [
 
 const statusOptions: Array<StudyStatus | "Tutti"> = [
   "Tutti",
-  "Favorevole",
-  "Non favorevole",
-  "Da valutare",
+  "Da iniziare",
   "In lavorazione",
-  "Con appuntamento",
   "In revisione",
+  "Concluso",
+];
+
+const editableStatusOptions: StudyStatus[] = [
+  "Da iniziare",
+  "In lavorazione",
+  "In revisione",
+  "Concluso",
 ];
 
 const euroFormatter = new Intl.NumberFormat("it-IT", {
@@ -1141,10 +1147,6 @@ function getInitials(name: string) {
     .join("")
     .slice(0, 2)
     .toUpperCase();
-}
-
-function isPositiveStatus(status: StudyStatus) {
-  return status === "Favorevole";
 }
 
 function getCounts(study: FeasibilityStudy) {
@@ -1204,10 +1206,14 @@ function App() {
   const [statusFilter, setStatusFilter] = useState<StudyStatus | "Tutti">("Tutti");
   const [regionFilter, setRegionFilter] = useState("Tutte");
   const [appointmentOnly, setAppointmentOnly] = useState(false);
-  const [expandedStudy, setExpandedStudy] = useState(demoStudies[0].id);
+  const [expandedStudy, setExpandedStudy] = useState("");
   const [propertyDetailsStudy, setPropertyDetailsStudy] = useState("");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [selectedStudyIds, setSelectedStudyIds] = useState<string[]>([]);
+  const [sidePanelCollapsed, setSidePanelCollapsed] = useState(() => {
+    return window.localStorage.getItem("soul-summary-panel-collapsed") === "true";
+  });
+  const [presentationFiles, setPresentationFiles] = useState<Record<string, File>>({});
   const [editorDirty, setEditorDirty] = useState(false);
   const [toast, setToast] = useState("");
 
@@ -1223,11 +1229,9 @@ function App() {
         const importedStudies = (await response.json()) as FeasibilityStudy[];
         if (!Array.isArray(importedStudies)) throw new Error("Risposta studi non valida");
         setStudies(importedStudies);
-        if (importedStudies.length > 0) {
-          setExpandedStudy((current) =>
-            importedStudies.some((study) => study.id === current) ? current : importedStudies[0].id,
-          );
-        }
+        setExpandedStudy((current) =>
+          current && importedStudies.some((study) => study.id === current) ? current : "",
+        );
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setStudies(demoStudies);
@@ -1237,6 +1241,10 @@ function App() {
     void loadStudies();
     return () => abortController.abort();
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("soul-summary-panel-collapsed", String(sidePanelCollapsed));
+  }, [sidePanelCollapsed]);
 
   useEffect(() => {
     function handleSearchShortcut(event: KeyboardEvent) {
@@ -1334,14 +1342,16 @@ function App() {
 
   const totals = useMemo(() => {
     const visible = filteredStudies;
-    const active = visible.filter((study) => study.status !== "Non favorevole").length;
-    const positive = visible.filter((study) => isPositiveStatus(study.status)).length;
+    const inProgress = visible.filter(
+      (study) => study.status === "In lavorazione" || study.status === "In revisione",
+    ).length;
+    const concluded = visible.filter((study) => study.status === "Concluso").length;
     const potentialRendita = visible.reduce((sum, study) => sum + study.totalRendita, 0);
     const averageDiff =
       visible.reduce((sum, study) => sum + study.diffRendita, 0) / Math.max(visible.length, 1);
     return {
-      active,
-      positive,
+      inProgress,
+      concluded,
       potentialRendita,
       averageDiff,
     };
@@ -1362,6 +1372,31 @@ function App() {
   function flash(message: string) {
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
+  }
+
+  async function updateStudy(studyId: string, input: StudyUpdate) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/studies/${encodeURIComponent(studyId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const updatedStudy = (await response.json()) as FeasibilityStudy;
+      setStudies((current) =>
+        current.map((study) => (study.id === updatedStudy.id ? updatedStudy : study)),
+      );
+      flash(input.notes !== undefined ? "Note salvate." : "Stato aggiornato.");
+      return true;
+    } catch {
+      flash("Impossibile salvare le modifiche dello studio.");
+      return false;
+    }
+  }
+
+  function attachPresentation(studyId: string, file: File) {
+    setPresentationFiles((current) => ({ ...current, [studyId]: file }));
+    flash("Presentazione caricata per la sessione corrente.");
   }
 
   function downloadCsv(filename: string, headers: string[], rows: Array<Array<string | number>>) {
@@ -1522,6 +1557,9 @@ function App() {
           study={activeStudy}
           onBack={() => navigate({ view: "studies" })}
           onExport={() => downloadStudyPropertiesCsv(activeStudy)}
+          onNotice={flash}
+          presentationFile={presentationFiles[activeStudy.id]}
+          onPresentationUpload={(file) => attachPresentation(activeStudy.id, file)}
           onOpenEditor={(property) =>
             navigate({ view: "editor", studyId: activeStudy.id, propertyId: property.id })
           }
@@ -1608,7 +1646,7 @@ function App() {
       activeSection={navSectionForRoute(route)}
       onNavigate={navigate}
     >
-      <main className="dashboard-grid">
+      <main className={`dashboard-grid ${sidePanelCollapsed ? "summary-collapsed" : ""}`}>
         <section className="workspace">
           <div className="page-heading">
             <div>
@@ -1668,7 +1706,7 @@ function App() {
                       )}
                       {appointmentOnly && (
                         <button className="chip urgent" onClick={() => setAppointmentOnly(false)}>
-                          Con appuntamento
+                          Appuntamento presente
                           <X size={14} />
                         </button>
                       )}
@@ -1748,7 +1786,7 @@ function App() {
                         checked={appointmentOnly}
                         onChange={(event) => setAppointmentOnly(event.target.checked)}
                       />
-                      <span>Con appuntamento</span>
+                      <span>Appuntamento presente</span>
                     </label>
                   </div>
                 </section>
@@ -1868,6 +1906,10 @@ function App() {
                       onOpenEditor={(property) =>
                         navigate({ view: "editor", studyId: study.id, propertyId: property.id })
                       }
+                      onUpdate={(input) => updateStudy(study.id, input)}
+                      onNotice={flash}
+                      presentationFile={presentationFiles[study.id]}
+                      onPresentationUpload={(file) => attachPresentation(study.id, file)}
                     />
                   ))}
                 </tbody>
@@ -1883,20 +1925,35 @@ function App() {
           </section>
         </section>
 
-        <aside className="side-panel">
+        <aside className={`side-panel ${sidePanelCollapsed ? "collapsed" : ""}`}>
+          <div className="side-panel-controls">
+            {!sidePanelCollapsed && <strong>Vista sintetica</strong>}
+            <button
+              className="side-panel-toggle"
+              type="button"
+              onClick={() => setSidePanelCollapsed((collapsed) => !collapsed)}
+              title={sidePanelCollapsed ? "Mostra riepilogo e attivita" : "Nascondi riepilogo e attivita"}
+              aria-label={sidePanelCollapsed ? "Mostra riepilogo e attivita" : "Nascondi riepilogo e attivita"}
+            >
+              {sidePanelCollapsed ? <PanelRightOpen size={19} /> : <PanelRightClose size={19} />}
+              {!sidePanelCollapsed && <span>Nascondi</span>}
+            </button>
+          </div>
+          {!sidePanelCollapsed && (
+            <>
           <section className="summary-card">
             <h2>Riepilogo</h2>
             <MetricCard
-              icon={<FileText size={24} />}
-              label="Studi attivi"
-              value={numberFormatter.format(totals.active)}
+              icon={<Clock3 size={24} />}
+              label="Studi in corso"
+              value={numberFormatter.format(totals.inProgress)}
               tone="blue"
               delta="Nella vista corrente"
             />
             <MetricCard
               icon={<CheckCircle2 size={24} />}
-              label="Con esito positivo"
-              value={numberFormatter.format(totals.positive)}
+              label="Studi conclusi"
+              value={numberFormatter.format(totals.concluded)}
               tone="green"
               delta="Nella vista corrente"
             />
@@ -1950,6 +2007,8 @@ function App() {
               <ChevronRight size={16} />
             </button>
           </section>
+            </>
+          )}
         </aside>
       </main>
     </Shell>
@@ -2266,6 +2325,10 @@ function StudyRows({
   onTogglePropertyDetails,
   onOpenDetail,
   onOpenEditor,
+  onUpdate,
+  onNotice,
+  presentationFile,
+  onPresentationUpload,
 }: {
   study: FeasibilityStudy;
   expanded: boolean;
@@ -2276,8 +2339,34 @@ function StudyRows({
   onTogglePropertyDetails: () => void;
   onOpenDetail: () => void;
   onOpenEditor: (property: PropertyItem) => void;
+  onUpdate: (input: StudyUpdate) => Promise<boolean>;
+  onNotice: (message: string) => void;
+  presentationFile?: File;
+  onPresentationUpload: (file: File) => void;
 }) {
   const counts = getCounts(study);
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [noteDraft, setNoteDraft] = useState(study.notes);
+
+  useEffect(() => {
+    if (!editingNotes) setNoteDraft(study.notes);
+  }, [editingNotes, study.notes]);
+
+  async function handleStatusChange(status: StudyStatus) {
+    if (status === study.status) return;
+    setSavingStatus(true);
+    await onUpdate({ status });
+    setSavingStatus(false);
+  }
+
+  async function saveNotes() {
+    setSavingNotes(true);
+    const saved = await onUpdate({ notes: noteDraft.trim() });
+    setSavingNotes(false);
+    if (saved) setEditingNotes(false);
+  }
 
   return (
     <>
@@ -2315,7 +2404,11 @@ function StudyRows({
         </td>
         <td>{study.properties.length}</td>
         <td>
-          <StatusBadge status={study.status} />
+          <StatusSelect
+            status={study.status}
+            saving={savingStatus}
+            onChange={(status) => void handleStatusChange(status)}
+          />
         </td>
         <td>{formatDate(study.importedAt)}</td>
         <td>
@@ -2357,33 +2450,79 @@ function StudyRows({
                   <StatusBadge status={study.status} />
                 </div>
                 <div className="summary-grid">
-                  <SummaryStat label="N. immobili" value={counts.total.toString()} />
-                  <SummaryStat label="In categoria D" value={counts.catD.toString()} />
-                  <SummaryStat label="Rendita totale" value={formatEuro(study.totalRendita)} />
-                  <SummaryStat label="Rendita categoria D" value={formatEuro(study.catDRendita)} />
-                  <SummaryStat label="Importato ERP" value={formatDate(study.importedAt)} />
-                  <SummaryStat label="Data creazione" value={formatDate(study.createdAt)} />
-                  <SummaryStat label="Data esito" value={formatDate(study.concludedAt)} />
-                  <SummaryStat label="Commerciale" value={study.commercialOwner} />
-                  <SummaryStat label="Responsabile tecnico" value={study.technicalOwner} />
+                  <SummaryStat icon={<Building2 size={16} />} label="N. immobili" value={counts.total.toString()} />
+                  <SummaryStat icon={<Factory size={16} />} label="In categoria D" value={counts.catD.toString()} />
+                  <SummaryStat icon={<Euro size={16} />} label="Rendita totale" value={formatEuro(study.totalRendita)} />
+                  <SummaryStat icon={<Factory size={16} />} label="Rendita categoria D" value={formatEuro(study.catDRendita)} />
+                  <SummaryStat icon={<RefreshCw size={16} />} label="Importato ERP" value={formatDate(study.importedAt)} />
+                  <SummaryStat icon={<CalendarDays size={16} />} label="Data creazione" value={formatDate(study.createdAt)} />
+                  <SummaryStat icon={<CheckCircle2 size={16} />} label="Data esito" value={formatDate(study.concludedAt)} />
+                  <SummaryStat icon={<BriefcaseBusiness size={16} />} label="Commerciale" value={study.commercialOwner} />
+                  <SummaryStat icon={<UserRound size={16} />} label="Responsabile tecnico" value={study.technicalOwner} />
                 </div>
-                <div className="notes-block">
-                  <span>Note</span>
-                  <p>{study.notes}</p>
-                </div>
-                <div className="summary-actions">
-                  <button className="button secondary" disabled title="Disponibile con il servizio documentale">
-                    <Presentation size={16} />
-                    Download presentazione
-                  </button>
-                  <a className="button secondary" href={study.erpUrl} target="_blank" rel="noreferrer">
-                    Link allo studio sull'ERP
-                    <ExternalLink size={16} />
-                  </a>
-                  <button className="button primary" onClick={onOpenDetail}>
-                    <FileText size={16} />
-                    Apri studio di fattibilita
-                  </button>
+                <div className="summary-footer">
+                  <div className="notes-block">
+                    <div className="notes-head">
+                      <span>Note</span>
+                      {!editingNotes && (
+                        <button className="notes-edit" type="button" onClick={() => setEditingNotes(true)}>
+                          <Pencil size={14} />
+                          Modifica
+                        </button>
+                      )}
+                    </div>
+                    {editingNotes ? (
+                      <>
+                        <textarea
+                          className="notes-input"
+                          value={noteDraft}
+                          maxLength={4000}
+                          rows={3}
+                          onChange={(event) => setNoteDraft(event.target.value)}
+                        />
+                        <div className="notes-actions">
+                          <button
+                            className="button secondary compact-button"
+                            type="button"
+                            onClick={() => {
+                              setNoteDraft(study.notes);
+                              setEditingNotes(false);
+                            }}
+                            disabled={savingNotes}
+                          >
+                            Annulla
+                          </button>
+                          <button
+                            className="button primary compact-button"
+                            type="button"
+                            onClick={() => void saveNotes()}
+                            disabled={savingNotes}
+                          >
+                            <Save size={15} />
+                            {savingNotes ? "Salvataggio..." : "Salva note"}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <p>{study.notes || "Nessuna nota inserita."}</p>
+                    )}
+                  </div>
+                  <div className="summary-actions">
+                    <PresentationAction
+                      studyId={study.id}
+                      file={presentationFile}
+                      onUpload={onPresentationUpload}
+                      onNotice={onNotice}
+                    />
+                    <a className="button secondary" href={study.erpUrl} target="_blank" rel="noreferrer">
+                      Link allo studio sull'ERP
+                      <ExternalLink size={16} />
+                    </a>
+                    <button className="button primary" onClick={onOpenDetail}>
+                      <FileText size={16} />
+                      Apri studio di fattibilita
+                    </button>
+                  </div>
                 </div>
               </section>
 
@@ -2539,16 +2678,107 @@ function PropertyRow({
   );
 }
 
+function PresentationAction({
+  studyId,
+  file,
+  onUpload,
+  onNotice,
+}: {
+  studyId: string;
+  file?: File;
+  onUpload: (file: File) => void;
+  onNotice: (message: string) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const uploadInput = useRef<HTMLInputElement>(null);
+
+  function generatePresentation() {
+    setMenuOpen(false);
+    onNotice("La generazione sara disponibile con il servizio documentale.");
+  }
+
+  function promptUpload() {
+    setMenuOpen(false);
+    uploadInput.current?.click();
+  }
+
+  function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile) return;
+    onUpload(selectedFile);
+    event.target.value = "";
+  }
+
+  function downloadPresentation() {
+    if (!file) {
+      generatePresentation();
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = file.name || `${studyId}-presentazione.pptx`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    onNotice("Download presentazione avviato.");
+  }
+
+  return (
+    <div className="split-action">
+      <button className="button secondary split-primary" type="button" onClick={file ? downloadPresentation : generatePresentation}>
+        <Presentation size={16} />
+        {file ? "Download presentazione" : "Genera presentazione"}
+      </button>
+      <button
+        className="button secondary split-toggle"
+        type="button"
+        aria-label="Altre azioni presentazione"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        <ChevronDown size={15} />
+      </button>
+      {menuOpen && (
+        <div className="split-menu">
+          {file && (
+            <button type="button" onClick={generatePresentation}>
+              <Presentation size={15} />
+              Genera presentazione
+            </button>
+          )}
+          <button type="button" onClick={promptUpload}>
+            <Upload size={15} />
+            Carica presentazione
+          </button>
+        </div>
+      )}
+      <input
+        ref={uploadInput}
+        type="file"
+        accept=".ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        hidden
+        onChange={handleUpload}
+      />
+    </div>
+  );
+}
+
 function StudyDetail({
   study,
   onBack,
   onExport,
   onOpenEditor,
+  onNotice,
+  presentationFile,
+  onPresentationUpload,
 }: {
   study: FeasibilityStudy;
   onBack: () => void;
   onExport: () => void;
   onOpenEditor: (property: PropertyItem) => void;
+  onNotice: (message: string) => void;
+  presentationFile?: File;
+  onPresentationUpload: (file: File) => void;
 }) {
   const counts = getCounts(study);
   const positiveShare = Math.round((counts.positive / Math.max(counts.total, 1)) * 100);
@@ -2572,10 +2802,12 @@ function StudyDetail({
           </p>
         </div>
         <div className="detail-actions">
-          <button className="button secondary" disabled title="Disponibile con il servizio documentale">
-            <Presentation size={17} />
-            Download presentazione
-          </button>
+          <PresentationAction
+            studyId={study.id}
+            file={presentationFile}
+            onUpload={onPresentationUpload}
+            onNotice={onNotice}
+          />
           <button className="button secondary" onClick={onExport}>
             <FileSpreadsheet size={17} />
             Esporta immobili CSV
@@ -2708,6 +2940,36 @@ function StatusBadge({ status }: { status: StudyStatus }) {
   return <span className={`status-badge ${statusClass(status)}`}>{status}</span>;
 }
 
+function StatusSelect({
+  status,
+  saving,
+  onChange,
+}: {
+  status: StudyStatus;
+  saving: boolean;
+  onChange: (status: StudyStatus) => void;
+}) {
+  return (
+    <select
+      className={`status-select ${statusClass(status)}`}
+      value={status}
+      disabled={saving}
+      aria-label="Modifica stato studio di fattibilita"
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => {
+        event.stopPropagation();
+        onChange(event.target.value as StudyStatus);
+      }}
+    >
+      {editableStatusOptions.map((option) => (
+        <option key={option} value={option}>
+          {option}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function OutcomeBadge({ outcome }: { outcome: PropertyOutcome }) {
   return <span className={`outcome-badge ${outcomeClass(outcome)}`}>{outcome}</span>;
 }
@@ -2731,11 +2993,22 @@ function Delta({
   return <span className={`delta ${positive ? "positive" : "negative"}`}>{label}</span>;
 }
 
-function SummaryStat({ label, value }: { label: string; value: string }) {
+function SummaryStat({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon?: React.ReactNode;
+}) {
   return (
-    <div className="summary-stat">
-      <span>{label}</span>
-      <strong>{value}</strong>
+    <div className={`summary-stat ${icon ? "with-icon" : ""}`}>
+      {icon && <div className="summary-stat-icon">{icon}</div>}
+      <div className="summary-stat-copy">
+        <span>{label}</span>
+        <strong>{value}</strong>
+      </div>
     </div>
   );
 }
@@ -2823,10 +3096,7 @@ function ActivityItem({
 }
 
 function statusClass(status: StudyStatus) {
-  return status
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace("non-favorevole", "negativo");
+  return status.toLowerCase().replace(/\s+/g, "-");
 }
 
 function outcomeClass(outcome: PropertyOutcome) {
