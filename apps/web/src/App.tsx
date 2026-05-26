@@ -36,7 +36,6 @@ import {
   SlidersHorizontal,
   TrendingDown,
   TrendingUp,
-  UploadCloud,
   UserRound,
   X,
 } from "lucide-react";
@@ -1181,7 +1180,6 @@ function getSortValue(study: FeasibilityStudy, sortKey: SortKey) {
 
 function App() {
   const [studies, setStudies] = useState<FeasibilityStudy[]>(demoStudies);
-  const [dataSource, setDataSource] = useState<"loading" | "database" | "demo">("loading");
   const [route, setRoute] = useState<AppRoute>(routeFromLocation);
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("createdAt");
@@ -1190,6 +1188,9 @@ function App() {
   const [regionFilter, setRegionFilter] = useState("Tutte");
   const [appointmentOnly, setAppointmentOnly] = useState(false);
   const [expandedStudy, setExpandedStudy] = useState(demoStudies[0].id);
+  const [propertyDetailsStudy, setPropertyDetailsStudy] = useState("");
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [selectedStudyIds, setSelectedStudyIds] = useState<string[]>([]);
   const [editorDirty, setEditorDirty] = useState(false);
   const [toast, setToast] = useState("");
 
@@ -1205,7 +1206,6 @@ function App() {
         const importedStudies = (await response.json()) as FeasibilityStudy[];
         if (!Array.isArray(importedStudies)) throw new Error("Risposta studi non valida");
         setStudies(importedStudies);
-        setDataSource("database");
         if (importedStudies.length > 0) {
           setExpandedStudy((current) =>
             importedStudies.some((study) => study.id === current) ? current : importedStudies[0].id,
@@ -1214,7 +1214,6 @@ function App() {
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setStudies(demoStudies);
-        setDataSource("demo");
       }
     }
 
@@ -1338,6 +1337,11 @@ function App() {
     appointmentOnly,
   ].filter(Boolean).length;
 
+  const selectedStudies = studies.filter((study) => selectedStudyIds.includes(study.id));
+  const allVisibleSelected =
+    filteredStudies.length > 0 &&
+    filteredStudies.every((study) => selectedStudyIds.includes(study.id));
+
   function flash(message: string) {
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
@@ -1361,7 +1365,7 @@ function App() {
     URL.revokeObjectURL(url);
   }
 
-  function downloadFilteredCsv() {
+  function downloadSelectedCsv() {
     const headers = [
       "ID studio",
       "Azienda",
@@ -1381,7 +1385,7 @@ function App() {
       "Responsabile tecnico",
     ];
 
-    const rows = filteredStudies.map((study) => [
+    const rows = selectedStudies.map((study) => [
       study.id,
       study.company,
       study.vat,
@@ -1400,8 +1404,8 @@ function App() {
       study.technicalOwner,
     ]);
 
-    downloadCsv("studi-fattibilita-filtrati.csv", headers, rows);
-    flash("Lista filtrata esportata in CSV.");
+    downloadCsv("studi-fattibilita-selezionati.csv", headers, rows);
+    flash(`${selectedStudies.length} studi esportati in CSV.`);
   }
 
   function downloadStudyPropertiesCsv(study: FeasibilityStudy) {
@@ -1436,6 +1440,23 @@ function App() {
     setStatusFilter("Tutti");
     setRegionFilter("Tutte");
     setAppointmentOnly(false);
+  }
+
+  function toggleStudySelection(studyId: string) {
+    setSelectedStudyIds((current) =>
+      current.includes(studyId)
+        ? current.filter((selectedId) => selectedId !== studyId)
+        : [...current, studyId],
+    );
+  }
+
+  function toggleVisibleSelection() {
+    setSelectedStudyIds((current) => {
+      if (allVisibleSelected) {
+        return current.filter((selectedId) => !filteredStudies.some((study) => study.id === selectedId));
+      }
+      return Array.from(new Set([...current, ...filteredStudies.map((study) => study.id)]));
+    });
   }
 
   if (route.view === "editor" && editorStudy && editorProperty) {
@@ -1563,155 +1584,12 @@ function App() {
         <section className="workspace">
           <div className="page-heading">
             <div>
-              <div className="heading-meta">
-                <p className="eyebrow">Import ERP</p>
-                <span className={`data-source ${dataSource}`}>
-                  {dataSource === "database"
-                    ? "Database collegato"
-                    : dataSource === "demo"
-                      ? "Dati dimostrativi"
-                      : "Caricamento dati"}
-                </span>
-              </div>
               <h1>{route.view === "studies" ? "Studi di fattibilita" : "Dashboard studi di fattibilita"}</h1>
               <p>
                 Monitora gli studi importati dall'ERP, le priorita commerciali e le differenze
                 di rendita catastale.
               </p>
             </div>
-            <button className="button primary" disabled title="Disponibile dopo integrazione ERP">
-              <RefreshCw size={18} />
-              Sincronizza ERP
-            </button>
-          </div>
-
-          <section className="filters-panel" aria-label="Filtri studi di fattibilita">
-            <div className="filters-summary">
-              <div className="filters-title">
-                <SlidersHorizontal size={18} />
-                <span>Filtri attivi ({activeFilterCount})</span>
-              </div>
-              <div className="filter-chips">
-                {statusFilter !== "Tutti" && (
-                  <button className="chip" onClick={() => setStatusFilter("Tutti")}>
-                    Stato: {statusFilter}
-                    <X size={14} />
-                  </button>
-                )}
-                {regionFilter !== "Tutte" && (
-                  <button className="chip" onClick={() => setRegionFilter("Tutte")}>
-                    Regione: {regionFilter}
-                    <X size={14} />
-                  </button>
-                )}
-                {appointmentOnly && (
-                  <button className="chip urgent" onClick={() => setAppointmentOnly(false)}>
-                    Con appuntamento
-                    <X size={14} />
-                  </button>
-                )}
-                {query.trim() && (
-                  <button className="chip" onClick={() => setQuery("")}>
-                    Ricerca: {query}
-                    <X size={14} />
-                  </button>
-                )}
-                {activeFilterCount === 0 && (
-                  <span className="muted-chip">Nessun filtro, ultimi studi importati</span>
-                )}
-              </div>
-              <button className="icon-button" title="Reimposta filtri" aria-label="Reimposta filtri" onClick={resetFilters}>
-                <RefreshCw size={17} />
-              </button>
-            </div>
-
-            <div className="filter-controls">
-              <label className="search-field table-search">
-                <Search size={17} />
-                <input
-                  aria-label="Cerca studi per azienda, partita IVA o comune"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Cerca per azienda, P. IVA, comune..."
-                />
-              </label>
-
-              <label className="select-field">
-                <span>Ordina per</span>
-                <select value={sortKey} onChange={(event) => setSortKey(event.target.value as SortKey)}>
-                  {sortOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <button
-                className="button ghost sort-toggle"
-                onClick={() => setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))}
-              >
-                <ArrowDownUp size={16} />
-                {sortDirection === "asc" ? "Crescente" : "Decrescente"}
-              </button>
-
-              <label className="select-field">
-                <span>Stato</span>
-                <select
-                  value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value as StudyStatus | "Tutti")}
-                >
-                  {statusOptions.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="select-field">
-                <span>Regione</span>
-                <select value={regionFilter} onChange={(event) => setRegionFilter(event.target.value)}>
-                  {regions.map((region) => (
-                    <option key={region} value={region}>
-                      {region}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="toggle-field">
-                <input
-                  type="checkbox"
-                  checked={appointmentOnly}
-                  onChange={(event) => setAppointmentOnly(event.target.checked)}
-                />
-                <span>Con appuntamento</span>
-              </label>
-            </div>
-          </section>
-
-          <div className="toolbar">
-            <button
-              className="button primary"
-              disabled
-              title="Disponibile dopo integrazione ERP"
-            >
-              <Send size={17} />
-              Invia a ERP
-            </button>
-            <button className="button secondary" disabled title="Disponibile con il servizio documentale">
-              <Presentation size={17} />
-              Download presentazione
-            </button>
-            <button className="button secondary" disabled title="Disponibile dopo integrazione ERP">
-              <ExternalLink size={17} />
-              Link allo studio sull'ERP
-            </button>
-            <button className="button secondary" onClick={downloadFilteredCsv}>
-              <FileSpreadsheet size={17} />
-              Esporta lista CSV
-            </button>
           </div>
 
           <section className="table-card">
@@ -1733,10 +1611,154 @@ function App() {
               </div>
             </div>
 
+            <div className="table-tools">
+              <button
+                className="filters-toggle"
+                aria-expanded={filtersExpanded}
+                onClick={() => setFiltersExpanded((expanded) => !expanded)}
+              >
+                <SlidersHorizontal size={18} />
+                <span>Filtri attivi ({activeFilterCount})</span>
+                {filtersExpanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
+              </button>
+
+              {filtersExpanded && (
+                <section className="filters-panel in-table" aria-label="Filtri studi di fattibilita">
+                  <div className="filters-summary">
+                    <div className="filter-chips">
+                      {statusFilter !== "Tutti" && (
+                        <button className="chip" onClick={() => setStatusFilter("Tutti")}>
+                          Stato: {statusFilter}
+                          <X size={14} />
+                        </button>
+                      )}
+                      {regionFilter !== "Tutte" && (
+                        <button className="chip" onClick={() => setRegionFilter("Tutte")}>
+                          Regione: {regionFilter}
+                          <X size={14} />
+                        </button>
+                      )}
+                      {appointmentOnly && (
+                        <button className="chip urgent" onClick={() => setAppointmentOnly(false)}>
+                          Con appuntamento
+                          <X size={14} />
+                        </button>
+                      )}
+                      {query.trim() && (
+                        <button className="chip" onClick={() => setQuery("")}>
+                          Ricerca: {query}
+                          <X size={14} />
+                        </button>
+                      )}
+                      {activeFilterCount === 0 && (
+                        <span className="muted-chip">Nessun filtro applicato</span>
+                      )}
+                    </div>
+                    <button className="icon-button" title="Reimposta filtri" aria-label="Reimposta filtri" onClick={resetFilters}>
+                      <RefreshCw size={17} />
+                    </button>
+                  </div>
+
+                  <div className="filter-controls">
+                    <label className="search-field table-search">
+                      <Search size={17} />
+                      <input
+                        aria-label="Cerca studi per azienda, partita IVA o comune"
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder="Cerca per azienda, P. IVA, comune..."
+                      />
+                    </label>
+
+                    <label className="select-field">
+                      <span>Ordina per</span>
+                      <select value={sortKey} onChange={(event) => setSortKey(event.target.value as SortKey)}>
+                        {sortOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <button
+                      className="button ghost sort-toggle"
+                      onClick={() => setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))}
+                    >
+                      <ArrowDownUp size={16} />
+                      {sortDirection === "asc" ? "Crescente" : "Decrescente"}
+                    </button>
+
+                    <label className="select-field">
+                      <span>Stato</span>
+                      <select
+                        value={statusFilter}
+                        onChange={(event) => setStatusFilter(event.target.value as StudyStatus | "Tutti")}
+                      >
+                        {statusOptions.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="select-field">
+                      <span>Regione</span>
+                      <select value={regionFilter} onChange={(event) => setRegionFilter(event.target.value)}>
+                        {regions.map((region) => (
+                          <option key={region} value={region}>
+                            {region}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="toggle-field">
+                      <input
+                        type="checkbox"
+                        checked={appointmentOnly}
+                        onChange={(event) => setAppointmentOnly(event.target.checked)}
+                      />
+                      <span>Con appuntamento</span>
+                    </label>
+                  </div>
+                </section>
+              )}
+
+              <div className="selection-toolbar" aria-label="Azioni studi selezionati">
+                <span className="selection-count">
+                  {selectedStudies.length > 0
+                    ? `${selectedStudies.length} studi selezionati`
+                    : "Seleziona gli studi da elaborare"}
+                </span>
+                <button
+                  className="button primary"
+                  disabled
+                  title={selectedStudies.length > 0 ? "Disponibile dopo integrazione ERP" : "Seleziona almeno uno studio"}
+                >
+                  <Send size={17} />
+                  Invia a ERP
+                </button>
+                <button className="button secondary" disabled={selectedStudies.length === 0} onClick={downloadSelectedCsv}>
+                  <FileSpreadsheet size={17} />
+                  Esporta selezione CSV
+                </button>
+              </div>
+            </div>
+
             <div className="studies-table-wrap">
               <table className="studies-table">
                 <thead>
                   <tr>
+                    <th className="selection-cell">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        onChange={toggleVisibleSelection}
+                        aria-label="Seleziona tutti gli studi visibili"
+                      />
+                    </th>
                     <th aria-label="Espandi studio" />
                     <SortableHeader
                       label="ID studio"
@@ -1782,7 +1804,6 @@ function App() {
                       activeSort={sortKey}
                       onSort={setSortKey}
                     />
-                    <th aria-label="Azioni" />
                   </tr>
                 </thead>
                 <tbody>
@@ -1791,8 +1812,15 @@ function App() {
                       key={study.id}
                       study={study}
                       expanded={expandedStudy === study.id}
-                      onToggle={() =>
-                        setExpandedStudy((current) => (current === study.id ? "" : study.id))
+                      selected={selectedStudyIds.includes(study.id)}
+                      propertyDetailsOpen={propertyDetailsStudy === study.id}
+                      onSelect={() => toggleStudySelection(study.id)}
+                      onToggle={() => {
+                        setExpandedStudy((current) => (current === study.id ? "" : study.id));
+                        setPropertyDetailsStudy("");
+                      }}
+                      onTogglePropertyDetails={() =>
+                        setPropertyDetailsStudy((current) => (current === study.id ? "" : study.id))
                       }
                       onOpenDetail={() => navigate({ view: "study", studyId: study.id })}
                       onOpenEditor={(property) =>
@@ -1999,8 +2027,8 @@ function Shell({
           </button>
 
           <button className="button primary top-action" disabled title="Disponibile dopo integrazione ERP">
-            <UploadCloud size={18} />
-            Importa ERP
+            <RefreshCw size={18} />
+            Sincronizza ERP
           </button>
 
           <div className="top-icons">
@@ -2182,13 +2210,21 @@ function PendingPage({
 function StudyRows({
   study,
   expanded,
+  selected,
+  propertyDetailsOpen,
+  onSelect,
   onToggle,
+  onTogglePropertyDetails,
   onOpenDetail,
   onOpenEditor,
 }: {
   study: FeasibilityStudy;
   expanded: boolean;
+  selected: boolean;
+  propertyDetailsOpen: boolean;
+  onSelect: () => void;
   onToggle: () => void;
+  onTogglePropertyDetails: () => void;
   onOpenDetail: () => void;
   onOpenEditor: (property: PropertyItem) => void;
 }) {
@@ -2197,6 +2233,14 @@ function StudyRows({
   return (
     <>
       <tr className={`study-row ${expanded ? "expanded" : ""}`}>
+        <td className="selection-cell">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onSelect}
+            aria-label={`Seleziona ${study.company}`}
+          />
+        </td>
         <td>
           <button
             className="expand-button"
@@ -2236,32 +2280,66 @@ function StudyRows({
         <td>
           <Owner owner={study.commercialOwner} />
         </td>
-        <td>
-          <button className="icon-button" title="Disponibile dopo integrazione ERP" disabled aria-label="Link ERP non disponibile">
-            <ExternalLink size={17} />
-          </button>
-        </td>
       </tr>
       {expanded && (
         <tr className="study-detail-row">
           <td colSpan={11}>
             <div className="expanded-panel">
               <section className="property-overview">
-                <div className="section-title">
-                  <h3>Panoramica immobili</h3>
-                  <span>
-                    {counts.performed}/{counts.total} studi eseguiti
-                  </span>
+                <div className="section-title property-overview-header">
+                  <div>
+                    <h3>Panoramica immobili</h3>
+                    <span>
+                      {counts.performed}/{counts.total} studi eseguiti
+                    </span>
+                  </div>
+                  <button className="button secondary compact-button" onClick={onTogglePropertyDetails}>
+                    {propertyDetailsOpen ? "Nascondi dettaglio immobili" : "Dettaglio immobili"}
+                    {propertyDetailsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                  </button>
                 </div>
                 <div className="property-icons" aria-label="Esiti degli immobili">
                   {study.properties.map((property) => (
-                    <div
+                    <button
+                      type="button"
                       key={property.id}
                       className={`property-tile ${outcomeClass(property.outcome)}`}
-                      title={`${property.address}, ${property.comune} - ${property.outcome}`}
+                      aria-label={`Dettagli immobile ${property.address}, ${property.comune}`}
                     >
                       {property.categoria.startsWith("D/") ? <Factory size={20} /> : <Home size={20} />}
-                    </div>
+                      <span className="property-tooltip" role="tooltip">
+                        <strong>{property.address}</strong>
+                        <small>{property.comune}</small>
+                        <span className="tooltip-grid">
+                          <span>
+                            <em>Categoria</em>
+                            <b>{property.categoria}</b>
+                          </span>
+                          <span>
+                            <em>Rendita attuale</em>
+                            <b>{formatEuro(property.currentRendita)}</b>
+                          </span>
+                          <span>
+                            <em>Rendita stimata</em>
+                            <b>{property.estimatedRendita ? formatEuro(property.estimatedRendita) : "Da stimare"}</b>
+                          </span>
+                          <span>
+                            <em>Differenza rendita</em>
+                            <b>{property.hasStudy ? formatPercent(property.diffPercent) : "Non disponibile"}</b>
+                          </span>
+                          <span>
+                            <em>Esito</em>
+                            <b>{property.outcome}</b>
+                          </span>
+                        </span>
+                        <span className="tooltip-documents">
+                          <File size={13} />
+                          Planimetria PDF
+                          <FileText size={13} />
+                          Visura PDF
+                        </span>
+                      </span>
+                    </button>
                   ))}
                 </div>
                 <div className="outcome-summary">
@@ -2300,10 +2378,14 @@ function StudyRows({
                   <p>{study.notes}</p>
                 </div>
                 <div className="summary-actions">
-                  <button className="button secondary" disabled title="Disponibile dopo integrazione ERP">
-                    Link ERP
-                    <ExternalLink size={16} />
+                  <button className="button secondary" disabled title="Disponibile con il servizio documentale">
+                    <Presentation size={16} />
+                    Download presentazione
                   </button>
+                  <a className="button secondary" href={study.erpUrl} target="_blank" rel="noreferrer">
+                    Link allo studio sull'ERP
+                    <ExternalLink size={16} />
+                  </a>
                   <button className="button primary" onClick={onOpenDetail}>
                     Apri studio di fattibilita
                     <ExternalLink size={16} />
@@ -2311,36 +2393,38 @@ function StudyRows({
                 </div>
               </section>
 
-              <section className="property-table-section">
-                <div className="section-title">
-                  <h3>Dettaglio immobili ({counts.total})</h3>
-                  <span>Documenti associati agli immobili</span>
-                </div>
-                <div className="compact-table-wrap">
-                  <table className="compact-table">
-                    <thead>
-                      <tr>
-                        <th>Indirizzo</th>
-                        <th>Categoria</th>
-                        <th>Rendita attuale</th>
-                        <th>Rendita stimata</th>
-                        <th>Diff. rendita</th>
-                        <th>Esito</th>
-                        <th>Documenti</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {study.properties.map((property) => (
-                        <PropertyRow
-                          key={property.id}
-                          property={property}
-                          onOpenEditor={() => onOpenEditor(property)}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
+              {propertyDetailsOpen && (
+                <section className="property-table-section">
+                  <div className="section-title">
+                    <h3>Dettaglio immobili ({counts.total})</h3>
+                    <span>Documenti associati agli immobili</span>
+                  </div>
+                  <div className="compact-table-wrap">
+                    <table className="compact-table">
+                      <thead>
+                        <tr>
+                          <th>Indirizzo</th>
+                          <th>Categoria</th>
+                          <th>Rendita attuale</th>
+                          <th>Rendita stimata</th>
+                          <th>Diff. rendita</th>
+                          <th>Esito</th>
+                          <th>Documenti</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {study.properties.map((property) => (
+                          <PropertyRow
+                            key={property.id}
+                            property={property}
+                            onOpenEditor={() => onOpenEditor(property)}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
             </div>
           </td>
         </tr>
@@ -2422,14 +2506,18 @@ function StudyDetail({
           </p>
         </div>
         <div className="detail-actions">
+          <button className="button secondary" disabled title="Disponibile con il servizio documentale">
+            <Presentation size={17} />
+            Download presentazione
+          </button>
           <button className="button secondary" onClick={onExport}>
             <FileSpreadsheet size={17} />
             Esporta immobili CSV
           </button>
-          <button className="button secondary" disabled title="Disponibile dopo integrazione ERP">
+          <a className="button secondary" href={study.erpUrl} target="_blank" rel="noreferrer">
             <ExternalLink size={17} />
-            Link ERP
-          </button>
+            Link allo studio sull'ERP
+          </a>
           <button className="button primary" disabled title="Disponibile dopo integrazione ERP">
             <Send size={17} />
             Invia a ERP
