@@ -24,7 +24,6 @@ import {
   FileSpreadsheet,
   FileText,
   Home,
-  LayoutDashboard,
   MoreVertical,
   PanelLeftClose,
   PanelLeftOpen,
@@ -173,7 +172,6 @@ function pathForRoute(route: AppRoute) {
 function navSectionForRoute(route: AppRoute) {
   switch (route.view) {
     case "dashboard":
-      return "Dashboard";
     case "study":
     case "studies":
       return "Studi di fattibilita";
@@ -2048,6 +2046,7 @@ function Shell({
         <div className="brand-row">
           <div className="brand">
             <img src="/soul_logo_blu.png" alt="Soul Prospect Qualifier" />
+            <span className="brand-product-name">Prospect Qualifier</span>
           </div>
           <button
             className="sidebar-toggle"
@@ -2059,12 +2058,6 @@ function Shell({
           </button>
         </div>
         <nav className="nav-menu" aria-label="Navigazione principale">
-          <NavItem
-            active={activeSection === "Dashboard"}
-            icon={<LayoutDashboard size={21} />}
-            label="Dashboard"
-            onClick={() => onNavigate({ view: "dashboard" })}
-          />
           <NavItem
             active={activeSection === "Studi di fattibilita"}
             icon={<ClipboardList size={21} />}

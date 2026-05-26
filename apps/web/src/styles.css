@@ -101,6 +101,8 @@ button:disabled {
 .brand {
   min-width: 0;
   flex: 1;
+  display: grid;
+  gap: 5px;
   padding: 0 18px 6px;
   overflow: hidden;
 }
@@ -109,6 +111,15 @@ button:disabled {
   width: 158px;
   max-width: 100%;
   display: block;
+}
+
+.brand-product-name {
+  padding-left: 39px;
+  color: #b8d7ff;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .sidebar-toggle {
@@ -1076,9 +1087,11 @@ a.button {
   font-size: 12px;
 }
 
-.study-detail-row > td {
+.studies-table .study-detail-row > td {
+  width: auto;
   padding: 0 12px 14px;
   background: #f1f6fc;
+  text-align: left;
 }
 
 .expanded-panel {
