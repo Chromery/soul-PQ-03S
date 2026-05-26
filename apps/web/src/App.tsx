@@ -23,7 +23,10 @@ import {
   File,
   FileSpreadsheet,
   FileText,
+  Globe,
+  GripVertical,
   Home,
+  MapPin,
   MoreVertical,
   PanelLeftClose,
   PanelLeftOpen,
@@ -54,11 +57,19 @@ type PropertyItem = {
   id: string;
   address: string;
   comune: string;
+  ubicazione?: string | null;
+  foglio?: string | null;
+  particella?: string | null;
+  subalterno?: string | null;
   categoria: string;
+  titolarita?: string | null;
   currentRendita: number;
   estimatedRendita: number;
   diffPercent: number;
+  currentImu?: number | null;
+  estimatedImu?: number | null;
   imuDiff: number;
+  displayOrder?: number;
   outcome: PropertyOutcome;
   hasStudy: boolean;
   documents: {
@@ -109,6 +120,20 @@ type SortKey =
   | "propertiesCount"
   | "commercialOwner"
   | "technicalOwner";
+
+type PropertySortKey =
+  | "manual"
+  | "ubicazione"
+  | "foglio"
+  | "particella"
+  | "subalterno"
+  | "categoria"
+  | "currentRendita"
+  | "estimatedRendita"
+  | "currentImu"
+  | "estimatedImu"
+  | "titolarita"
+  | "outcome";
 
 type AppRoute =
   | { view: "dashboard" }
@@ -1138,6 +1163,32 @@ function formatPercent(value: number) {
   })}%`;
 }
 
+function formatEstimatedValue(value: number | null | undefined) {
+  return value === null || value === undefined || value === 0 ? "Da stimare" : formatEuro(value);
+}
+
+function propertyLocation(property: PropertyItem) {
+  return property.ubicazione || `${property.address}, ${property.comune}`;
+}
+
+function deviationPercent(current: number | null | undefined, estimated: number | null | undefined) {
+  if (current === null || current === undefined || estimated === null || estimated === undefined || current === 0) {
+    return null;
+  }
+  return ((estimated - current) / current) * 100;
+}
+
+function googleMapsUrl(property: PropertyItem) {
+  const url = new URL("https://www.google.com/maps/search/");
+  url.searchParams.set("api", "1");
+  url.searchParams.set("query", propertyLocation(property));
+  return url.toString();
+}
+
+function googleEarthUrl(property: PropertyItem) {
+  return `https://earth.google.com/web/search/${encodeURIComponent(propertyLocation(property))}`;
+}
+
 function getInitials(name: string) {
   return name
     .split(" ")
@@ -1392,6 +1443,26 @@ function App() {
     }
   }
 
+  async function reorderStudyProperties(studyId: string, propertyIds: string[]) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/studies/${encodeURIComponent(studyId)}/properties/order`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyIds }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const updatedStudy = (await response.json()) as FeasibilityStudy;
+      setStudies((current) =>
+        current.map((study) => (study.id === updatedStudy.id ? updatedStudy : study)),
+      );
+      flash("Ordine immobili salvato.");
+      return true;
+    } catch {
+      flash("Impossibile salvare l'ordine degli immobili.");
+      return false;
+    }
+  }
+
   function attachPresentation(studyId: string, file: File) {
     setPresentationFiles((current) => ({ ...current, [studyId]: file }));
     flash("Presentazione caricata per la sessione corrente.");
@@ -1463,24 +1534,34 @@ function App() {
   function downloadStudyPropertiesCsv(study: FeasibilityStudy) {
     const headers = [
       "ID immobile",
-      "Indirizzo",
-      "Comune",
+      "Ubicazione",
+      "Foglio",
+      "Particella",
+      "Subalterno",
       "Categoria",
+      "Titolarita",
       "Rendita attuale",
-      "Rendita prospettata",
-      "Differenza rendita",
-      "Differenza IMU",
+      "Rendita proposta",
+      "Differenza rendita percentuale",
+      "IMU attuale",
+      "IMU prevista",
+      "Differenza IMU percentuale",
       "Esito",
     ];
     const rows = study.properties.map((property) => [
       property.id,
-      property.address,
-      property.comune,
+      propertyLocation(property),
+      property.foglio ?? "",
+      property.particella ?? "",
+      property.subalterno ?? "",
       property.categoria,
+      property.titolarita ?? "",
       property.currentRendita,
       property.estimatedRendita,
       property.diffPercent,
-      property.imuDiff,
+      property.currentImu ?? "",
+      property.estimatedImu ?? "",
+      deviationPercent(property.currentImu, property.estimatedImu) ?? "",
       property.outcome,
     ]);
     downloadCsv(`${study.id.toLowerCase()}-immobili.csv`, headers, rows);
@@ -1556,6 +1637,8 @@ function App() {
           onBack={() => navigate({ view: "studies" })}
           onExport={() => downloadStudyPropertiesCsv(activeStudy)}
           onNotice={flash}
+          onUpdate={(input) => updateStudy(activeStudy.id, input)}
+          onReorder={(propertyIds) => reorderStudyProperties(activeStudy.id, propertyIds)}
           presentationFile={presentationFiles[activeStudy.id]}
           onPresentationUpload={(file) => attachPresentation(activeStudy.id, file)}
           onOpenEditor={(property) =>
@@ -2771,6 +2854,8 @@ function StudyDetail({
   onExport,
   onOpenEditor,
   onNotice,
+  onUpdate,
+  onReorder,
   presentationFile,
   onPresentationUpload,
 }: {
@@ -2779,24 +2864,142 @@ function StudyDetail({
   onExport: () => void;
   onOpenEditor: (property: PropertyItem) => void;
   onNotice: (message: string) => void;
+  onUpdate: (input: StudyUpdate) => Promise<boolean>;
+  onReorder: (propertyIds: string[]) => Promise<boolean>;
   presentationFile?: File;
   onPresentationUpload: (file: File) => void;
 }) {
   const counts = getCounts(study);
   const positiveShare = Math.round((counts.positive / Math.max(counts.total, 1)) * 100);
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [selectedPropertyIds, setSelectedPropertyIds] = useState<string[]>([]);
+  const [propertySortKey, setPropertySortKey] = useState<PropertySortKey>("manual");
+  const [propertySortDirection, setPropertySortDirection] = useState<"asc" | "desc">("asc");
+  const [manualOrder, setManualOrder] = useState<string[]>(() => study.properties.map((property) => property.id));
+  const [draggedPropertyId, setDraggedPropertyId] = useState("");
+
+  useEffect(() => {
+    setSelectedPropertyIds([]);
+    setPropertySortKey("manual");
+    setManualOrder(study.properties.map((property) => property.id));
+  }, [study.id]);
+
+  useEffect(() => {
+    setManualOrder((current) => {
+      const existingIds = new Set(study.properties.map((property) => property.id));
+      const retained = current.filter((propertyId) => existingIds.has(propertyId));
+      const added = study.properties.map((property) => property.id).filter((propertyId) => !retained.includes(propertyId));
+      return [...retained, ...added];
+    });
+  }, [study.properties]);
+
+  const orderedProperties = useMemo(() => {
+    const byId = new Map(study.properties.map((property) => [property.id, property]));
+    const properties = manualOrder.map((propertyId) => byId.get(propertyId)).filter((property): property is PropertyItem => Boolean(property));
+    if (propertySortKey === "manual") return properties;
+
+    return [...properties].sort((first, second) => {
+      const values: Record<Exclude<PropertySortKey, "manual">, [string | number, string | number]> = {
+        ubicazione: [propertyLocation(first), propertyLocation(second)],
+        foglio: [first.foglio ?? "", second.foglio ?? ""],
+        particella: [first.particella ?? "", second.particella ?? ""],
+        subalterno: [first.subalterno ?? "", second.subalterno ?? ""],
+        categoria: [first.categoria, second.categoria],
+        currentRendita: [first.currentRendita, second.currentRendita],
+        estimatedRendita: [first.estimatedRendita, second.estimatedRendita],
+        currentImu: [first.currentImu ?? -Infinity, second.currentImu ?? -Infinity],
+        estimatedImu: [first.estimatedImu ?? -Infinity, second.estimatedImu ?? -Infinity],
+        titolarita: [first.titolarita ?? "", second.titolarita ?? ""],
+        outcome: [first.outcome, second.outcome],
+      };
+      const [left, right] = values[propertySortKey];
+      const comparison =
+        typeof left === "string" && typeof right === "string"
+          ? left.localeCompare(right, "it")
+          : Number(left) - Number(right);
+      return propertySortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [manualOrder, propertySortDirection, propertySortKey, study.properties]);
+
+  const selectedProperties = orderedProperties.filter((property) => selectedPropertyIds.includes(property.id));
+  const allPropertiesSelected =
+    orderedProperties.length > 0 &&
+    orderedProperties.every((property) => selectedPropertyIds.includes(property.id));
+
+  async function handleStatusChange(status: StudyStatus) {
+    if (status === study.status) return;
+    setSavingStatus(true);
+    await onUpdate({ status });
+    setSavingStatus(false);
+  }
+
+  function handlePropertySort(sortKey: Exclude<PropertySortKey, "manual">) {
+    if (propertySortKey === sortKey) {
+      setPropertySortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setPropertySortKey(sortKey);
+    setPropertySortDirection("asc");
+  }
+
+  function togglePropertySelection(propertyId: string) {
+    setSelectedPropertyIds((current) =>
+      current.includes(propertyId)
+        ? current.filter((selectedId) => selectedId !== propertyId)
+        : [...current, propertyId],
+    );
+  }
+
+  function toggleAllProperties() {
+    setSelectedPropertyIds((current) =>
+      allPropertiesSelected
+        ? current.filter((propertyId) => !orderedProperties.some((property) => property.id === propertyId))
+        : Array.from(new Set([...current, ...orderedProperties.map((property) => property.id)])),
+    );
+  }
+
+  function openSelected(service: "maps" | "earth") {
+    selectedProperties.forEach((property) => {
+      const url = service === "maps" ? googleMapsUrl(property) : googleEarthUrl(property);
+      window.open(url, "_blank", "noopener,noreferrer");
+    });
+  }
+
+  function notifyFormAbs() {
+    onNotice("Collegamento FormABS in attesa delle specifiche di integrazione.");
+  }
+
+  function handleDrop(targetPropertyId: string) {
+    if (!draggedPropertyId || draggedPropertyId === targetPropertyId) {
+      setDraggedPropertyId("");
+      return;
+    }
+    const currentOrder = orderedProperties.map((property) => property.id);
+    const nextOrder = currentOrder.filter((propertyId) => propertyId !== draggedPropertyId);
+    const targetIndex = nextOrder.indexOf(targetPropertyId);
+    nextOrder.splice(targetIndex, 0, draggedPropertyId);
+    setManualOrder(nextOrder);
+    setPropertySortKey("manual");
+    setDraggedPropertyId("");
+    void onReorder(nextOrder);
+  }
 
   return (
     <main className="detail-page">
       <button className="back-link" onClick={onBack}>
         <ChevronLeft size={17} />
-        Torna alla dashboard
+        Torna agli studi
       </button>
 
       <section className="detail-hero">
         <div>
           <div className="detail-meta">
             <span>{study.id}</span>
-            <StatusBadge status={study.status} />
+            <StatusSelect
+              status={study.status}
+              saving={savingStatus}
+              onChange={(status) => void handleStatusChange(status)}
+            />
           </div>
           <h1>{study.company}</h1>
           <p>
@@ -2825,19 +3028,184 @@ function StudyDetail({
         </div>
       </section>
 
+      <section className="detail-card property-detail-card operational-properties">
+        <div className="section-title property-list-title">
+          <div>
+            <h2>Immobili dello studio</h2>
+            <span>{counts.total} immobili, di cui {counts.catD} in categoria D</span>
+          </div>
+          <div className="manual-order-indicator">
+            <GripVertical size={15} />
+            {propertySortKey === "manual" ? "Ordine manuale" : "Trascina per salvare un nuovo ordine"}
+          </div>
+        </div>
+
+        <div className="property-selection-toolbar" aria-label="Azioni immobili selezionati">
+          <span>
+            {selectedProperties.length > 0
+              ? `${selectedProperties.length} immobili selezionati`
+              : "Seleziona uno o piu immobili per azioni multiple"}
+          </span>
+          <button className="button secondary compact-button" disabled={selectedProperties.length === 0} onClick={notifyFormAbs}>
+            <Building2 size={15} />
+            Apri su FormABS
+          </button>
+          <button
+            className="button secondary compact-button"
+            disabled={selectedProperties.length === 0}
+            onClick={() => openSelected("earth")}
+          >
+            <Globe size={15} />
+            Google Earth
+          </button>
+          <button
+            className="button secondary compact-button"
+            disabled={selectedProperties.length === 0}
+            onClick={() => openSelected("maps")}
+          >
+            <MapPin size={15} />
+            Google Maps
+          </button>
+        </div>
+
+        <div className="compact-table-wrap">
+          <table className="compact-table property-operational-table">
+            <thead>
+              <tr>
+                <th className="property-select-cell">
+                  <input
+                    type="checkbox"
+                    checked={allPropertiesSelected}
+                    onChange={toggleAllProperties}
+                    aria-label="Seleziona tutti gli immobili"
+                  />
+                </th>
+                <th className="property-drag-cell" aria-label="Ordine manuale" />
+                <PropertySortHeader label="Ubicazione" sortKey="ubicazione" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Rendita attuale" sortKey="currentRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Rendita proposta" sortKey="estimatedRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="IMU attuale" sortKey="currentImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="IMU prevista" sortKey="estimatedImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Foglio" sortKey="foglio" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Part." sortKey="particella" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Sub" sortKey="subalterno" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Categoria" sortKey="categoria" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Titolarita" sortKey="titolarita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Esito" sortKey="outcome" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <th>Azioni</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orderedProperties.map((property) => {
+                const imuPercent = deviationPercent(property.currentImu, property.estimatedImu);
+                return (
+                  <tr
+                    key={property.id}
+                    className={draggedPropertyId === property.id ? "dragging" : ""}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      handleDrop(property.id);
+                    }}
+                  >
+                    <td className="property-select-cell">
+                      <input
+                        type="checkbox"
+                        checked={selectedPropertyIds.includes(property.id)}
+                        onChange={() => togglePropertySelection(property.id)}
+                        aria-label={`Seleziona ${propertyLocation(property)}`}
+                      />
+                    </td>
+                    <td className="property-drag-cell">
+                      <button
+                        className="drag-handle"
+                        type="button"
+                        draggable
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", property.id);
+                          setDraggedPropertyId(property.id);
+                        }}
+                        onDragEnd={() => setDraggedPropertyId("")}
+                        aria-label={`Riordina ${propertyLocation(property)}`}
+                        title="Trascina per riordinare"
+                      >
+                        <GripVertical size={17} />
+                      </button>
+                    </td>
+                    <td className="location-cell">
+                      <strong>{propertyLocation(property)}</strong>
+                    </td>
+                    <td>{formatEuro(property.currentRendita)}</td>
+                    <td>
+                      <AmountWithVariance value={formatEstimatedValue(property.estimatedRendita)} variance={property.hasStudy ? property.diffPercent : null} />
+                    </td>
+                    <td>{property.currentImu === null || property.currentImu === undefined ? "In attesa ERP" : formatEuro(property.currentImu)}</td>
+                    <td>
+                      <AmountWithVariance value={formatEstimatedValue(property.estimatedImu)} variance={imuPercent} />
+                    </td>
+                    <td>{property.foglio || "In attesa ERP"}</td>
+                    <td>{property.particella || "In attesa ERP"}</td>
+                    <td>{property.subalterno || "In attesa ERP"}</td>
+                    <td>{property.categoria}</td>
+                    <td>{property.titolarita || "In attesa ERP"}</td>
+                    <td>
+                      <OutcomeBadge outcome={property.outcome} />
+                    </td>
+                    <td>
+                      <div className="property-external-actions">
+                        <button type="button" onClick={notifyFormAbs} title="In attesa della regola FormABS">
+                          <Building2 size={14} />
+                          FormABS
+                        </button>
+                        <a href={googleEarthUrl(property)} target="_blank" rel="noreferrer">
+                          <Globe size={14} />
+                          Earth
+                        </a>
+                        <a href={googleMapsUrl(property)} target="_blank" rel="noreferrer">
+                          <MapPin size={14} />
+                          Maps
+                        </a>
+                        <button type="button" onClick={() => onOpenEditor(property)}>
+                          <File size={14} />
+                          Planimetria
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="detail-metrics">
-        <DetailMetric icon={<Building2 size={22} />} label="Immobili" value={counts.total.toString()} />
-        <DetailMetric icon={<Factory size={22} />} label="In categoria D" value={counts.catD.toString()} />
+        <DetailMetric
+          icon={<Building2 size={22} />}
+          label="Immobili"
+          value={counts.total.toString()}
+          supplementaryLabel="Dei quali in categoria D"
+          supplementaryValue={counts.catD.toString()}
+        />
         <DetailMetric
           icon={<CircleDollarSign size={22} />}
           label="Rendita totale"
           value={formatEuro(study.totalRendita)}
+          supplementaryLabel="Rendita in categoria D"
+          supplementaryValue={formatEuro(study.catDRendita)}
         />
         <DetailMetric
           icon={study.diffRendita >= 0 ? <TrendingUp size={22} /> : <TrendingDown size={22} />}
           label="Differenza rendita"
           value={formatPercent(study.diffRendita)}
           positive={study.diffRendita >= 0}
+        />
+        <DetailMetric
+          icon={<Euro size={22} />}
+          label="Differenza IMU totale"
+          value={formatEuro(study.diffImu)}
+          positive={study.diffImu >= 0}
         />
       </section>
 
@@ -2883,58 +3251,50 @@ function StudyDetail({
         </div>
       </section>
 
-      <section className="detail-card property-detail-card">
-        <div className="section-title">
-          <h2>Immobili dello studio</h2>
-          <span>{counts.catD} in categoria D</span>
-        </div>
-        <div className="compact-table-wrap">
-          <table className="compact-table">
-            <thead>
-              <tr>
-                <th>Immobile</th>
-                <th>Comune</th>
-                <th>Categoria</th>
-                <th>Rendita attuale</th>
-                <th>Rendita prospettata</th>
-                <th>Diff. IMU</th>
-                <th>Esito</th>
-                <th>Documenti</th>
-              </tr>
-            </thead>
-            <tbody>
-              {study.properties.map((property) => (
-                <tr key={property.id}>
-                  <td>{property.address}</td>
-                  <td>{property.comune}</td>
-                  <td>{property.categoria}</td>
-                  <td>{formatEuro(property.currentRendita)}</td>
-                  <td>{property.estimatedRendita ? formatEuro(property.estimatedRendita) : "Da stimare"}</td>
-                  <td>
-                    <Delta value={property.imuDiff} currency muted={!property.hasStudy} />
-                  </td>
-                  <td>
-                    <OutcomeBadge outcome={property.outcome} />
-                  </td>
-                  <td>
-                    <div className="document-actions">
-                      <button onClick={() => onOpenEditor(property)}>
-                        <File size={14} />
-                        Editor planimetria
-                      </button>
-                      <button disabled title="Documento disponibile dopo integrazione storage">
-                        <FileText size={14} />
-                        Visura
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
     </main>
+  );
+}
+
+function PropertySortHeader({
+  label,
+  sortKey,
+  activeSort,
+  direction,
+  onSort,
+}: {
+  label: string;
+  sortKey: Exclude<PropertySortKey, "manual">;
+  activeSort: PropertySortKey;
+  direction: "asc" | "desc";
+  onSort: (sortKey: Exclude<PropertySortKey, "manual">) => void;
+}) {
+  const active = activeSort === sortKey;
+  return (
+    <th aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button className={`sort-header ${active ? "active" : ""}`} onClick={() => onSort(sortKey)}>
+        {label}
+        {active ? (
+          direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+        ) : (
+          <ArrowDownUp size={13} />
+        )}
+      </button>
+    </th>
+  );
+}
+
+function AmountWithVariance({
+  value,
+  variance,
+}: {
+  value: string;
+  variance: number | null;
+}) {
+  return (
+    <div className="amount-variance">
+      <strong>{value}</strong>
+      {variance !== null && <Delta value={variance} suffix="%" />}
+    </div>
   );
 }
 
@@ -3057,17 +3417,27 @@ function DetailMetric({
   label,
   value,
   positive = true,
+  supplementaryLabel,
+  supplementaryValue,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   positive?: boolean;
+  supplementaryLabel?: string;
+  supplementaryValue?: string;
 }) {
   return (
     <div className="detail-metric">
       <div className={positive ? "metric-symbol positive" : "metric-symbol negative"}>{icon}</div>
       <span>{label}</span>
       <strong>{value}</strong>
+      {supplementaryLabel && supplementaryValue && (
+        <div className="metric-supplementary">
+          <span>{supplementaryLabel}</span>
+          <b>{supplementaryValue}</b>
+        </div>
+      )}
     </div>
   );
 }

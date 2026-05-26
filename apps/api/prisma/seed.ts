@@ -8,10 +8,17 @@ type SeedProperty = {
   id: string;
   address: string;
   comune: string;
+  ubicazione: string;
+  foglio: string;
+  particella: string;
+  subalterno: string;
   categoria: string;
+  titolarita: string;
   currentRendita: number;
   estimatedRendita: number;
   diffPercent: number;
+  currentImu: number;
+  estimatedImu: number | null;
   imuDiff: number;
   outcome: string;
   hasStudy: boolean;
@@ -68,10 +75,17 @@ const demoStudies: SeedStudy[] = [
         id: "AU-01",
         address: "Via Manzoni 12",
         comune: "Milano",
+        ubicazione: "Via Manzoni 12, 20121 Milano (MI)",
+        foglio: "348",
+        particella: "112",
+        subalterno: "7",
         categoria: "D/8",
+        titolarita: "Proprieta",
         currentRendita: 1248.56,
         estimatedRendita: 1842.31,
         diffPercent: 47.6,
+        currentImu: 2800,
+        estimatedImu: 4120,
         imuDiff: 1320,
         outcome: "Positivo",
         hasStudy: true,
@@ -82,10 +96,17 @@ const demoStudies: SeedStudy[] = [
         id: "AU-02",
         address: "Via Manzoni 14",
         comune: "Milano",
+        ubicazione: "Via Manzoni 14, 20121 Milano (MI)",
+        foglio: "348",
+        particella: "113",
+        subalterno: "2",
         categoria: "D/1",
+        titolarita: "Proprieta",
         currentRendita: 842.31,
         estimatedRendita: 1278.12,
         diffPercent: 51.7,
+        currentImu: 2120,
+        estimatedImu: 3205,
         imuDiff: 1085,
         outcome: "Positivo",
         hasStudy: true,
@@ -96,10 +117,17 @@ const demoStudies: SeedStudy[] = [
         id: "AU-03",
         address: "Via Verdi 8",
         comune: "Milano",
+        ubicazione: "Via Giuseppe Verdi 8, 20121 Milano (MI)",
+        foglio: "392",
+        particella: "48",
+        subalterno: "11",
         categoria: "D/7",
+        titolarita: "Superficie",
         currentRendita: 1123.45,
         estimatedRendita: 1560,
         diffPercent: 38.8,
+        currentImu: 3060,
+        estimatedImu: 4258,
         imuDiff: 1198,
         outcome: "Positivo",
         hasStudy: true,
@@ -110,10 +138,17 @@ const demoStudies: SeedStudy[] = [
         id: "AU-04",
         address: "Via Torino 4",
         comune: "Sesto San Giovanni",
+        ubicazione: "Via Torino 4, 20099 Sesto San Giovanni (MI)",
+        foglio: "17",
+        particella: "608",
+        subalterno: "4",
         categoria: "C/3",
+        titolarita: "Proprieta",
         currentRendita: 780,
         estimatedRendita: 706,
         diffPercent: -9.5,
+        currentImu: 1640,
+        estimatedImu: 1410,
         imuDiff: -230,
         outcome: "Negativo",
         hasStudy: true,
@@ -146,10 +181,17 @@ const demoStudies: SeedStudy[] = [
         id: "LP-01",
         address: "Via delle Industrie 44",
         comune: "Bergamo",
+        ubicazione: "Via delle Industrie 44, 24126 Bergamo (BG)",
+        foglio: "61",
+        particella: "902",
+        subalterno: "1",
         categoria: "D/7",
+        titolarita: "Proprieta",
         currentRendita: 12700,
         estimatedRendita: 15850,
         diffPercent: 24.8,
+        currentImu: 12200,
+        estimatedImu: 15220,
         imuDiff: 3020,
         outcome: "Positivo",
         hasStudy: true,
@@ -160,10 +202,17 @@ const demoStudies: SeedStudy[] = [
         id: "LP-02",
         address: "Via Autostrada 18",
         comune: "Dalmine",
+        ubicazione: "Via Autostrada 18, 24044 Dalmine (BG)",
+        foglio: "12",
+        particella: "335",
+        subalterno: "3",
         categoria: "D/8",
+        titolarita: "Diritto di superficie",
         currentRendita: 16400,
         estimatedRendita: 0,
         diffPercent: 0,
+        currentImu: 15700,
+        estimatedImu: null,
         imuDiff: 0,
         outcome: "Non analizzato",
         hasStudy: false,
@@ -196,10 +245,17 @@ const demoStudies: SeedStudy[] = [
         id: "RR-01",
         address: "Via Flaminia 128",
         comune: "Rimini",
+        ubicazione: "Via Flaminia 128, 47923 Rimini (RN)",
+        foglio: "85",
+        particella: "721",
+        subalterno: "9",
         categoria: "D/8",
+        titolarita: "Proprieta",
         currentRendita: 9200,
         estimatedRendita: 8080,
         diffPercent: -12.2,
+        currentImu: 10900,
+        estimatedImu: 9580,
         imuDiff: -1320,
         outcome: "Negativo",
         hasStudy: true,
@@ -258,22 +314,29 @@ async function seed() {
       },
     });
 
-    for (const property of study.properties) {
+    for (const [displayOrder, property] of study.properties.entries()) {
       const baseProperty = {
         studyId: study.id,
         address: property.address,
         comune: property.comune,
+        ubicazione: property.ubicazione,
+        foglio: property.foglio,
+        particella: property.particella,
+        subalterno: property.subalterno,
         categoria: property.categoria,
+        titolarita: property.titolarita,
         currentRendita: property.currentRendita,
         estimatedRendita: property.estimatedRendita,
         diffPercent: property.diffPercent,
+        currentImu: property.currentImu,
+        estimatedImu: property.estimatedImu,
         imuDiff: property.imuDiff,
         outcome: property.outcome,
         hasStudy: property.hasStudy,
       };
       await prisma.property.upsert({
         where: { id: property.id },
-        create: { id: property.id, ...baseProperty },
+        create: { id: property.id, displayOrder, ...baseProperty },
         update: baseProperty,
       });
       for (const document of [

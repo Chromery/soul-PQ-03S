@@ -64,11 +64,19 @@ model Property {
   studyId            String
   address            String
   comune             String
+  ubicazione         String?
+  foglio             String?
+  particella         String?
+  subalterno         String?
   categoria          String
+  titolarita         String?
   currentRendita     Decimal             @db.Decimal(14, 2)
   estimatedRendita   Decimal             @db.Decimal(14, 2)
   diffPercent        Decimal             @db.Decimal(10, 2)
+  currentImu         Decimal?            @db.Decimal(14, 2)
+  estimatedImu       Decimal?            @db.Decimal(14, 2)
   imuDiff            Decimal             @db.Decimal(14, 2)
+  displayOrder       Int                 @default(0)
   outcome            String
   hasStudy           Boolean             @default(false)
   createdAt          DateTime            @default(now())

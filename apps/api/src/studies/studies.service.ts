@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { DocumentType } from "../generated/prisma/enums.js";
 import type { FeasibilityStudy, Property, PropertyDocument, StudyVersion } from "../generated/prisma/client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -17,7 +17,7 @@ export class StudiesService {
   async list() {
     const studies = await this.prisma.feasibilityStudy.findMany({
       include: {
-        properties: { include: { documents: true }, orderBy: { id: "asc" } },
+        properties: { include: { documents: true }, orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
         versions: { orderBy: { versionNumber: "desc" } },
       },
       orderBy: { createdAt: "desc" },
@@ -29,7 +29,7 @@ export class StudiesService {
     const study = await this.prisma.feasibilityStudy.findUnique({
       where: { id },
       include: {
-        properties: { include: { documents: true }, orderBy: { id: "asc" } },
+        properties: { include: { documents: true }, orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
         versions: { orderBy: { versionNumber: "desc" } },
       },
     });
@@ -44,11 +44,34 @@ export class StudiesService {
       where: { id },
       data: input,
       include: {
-        properties: { include: { documents: true }, orderBy: { id: "asc" } },
+        properties: { include: { documents: true }, orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
         versions: { orderBy: { versionNumber: "desc" } },
       },
     });
     return this.toApiStudy(study);
+  }
+
+  async reorderProperties(id: string, propertyIds: string[]) {
+    const study = await this.prisma.feasibilityStudy.findUnique({
+      where: { id },
+      select: { properties: { select: { id: true } } },
+    });
+    if (!study) return null;
+
+    const availableIds = new Set(study.properties.map((property) => property.id));
+    if (
+      propertyIds.length !== availableIds.size ||
+      propertyIds.some((propertyId) => !availableIds.has(propertyId))
+    ) {
+      throw new BadRequestException("L'ordine deve includere tutti gli immobili dello studio");
+    }
+
+    await this.prisma.$transaction(
+      propertyIds.map((propertyId, displayOrder) =>
+        this.prisma.property.update({ where: { id: propertyId }, data: { displayOrder } }),
+      ),
+    );
+    return this.find(id);
   }
 
   private toApiStudy(study: StudyWithRelations) {
@@ -70,11 +93,19 @@ export class StudiesService {
       id: property.id,
       address: property.address,
       comune: property.comune,
+      ubicazione: property.ubicazione,
+      foglio: property.foglio,
+      particella: property.particella,
+      subalterno: property.subalterno,
       categoria: property.categoria,
+      titolarita: property.titolarita,
       currentRendita: Number(property.currentRendita),
       estimatedRendita: Number(property.estimatedRendita),
       diffPercent: Number(property.diffPercent),
+      currentImu: property.currentImu === null ? null : Number(property.currentImu),
+      estimatedImu: property.estimatedImu === null ? null : Number(property.estimatedImu),
       imuDiff: Number(property.imuDiff),
+      displayOrder: property.displayOrder,
       outcome: property.outcome,
       hasStudy: property.hasStudy,
       documents: {
