@@ -78,6 +78,7 @@ type FeasibilityStudy = {
   region: string;
   status: StudyStatus;
   createdAt: string;
+  importedAt: string;
   concludedAt?: string;
   deadline: string;
   nextAppointment?: string;
@@ -94,7 +95,9 @@ type FeasibilityStudy = {
 };
 
 type SortKey =
+  | "id"
   | "createdAt"
+  | "importedAt"
   | "concludedAt"
   | "deadline"
   | "nextAppointment"
@@ -102,6 +105,7 @@ type SortKey =
   | "diffImu"
   | "appointment"
   | "originalRendita"
+  | "totalRendita"
   | "propertiesCount"
   | "commercialOwner"
   | "technicalOwner";
@@ -196,6 +200,7 @@ const demoStudies: FeasibilityStudy[] = [
     region: "Lombardia",
     status: "Favorevole",
     createdAt: "2026-04-29",
+    importedAt: "2026-05-05T09:15:00",
     concludedAt: "2026-05-04",
     deadline: "2026-05-24",
     nextAppointment: "2026-05-07T11:00:00",
@@ -413,6 +418,7 @@ const demoStudies: FeasibilityStudy[] = [
     region: "Lombardia",
     status: "Da valutare",
     createdAt: "2026-04-27",
+    importedAt: "2026-05-05T09:10:00",
     deadline: "2026-05-31",
     nextAppointment: "2026-05-08T15:30:00",
     diffRendita: 12.3,
@@ -597,6 +603,7 @@ const demoStudies: FeasibilityStudy[] = [
     region: "Lombardia",
     status: "In revisione",
     createdAt: "2026-04-24",
+    importedAt: "2026-05-02T10:28:00",
     deadline: "2026-06-08",
     diffRendita: -5.1,
     diffImu: -960,
@@ -748,6 +755,7 @@ const demoStudies: FeasibilityStudy[] = [
     region: "Lombardia",
     status: "Con appuntamento",
     createdAt: "2026-04-23",
+    importedAt: "2026-05-02T09:48:00",
     deadline: "2026-05-18",
     nextAppointment: "2026-05-06T09:45:00",
     diffRendita: 41.9,
@@ -868,6 +876,7 @@ const demoStudies: FeasibilityStudy[] = [
     region: "Emilia-Romagna",
     status: "In lavorazione",
     createdAt: "2026-04-21",
+    importedAt: "2026-04-30T11:04:00",
     deadline: "2026-06-15",
     diffRendita: 18.7,
     diffImu: 5460,
@@ -971,6 +980,7 @@ const demoStudies: FeasibilityStudy[] = [
     region: "Emilia-Romagna",
     status: "Non favorevole",
     createdAt: "2026-04-18",
+    importedAt: "2026-04-29T16:22:00",
     concludedAt: "2026-05-02",
     deadline: "2026-05-29",
     diffRendita: -11.8,
@@ -1053,6 +1063,7 @@ const demoStudies: FeasibilityStudy[] = [
 ];
 
 const sortOptions: Array<{ value: SortKey; label: string }> = [
+  { value: "importedAt", label: "Data importazione ERP" },
   { value: "createdAt", label: "Data creazione" },
   { value: "concludedAt", label: "Data esito" },
   { value: "deadline", label: "Data scadenza" },
@@ -1153,8 +1164,12 @@ function getCounts(study: FeasibilityStudy) {
 
 function getSortValue(study: FeasibilityStudy, sortKey: SortKey) {
   switch (sortKey) {
+    case "id":
+      return study.id;
     case "createdAt":
       return new Date(study.createdAt).getTime();
+    case "importedAt":
+      return new Date(study.importedAt).getTime();
     case "concludedAt":
       return study.concludedAt ? new Date(study.concludedAt).getTime() : 0;
     case "deadline":
@@ -1169,6 +1184,8 @@ function getSortValue(study: FeasibilityStudy, sortKey: SortKey) {
       return study.nextAppointment ? 1 : 0;
     case "originalRendita":
       return study.originalRendita;
+    case "totalRendita":
+      return study.totalRendita;
     case "propertiesCount":
       return study.properties.length;
     case "commercialOwner":
@@ -1182,7 +1199,7 @@ function App() {
   const [studies, setStudies] = useState<FeasibilityStudy[]>(demoStudies);
   const [route, setRoute] = useState<AppRoute>(routeFromLocation);
   const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("createdAt");
+  const [sortKey, setSortKey] = useState<SortKey>("importedAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [statusFilter, setStatusFilter] = useState<StudyStatus | "Tutti">("Tutti");
   const [regionFilter, setRegionFilter] = useState("Tutte");
@@ -1372,6 +1389,7 @@ function App() {
       "P. IVA",
       "Comune",
       "Stato",
+      "Data importazione ERP",
       "Data creazione",
       "Data esito",
       "Scadenza",
@@ -1391,6 +1409,7 @@ function App() {
       study.vat,
       `${study.comune} (${study.provincia})`,
       study.status,
+      study.importedAt,
       study.createdAt,
       study.concludedAt ?? "",
       study.deadline,
@@ -1440,6 +1459,15 @@ function App() {
     setStatusFilter("Tutti");
     setRegionFilter("Tutte");
     setAppointmentOnly(false);
+  }
+
+  function handleSort(nextSortKey: SortKey) {
+    if (sortKey === nextSortKey) {
+      setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(nextSortKey);
+    setSortDirection("desc");
   }
 
   function toggleStudySelection(studyId: string) {
@@ -1759,51 +1787,65 @@ function App() {
                         aria-label="Seleziona tutti gli studi visibili"
                       />
                     </th>
-                    <th aria-label="Espandi studio" />
                     <SortableHeader
                       label="ID studio"
-                      sortKey="createdAt"
+                      sortKey="id"
                       activeSort={sortKey}
-                      onSort={setSortKey}
+                      direction={sortDirection}
+                      onSort={handleSort}
                     />
                     <th>Azienda</th>
                     <SortableHeader
                       label="N. immobili"
                       sortKey="propertiesCount"
                       activeSort={sortKey}
-                      onSort={setSortKey}
+                      direction={sortDirection}
+                      onSort={handleSort}
                     />
                     <th>Stato</th>
+                    <SortableHeader
+                      label="Importato ERP"
+                      sortKey="importedAt"
+                      activeSort={sortKey}
+                      direction={sortDirection}
+                      onSort={handleSort}
+                    />
                     <SortableHeader
                       label="Scadenza"
                       sortKey="deadline"
                       activeSort={sortKey}
-                      onSort={setSortKey}
+                      direction={sortDirection}
+                      onSort={handleSort}
                     />
                     <SortableHeader
                       label="Diff. rendita"
                       sortKey="diffRendita"
                       activeSort={sortKey}
-                      onSort={setSortKey}
+                      direction={sortDirection}
+                      onSort={handleSort}
                     />
                     <SortableHeader
                       label="Diff. IMU"
                       sortKey="diffImu"
                       activeSort={sortKey}
-                      onSort={setSortKey}
+                      direction={sortDirection}
+                      onSort={handleSort}
                     />
                     <SortableHeader
                       label="Rendita totale"
-                      sortKey="originalRendita"
+                      sortKey="totalRendita"
                       activeSort={sortKey}
-                      onSort={setSortKey}
+                      direction={sortDirection}
+                      onSort={handleSort}
                     />
                     <SortableHeader
                       label="Commerciale"
                       sortKey="commercialOwner"
                       activeSort={sortKey}
-                      onSort={setSortKey}
+                      direction={sortDirection}
+                      onSort={handleSort}
                     />
+                    <th aria-label="Apri studio di fattibilita" />
                   </tr>
                 </thead>
                 <tbody>
@@ -2083,18 +2125,25 @@ function SortableHeader({
   label,
   sortKey,
   activeSort,
+  direction,
   onSort,
 }: {
   label: string;
   sortKey: SortKey;
   activeSort: SortKey;
+  direction: "asc" | "desc";
   onSort: (sortKey: SortKey) => void;
 }) {
+  const active = activeSort === sortKey;
   return (
-    <th>
-      <button className={`sort-header ${activeSort === sortKey ? "active" : ""}`} onClick={() => onSort(sortKey)}>
+    <th aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button className={`sort-header ${active ? "active" : ""}`} onClick={() => onSort(sortKey)}>
         {label}
-        <ArrowDownUp size={13} />
+        {active ? (
+          direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+        ) : (
+          <ArrowDownUp size={13} />
+        )}
       </button>
     </th>
   );
@@ -2232,24 +2281,28 @@ function StudyRows({
 
   return (
     <>
-      <tr className={`study-row ${expanded ? "expanded" : ""}`}>
+      <tr
+        className={`study-row ${expanded ? "expanded" : ""}`}
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Comprimi" : "Espandi"} dettagli dello studio ${study.id}`}
+        onClick={onToggle}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onToggle();
+          }
+        }}
+      >
         <td className="selection-cell">
           <input
             type="checkbox"
             checked={selected}
+            onClick={(event) => event.stopPropagation()}
             onChange={onSelect}
             aria-label={`Seleziona ${study.company}`}
           />
-        </td>
-        <td>
-          <button
-            className="expand-button"
-            aria-expanded={expanded}
-            aria-label={expanded ? "Comprimi dettagli studio" : "Espandi dettagli studio"}
-            onClick={onToggle}
-          >
-            {expanded ? <ChevronUp size={17} /> : <ChevronRight size={17} />}
-          </button>
         </td>
         <td className="strong-cell">{study.id}</td>
         <td>
@@ -2264,6 +2317,7 @@ function StudyRows({
         <td>
           <StatusBadge status={study.status} />
         </td>
+        <td>{formatDate(study.importedAt)}</td>
         <td>
           <div className="date-stack">
             <strong>{formatDate(study.deadline)}</strong>
@@ -2280,11 +2334,59 @@ function StudyRows({
         <td>
           <Owner owner={study.commercialOwner} />
         </td>
+        <td className="row-action-cell">
+          <button
+            className="button secondary compact-button row-detail-button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenDetail();
+            }}
+          >
+            <FileText size={15} />
+            Apri studio di fattibilita
+          </button>
+        </td>
       </tr>
       {expanded && (
         <tr className="study-detail-row">
-          <td colSpan={11}>
+          <td colSpan={12}>
             <div className="expanded-panel">
+              <section className="study-summary">
+                <div className="section-title">
+                  <h3>Riepilogo studio</h3>
+                  <StatusBadge status={study.status} />
+                </div>
+                <div className="summary-grid">
+                  <SummaryStat label="N. immobili" value={counts.total.toString()} />
+                  <SummaryStat label="In categoria D" value={counts.catD.toString()} />
+                  <SummaryStat label="Rendita totale" value={formatEuro(study.totalRendita)} />
+                  <SummaryStat label="Rendita categoria D" value={formatEuro(study.catDRendita)} />
+                  <SummaryStat label="Importato ERP" value={formatDate(study.importedAt)} />
+                  <SummaryStat label="Data creazione" value={formatDate(study.createdAt)} />
+                  <SummaryStat label="Data esito" value={formatDate(study.concludedAt)} />
+                  <SummaryStat label="Commerciale" value={study.commercialOwner} />
+                  <SummaryStat label="Responsabile tecnico" value={study.technicalOwner} />
+                </div>
+                <div className="notes-block">
+                  <span>Note</span>
+                  <p>{study.notes}</p>
+                </div>
+                <div className="summary-actions">
+                  <button className="button secondary" disabled title="Disponibile con il servizio documentale">
+                    <Presentation size={16} />
+                    Download presentazione
+                  </button>
+                  <a className="button secondary" href={study.erpUrl} target="_blank" rel="noreferrer">
+                    Link allo studio sull'ERP
+                    <ExternalLink size={16} />
+                  </a>
+                  <button className="button primary" onClick={onOpenDetail}>
+                    <FileText size={16} />
+                    Apri studio di fattibilita
+                  </button>
+                </div>
+              </section>
+
               <section className="property-overview">
                 <div className="section-title property-overview-header">
                   <div>
@@ -2356,75 +2458,39 @@ function StudyRows({
                     {counts.pending} non analizzati
                   </span>
                 </div>
-              </section>
-
-              <section className="study-summary">
-                <div className="section-title">
-                  <h3>Riepilogo studio</h3>
-                  <StatusBadge status={study.status} />
-                </div>
-                <div className="summary-grid">
-                  <SummaryStat label="N. immobili" value={counts.total.toString()} />
-                  <SummaryStat label="In categoria D" value={counts.catD.toString()} />
-                  <SummaryStat label="Rendita totale" value={formatEuro(study.totalRendita)} />
-                  <SummaryStat label="Rendita categoria D" value={formatEuro(study.catDRendita)} />
-                  <SummaryStat label="Data creazione" value={formatDate(study.createdAt)} />
-                  <SummaryStat label="Data esito" value={formatDate(study.concludedAt)} />
-                  <SummaryStat label="Commerciale" value={study.commercialOwner} />
-                  <SummaryStat label="Responsabile tecnico" value={study.technicalOwner} />
-                </div>
-                <div className="notes-block">
-                  <span>Note</span>
-                  <p>{study.notes}</p>
-                </div>
-                <div className="summary-actions">
-                  <button className="button secondary" disabled title="Disponibile con il servizio documentale">
-                    <Presentation size={16} />
-                    Download presentazione
-                  </button>
-                  <a className="button secondary" href={study.erpUrl} target="_blank" rel="noreferrer">
-                    Link allo studio sull'ERP
-                    <ExternalLink size={16} />
-                  </a>
-                  <button className="button primary" onClick={onOpenDetail}>
-                    Apri studio di fattibilita
-                    <ExternalLink size={16} />
-                  </button>
-                </div>
-              </section>
-
-              {propertyDetailsOpen && (
-                <section className="property-table-section">
-                  <div className="section-title">
-                    <h3>Dettaglio immobili ({counts.total})</h3>
-                    <span>Documenti associati agli immobili</span>
+                {propertyDetailsOpen && (
+                  <div className="property-table-inline">
+                    <div className="section-title">
+                      <h3>Dettaglio immobili ({counts.total})</h3>
+                      <span>Documenti associati agli immobili</span>
+                    </div>
+                    <div className="compact-table-wrap">
+                      <table className="compact-table">
+                        <thead>
+                          <tr>
+                            <th>Indirizzo</th>
+                            <th>Categoria</th>
+                            <th>Rendita attuale</th>
+                            <th>Rendita stimata</th>
+                            <th>Diff. rendita</th>
+                            <th>Esito</th>
+                            <th>Documenti</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {study.properties.map((property) => (
+                            <PropertyRow
+                              key={property.id}
+                              property={property}
+                              onOpenEditor={() => onOpenEditor(property)}
+                            />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                  <div className="compact-table-wrap">
-                    <table className="compact-table">
-                      <thead>
-                        <tr>
-                          <th>Indirizzo</th>
-                          <th>Categoria</th>
-                          <th>Rendita attuale</th>
-                          <th>Rendita stimata</th>
-                          <th>Diff. rendita</th>
-                          <th>Esito</th>
-                          <th>Documenti</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {study.properties.map((property) => (
-                          <PropertyRow
-                            key={property.id}
-                            property={property}
-                            onOpenEditor={() => onOpenEditor(property)}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-              )}
+                )}
+              </section>
             </div>
           </td>
         </tr>
