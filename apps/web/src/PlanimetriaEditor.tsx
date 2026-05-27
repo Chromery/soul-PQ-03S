@@ -1,21 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, PointerEvent } from "react";
+import type { CSSProperties, PointerEvent, ReactNode } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.js?url";
 import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  ClipboardPaste,
+  Combine,
+  Copy,
   Download,
   Factory,
   FileText,
   Home,
   Layers,
   MousePointer2,
+  Move,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  PencilLine,
   RotateCcw,
   Ruler,
   Trash2,
@@ -37,6 +42,13 @@ type UsageId =
   | "sistemazione-esterna"
   | "verde"
   | "lotto";
+type EditorTool = "select" | "smart" | "polygon" | "calibrate";
+type SelectionSource = "smart" | "polygon" | "merged" | "copy";
+
+type CanvasPoint = {
+  x: number;
+  y: number;
+};
 
 type EditorStudy = {
   id: string;
@@ -81,6 +93,8 @@ type AreaSelection = {
   totalPixels: number;
   region: Region;
   bitmap: HTMLCanvasElement;
+  source: SelectionSource;
+  polygon?: CanvasPoint[];
 };
 
 type DocumentSource =
@@ -93,6 +107,8 @@ type SavedSelection = {
   usageId: UsageId;
   opacity: number;
   totalPixels: number;
+  source?: SelectionSource;
+  polygon?: CanvasPoint[];
   region: {
     bounds: MaskBounds;
     seed: { x: number; y: number };
@@ -101,6 +117,14 @@ type SavedSelection = {
     height: number;
     alphaDataUrl: string;
   };
+};
+
+type SavedCalibration = {
+  page: number;
+  knownMeters: number;
+  scaleDenominator: number;
+  start: CanvasPoint;
+  end: CanvasPoint;
 };
 
 type SavedDraft = {
@@ -116,9 +140,32 @@ type SavedDraft = {
   inflate: number;
   gap: number;
   dash: number;
+  activeTool?: EditorTool;
+  calibration?: SavedCalibration | null;
   totalArea?: number;
   totalEstimatedAmount?: number;
   selections: SavedSelection[];
+};
+
+type DragSnapshot = {
+  id: string;
+  bounds: MaskBounds;
+  seed: CanvasPoint;
+  polygon?: CanvasPoint[];
+};
+
+type DragState = {
+  start: CanvasPoint;
+  snapshots: DragSnapshot[];
+};
+
+type ClipboardSelection = {
+  usageId: UsageId;
+  opacity: number;
+  totalPixels: number;
+  source: SelectionSource;
+  polygon?: CanvasPoint[];
+  region: Region;
 };
 
 type Runtime = {
@@ -213,6 +260,38 @@ const SHEET_SIZES: Record<SheetSize, { widthMm: number; heightMm: number }> = {
   A4: { widthMm: 297, heightMm: 210 },
 };
 
+const TOOL_OPTIONS: Array<{
+  id: EditorTool;
+  label: string;
+  description: string;
+  icon: ReactNode;
+}> = [
+  {
+    id: "select",
+    label: "Seleziona",
+    description: "Sposta, copia e unisci aree",
+    icon: <Move size={17} />,
+  },
+  {
+    id: "smart",
+    label: "Smart selection",
+    description: "Clicca dentro un'area chiusa",
+    icon: <MousePointer2 size={17} />,
+  },
+  {
+    id: "polygon",
+    label: "Poligono",
+    description: "Disegno manuale per vertici",
+    icon: <PencilLine size={17} />,
+  },
+  {
+    id: "calibrate",
+    label: "Taratura",
+    description: "Disegna un segmento noto",
+    icon: <Ruler size={17} />,
+  },
+];
+
 const areaFormatter = new Intl.NumberFormat("it-IT", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -277,6 +356,32 @@ function pageRealAreaM2(sheetSize: SheetSize, scaleDenominator: number) {
   return width * height;
 }
 
+function orientedSheetSize(sheetSize: SheetSize, canvasWidth: number, canvasHeight: number) {
+  const sheet = SHEET_SIZES[sheetSize];
+  const pdfIsLandscape = canvasWidth >= canvasHeight;
+  const sheetIsLandscape = sheet.widthMm >= sheet.heightMm;
+  if (pdfIsLandscape === sheetIsLandscape) return sheet;
+  return { widthMm: sheet.heightMm, heightMm: sheet.widthMm };
+}
+
+function distance(a: CanvasPoint, b: CanvasPoint) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function translatePoint(point: CanvasPoint, dx: number, dy: number): CanvasPoint {
+  return { x: point.x + dx, y: point.y + dy };
+}
+
+function cloneCanvas(source: HTMLCanvasElement) {
+  const canvas = document.createElement("canvas");
+  canvas.width = source.width;
+  canvas.height = source.height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Contesto canvas non disponibile");
+  context.drawImage(source, 0, 0);
+  return canvas;
+}
+
 function areaFromPixels(
   pixelCount: number,
   totalPixels: number,
@@ -337,6 +442,9 @@ export default function PlanimetriaEditor({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const runtimeRef = useRef<Runtime>(createRuntime());
   const pendingDraftRef = useRef<SavedDraft | null>(null);
+  const dragStateRef = useRef<DragState | null>(null);
+  const calibrationDragRef = useRef<CanvasPoint | null>(null);
+  const clipboardRef = useRef<ClipboardSelection[]>([]);
 
   const [status, setStatus] = useState("Caricamento planimetria");
   const [busy, setBusy] = useState(false);
@@ -347,6 +455,9 @@ export default function PlanimetriaEditor({
   const [activeUsage, setActiveUsage] = useState<UsageId>("capannone");
   const [scaleDenominator, setScaleDenominator] = useState(500);
   const [sheetSize, setSheetSize] = useState<SheetSize>("A3");
+  const [activeTool, setActiveTool] = useState<EditorTool>("smart");
+  const [knownSegmentMeters, setKnownSegmentMeters] = useState(50);
+  const [calibration, setCalibration] = useState<SavedCalibration | null>(null);
   const [zoomPercent, setZoomPercent] = useState(100);
   const [opacityPercent, setOpacityPercent] = useState(44);
   const [threshold, setThreshold] = useState(236);
@@ -358,6 +469,11 @@ export default function PlanimetriaEditor({
   const [savedAt, setSavedAt] = useState("");
   const [leftPanelOpen, setLeftPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.left));
   const [rightPanelOpen, setRightPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.right));
+  const [selectedSelectionIds, setSelectedSelectionIds] = useState<string[]>([]);
+  const [polygonDraft, setPolygonDraft] = useState<CanvasPoint[]>([]);
+  const [pointerPreview, setPointerPreview] = useState<CanvasPoint | null>(null);
+  const [calibrationDraft, setCalibrationDraft] = useState<SavedCalibration | null>(null);
+  const [clipboardCount, setClipboardCount] = useState(0);
   const [revision, setRevision] = useState(0);
 
   const linkedSample = useMemo(() => linkedSampleForProperty(property.id), [property.id]);
@@ -367,6 +483,12 @@ export default function PlanimetriaEditor({
   const allSelections = hasPdf
     ? Array.from(runtimeRef.current.selectionsByPage.values()).flat()
     : [];
+  const selectedSelections = allSelections.filter((selection) =>
+    selectedSelectionIds.includes(selection.id),
+  );
+  const selectedCurrentPageSelections = selections.filter((selection) =>
+    selectedSelectionIds.includes(selection.id),
+  );
 
   const selectedAreas = useMemo(
     () =>
@@ -410,6 +532,41 @@ export default function PlanimetriaEditor({
   }, [leftPanelOpen, rightPanelOpen]);
 
   useEffect(() => {
+    if (hasPdf) redrawMasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeTool,
+    selectedSelectionIds,
+    polygonDraft,
+    pointerPreview,
+    calibration,
+    calibrationDraft,
+    revision,
+    hasPdf,
+  ]);
+
+  useEffect(() => {
+    function handleKeyboard(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select")) return;
+      const modifier = event.ctrlKey || event.metaKey;
+      if (!modifier) return;
+      if (event.key.toLowerCase() === "c") {
+        event.preventDefault();
+        copySelectedSelections();
+      }
+      if (event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        pasteCopiedSelections();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyboard);
+    return () => window.removeEventListener("keydown", handleKeyboard);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSelectionIds, clipboardCount, currentPage, hasPdf]);
+
+  useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
       if (!dirty) return;
       event.preventDefault();
@@ -429,6 +586,14 @@ export default function PlanimetriaEditor({
     setFileName("");
     setCanvasPixels("0 x 0");
     setDocumentSource(null);
+    setActiveTool("smart");
+    setCalibration(null);
+    setCalibrationDraft(null);
+    setSelectedSelectionIds([]);
+    setPolygonDraft([]);
+    setPointerPreview(null);
+    dragStateRef.current = null;
+    calibrationDragRef.current = null;
     setDirty(false);
     setSavedAt("");
     setRevision((value) => value + 1);
@@ -456,6 +621,9 @@ export default function PlanimetriaEditor({
       setInflate(draft.inflate);
       setGap(draft.gap);
       setDash(draft.dash);
+      setActiveTool(draft.activeTool ?? "smart");
+      setCalibration(draft.calibration ?? null);
+      setKnownSegmentMeters(draft.calibration?.knownMeters ?? 50);
       if (draft.document.kind === "sample") {
         void loadSample(draft.document.url, draft.document.fileName, draft, true);
       } else {
@@ -666,6 +834,8 @@ export default function PlanimetriaEditor({
         totalPixels: saved.totalPixels,
         region,
         bitmap: createTintedCanvas(region, usage.color, saved.opacity),
+        source: saved.source ?? "smart",
+        polygon: saved.polygon,
       };
       const pageSelections = restored.get(saved.page) ?? [];
       pageSelections.push(selection);
@@ -689,6 +859,8 @@ export default function PlanimetriaEditor({
         usageId: selection.usageId,
         opacity: selection.opacity,
         totalPixels: selection.totalPixels,
+        source: selection.source,
+        polygon: selection.polygon,
         region: {
           bounds: selection.region.bounds,
           seed: selection.region.seed,
@@ -712,6 +884,8 @@ export default function PlanimetriaEditor({
       inflate,
       gap,
       dash,
+      activeTool,
+      calibration,
       totalArea: totals.area,
       totalEstimatedAmount: totals.amount,
       selections: selectionsToSave,
@@ -1731,27 +1905,19 @@ export default function PlanimetriaEditor({
     }
   }
 
-  function makeRegion(
-    mask: Uint8Array,
-    bounds: MaskBounds,
-    seed: { x: number; y: number },
-    count: number,
+  function buildRegionFromMask(
+    visualMask: Uint8Array,
+    bounds: MaskBounds & { count?: number },
+    seed: CanvasPoint,
     canvasWidth: number,
-    canvasHeight: number,
-    wallMap: Uint8Array,
   ): Region {
-    const visualMask = includeNearbyBarriers(mask, wallMap, bounds, canvasWidth, canvasHeight);
-    let visualBounds = computeMaskBounds(visualMask, canvasWidth, canvasHeight);
-    fillClosedHoles(visualMask, visualBounds, canvasWidth, canvasHeight);
-    visualBounds = computeMaskBounds(visualMask, canvasWidth, canvasHeight) || { ...bounds, count };
-
     const finalBounds = {
-      minX: visualBounds.minX,
-      minY: visualBounds.minY,
-      maxX: visualBounds.maxX,
-      maxY: visualBounds.maxY,
+      minX: bounds.minX,
+      minY: bounds.minY,
+      maxX: bounds.maxX,
+      maxY: bounds.maxY,
     };
-    const finalCount = visualBounds.count;
+    const finalCount = bounds.count ?? 0;
     const width = finalBounds.maxX - finalBounds.minX + 1;
     const height = finalBounds.maxY - finalBounds.minY + 1;
     const alphaCanvas = document.createElement("canvas");
@@ -1781,6 +1947,77 @@ export default function PlanimetriaEditor({
     };
   }
 
+  function makeRegion(
+    mask: Uint8Array,
+    bounds: MaskBounds,
+    seed: { x: number; y: number },
+    count: number,
+    canvasWidth: number,
+    canvasHeight: number,
+    wallMap: Uint8Array,
+  ): Region {
+    const visualMask = includeNearbyBarriers(mask, wallMap, bounds, canvasWidth, canvasHeight);
+    let visualBounds = computeMaskBounds(visualMask, canvasWidth, canvasHeight);
+    fillClosedHoles(visualMask, visualBounds, canvasWidth, canvasHeight);
+    visualBounds = computeMaskBounds(visualMask, canvasWidth, canvasHeight) || { ...bounds, count };
+
+    return buildRegionFromMask(visualMask, visualBounds, seed, canvasWidth);
+  }
+
+  function regionFromAlphaCanvas(canvas: HTMLCanvasElement, seed: CanvasPoint) {
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Contesto maschera non disponibile");
+    const image = context.getImageData(0, 0, canvas.width, canvas.height);
+    const mask = new Uint8Array(canvas.width * canvas.height);
+    let count = 0;
+    let minX = canvas.width;
+    let maxX = -1;
+    let minY = canvas.height;
+    let maxY = -1;
+
+    for (let y = 0; y < canvas.height; y++) {
+      const row = y * canvas.width;
+      for (let x = 0; x < canvas.width; x++) {
+        const alpha = image.data[(row + x) * 4 + 3];
+        if (alpha < 8) continue;
+        mask[row + x] = 1;
+        count++;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+
+    if (count < 8) return null;
+    return buildRegionFromMask(mask, { minX, minY, maxX, maxY, count }, seed, canvas.width);
+  }
+
+  function createPolygonRegion(points: CanvasPoint[]) {
+    const { pdfCanvas } = getCanvases();
+    if (points.length < 3) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = pdfCanvas.width;
+    canvas.height = pdfCanvas.height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Contesto poligono non disponibile");
+    context.fillStyle = "#000";
+    context.beginPath();
+    context.moveTo(points[0].x, points[0].y);
+    points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
+    context.closePath();
+    context.fill();
+
+    const centroid = points.reduce(
+      (acc, point) => ({ x: acc.x + point.x / points.length, y: acc.y + point.y / points.length }),
+      { x: 0, y: 0 },
+    );
+    return regionFromAlphaCanvas(canvas, {
+      x: Math.round(centroid.x),
+      y: Math.round(centroid.y),
+    });
+  }
+
   function createTintedCanvas(region: Region, color: string, opacity: number) {
     const canvas = document.createElement("canvas");
     canvas.width = region.width;
@@ -1806,7 +2043,13 @@ export default function PlanimetriaEditor({
     );
   }
 
-  function commitSelection(region: Region, usageId: UsageId, opacity: number) {
+  function commitSelection(
+    region: Region,
+    usageId: UsageId,
+    opacity: number,
+    source: SelectionSource = "smart",
+    polygon?: CanvasPoint[],
+  ) {
     const usage = usageById(usageId);
     const selectionsForPage = currentSelections();
     const duplicateIndex = selectionsForPage.findIndex((selection) => sameRegion(selection.region, region));
@@ -1818,11 +2061,14 @@ export default function PlanimetriaEditor({
       selection.opacity = opacity;
       selection.region = region;
       selection.bitmap = createTintedCanvas(region, usage.color, opacity);
+      selection.source = source;
+      selection.polygon = polygon;
       redrawMasks();
       setStatus(`Area ${duplicateIndex + 1} aggiornata`);
+      setSelectedSelectionIds([selection.id]);
       markDirty();
       bumpRevision();
-      return;
+      return selection.id;
     }
 
     const selection = {
@@ -1834,13 +2080,95 @@ export default function PlanimetriaEditor({
       totalPixels: getCanvasTotalPixels(),
       region,
       bitmap: createTintedCanvas(region, usage.color, opacity),
+      source,
+      polygon,
     };
     selectionsForPage.push(selection);
     runtimeRef.current.history.push(selection.id);
     redrawMasks();
     setStatus(`Area ${selectionsForPage.length} tracciata`);
+    setSelectedSelectionIds([selection.id]);
     markDirty();
     bumpRevision();
+    return selection.id;
+  }
+
+  function drawPolygonPath(
+    context: CanvasRenderingContext2D,
+    points: CanvasPoint[],
+    closePath: boolean,
+  ) {
+    if (points.length === 0) return;
+    context.beginPath();
+    context.moveTo(points[0].x, points[0].y);
+    points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
+    if (closePath) context.closePath();
+  }
+
+  function drawSelectionOutline(context: CanvasRenderingContext2D, selection: AreaSelection) {
+    context.save();
+    context.strokeStyle = "#0d6efd";
+    context.lineWidth = 3;
+    context.setLineDash([12, 8]);
+    if (selection.polygon && selection.polygon.length >= 3) {
+      drawPolygonPath(context, selection.polygon, true);
+      context.stroke();
+    } else {
+      const { bounds } = selection.region;
+      context.strokeRect(
+        bounds.minX - 2,
+        bounds.minY - 2,
+        bounds.maxX - bounds.minX + 5,
+        bounds.maxY - bounds.minY + 5,
+      );
+    }
+    context.restore();
+  }
+
+  function drawEditorOverlays(context: CanvasRenderingContext2D) {
+    selectedCurrentPageSelections.forEach((selection) => drawSelectionOutline(context, selection));
+
+    if (polygonDraft.length > 0) {
+      const points = pointerPreview ? [...polygonDraft, pointerPreview] : polygonDraft;
+      context.save();
+      context.strokeStyle = activeUsageOption.color;
+      context.fillStyle = activeUsageOption.color;
+      context.lineWidth = 3;
+      context.setLineDash([10, 8]);
+      drawPolygonPath(context, points, false);
+      context.stroke();
+      polygonDraft.forEach((point, index) => {
+        context.beginPath();
+        context.arc(point.x, point.y, index === 0 ? 9 : 6, 0, Math.PI * 2);
+        context.fill();
+        context.lineWidth = 2;
+        context.strokeStyle = "#ffffff";
+        context.stroke();
+      });
+      context.restore();
+    }
+
+    const segment = calibrationDraft ?? calibration;
+    if (segment) {
+      context.save();
+      context.strokeStyle = calibrationDraft ? "#f59e0b" : "#0f766e";
+      context.fillStyle = calibrationDraft ? "#f59e0b" : "#0f766e";
+      context.lineWidth = 4;
+      context.setLineDash(calibrationDraft ? [12, 8] : []);
+      context.beginPath();
+      context.moveTo(segment.start.x, segment.start.y);
+      context.lineTo(segment.end.x, segment.end.y);
+      context.stroke();
+      [segment.start, segment.end].forEach((point) => {
+        context.beginPath();
+        context.arc(point.x, point.y, 7, 0, Math.PI * 2);
+        context.fill();
+        context.lineWidth = 2;
+        context.strokeStyle = "#ffffff";
+        context.stroke();
+      });
+      context.restore();
+    }
   }
 
   function redrawMasks() {
@@ -1850,6 +2178,7 @@ export default function PlanimetriaEditor({
     currentSelections().forEach((selection) => {
       mask.drawImage(selection.bitmap, selection.region.bounds.minX, selection.region.bounds.minY);
     });
+    drawEditorOverlays(mask);
   }
 
   function animateWave(region: Region, color: string, opacity: number) {
@@ -1934,7 +2263,7 @@ export default function PlanimetriaEditor({
       }
       const opacity = opacityPercent / 100;
       await animateWave(region, activeUsageOption.color, opacity);
-      commitSelection(region, activeUsage, opacity);
+      commitSelection(region, activeUsage, opacity, "smart");
     } catch (error) {
       console.error(error);
       setStatus("Selezione non riuscita");
@@ -1949,6 +2278,7 @@ export default function PlanimetriaEditor({
       if (index >= 0) {
         pageSelections.splice(index, 1);
         runtimeRef.current.history = runtimeRef.current.history.filter((selectionId) => selectionId !== id);
+        setSelectedSelectionIds((current) => current.filter((selectionId) => selectionId !== id));
         if (page === runtimeRef.current.currentPage) redrawMasks();
         setStatus("Area rimossa");
         markDirty();
@@ -1965,6 +2295,7 @@ export default function PlanimetriaEditor({
       const index = pageSelections.findIndex((selection) => selection.id === id);
       if (index >= 0) {
         pageSelections.splice(index, 1);
+        setSelectedSelectionIds((current) => current.filter((selectionId) => selectionId !== id));
         if (page === runtimeRef.current.currentPage) redrawMasks();
         setStatus("Annullamento completato");
         markDirty();
@@ -1976,7 +2307,10 @@ export default function PlanimetriaEditor({
   }
 
   function clearCurrentPage() {
-    currentSelections().splice(0);
+    const pageSelections = currentSelections();
+    const currentPageIds = new Set(pageSelections.map((selection) => selection.id));
+    pageSelections.splice(0);
+    setSelectedSelectionIds((current) => current.filter((id) => !currentPageIds.has(id)));
     runtimeRef.current.history = runtimeRef.current.history.filter((id) => {
       for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
         if (pageSelections.some((selection) => selection.id === id)) return true;
@@ -2018,6 +2352,223 @@ export default function PlanimetriaEditor({
     bumpRevision();
   }
 
+  function canvasPointFromEvent(event: PointerEvent<HTMLDivElement>) {
+    const stage = stageRef.current;
+    const pdfCanvas = pdfCanvasRef.current;
+    if (!stage || !pdfCanvas) return null;
+    const rect = stage.getBoundingClientRect();
+    const x = Math.floor((event.clientX - rect.left) * (pdfCanvas.width / rect.width));
+    const y = Math.floor((event.clientY - rect.top) * (pdfCanvas.height / rect.height));
+    if (x < 0 || y < 0 || x >= pdfCanvas.width || y >= pdfCanvas.height) return null;
+    return { x, y };
+  }
+
+  function hitTestSelection(point: CanvasPoint) {
+    const pageSelections = currentSelections();
+    for (let index = pageSelections.length - 1; index >= 0; index--) {
+      const selection = pageSelections[index];
+      const { bounds } = selection.region;
+      if (
+        point.x < bounds.minX ||
+        point.x > bounds.maxX ||
+        point.y < bounds.minY ||
+        point.y > bounds.maxY
+      ) {
+        continue;
+      }
+      const context = selection.region.alphaCanvas.getContext("2d", { willReadFrequently: true });
+      if (!context) continue;
+      const localX = point.x - bounds.minX;
+      const localY = point.y - bounds.minY;
+      const alpha = context.getImageData(localX, localY, 1, 1).data[3];
+      if (alpha > 8) return selection;
+    }
+    return null;
+  }
+
+  function clampDeltaForSnapshots(snapshots: DragSnapshot[], dx: number, dy: number) {
+    const canvas = pdfCanvasRef.current;
+    if (!canvas) return { dx, dy };
+    let nextDx = dx;
+    let nextDy = dy;
+    snapshots.forEach((snapshot) => {
+      nextDx = Math.max(nextDx, -snapshot.bounds.minX);
+      nextDx = Math.min(nextDx, canvas.width - 1 - snapshot.bounds.maxX);
+      nextDy = Math.max(nextDy, -snapshot.bounds.minY);
+      nextDy = Math.min(nextDy, canvas.height - 1 - snapshot.bounds.maxY);
+    });
+    return { dx: Math.round(nextDx), dy: Math.round(nextDy) };
+  }
+
+  function applyDragDelta(state: DragState, dx: number, dy: number) {
+    const byId = new Map(currentSelections().map((selection) => [selection.id, selection]));
+    state.snapshots.forEach((snapshot) => {
+      const selection = byId.get(snapshot.id);
+      if (!selection) return;
+      selection.region.bounds = {
+        minX: snapshot.bounds.minX + dx,
+        minY: snapshot.bounds.minY + dy,
+        maxX: snapshot.bounds.maxX + dx,
+        maxY: snapshot.bounds.maxY + dy,
+      };
+      selection.region.seed = translatePoint(snapshot.seed, dx, dy);
+      if (snapshot.polygon) {
+        selection.polygon = snapshot.polygon.map((point) => translatePoint(point, dx, dy));
+      }
+    });
+    redrawMasks();
+  }
+
+  function startSelectionDrag(point: CanvasPoint, selectionIds: string[]) {
+    const selected = currentSelections().filter((selection) => selectionIds.includes(selection.id));
+    if (selected.length === 0) return;
+    dragStateRef.current = {
+      start: point,
+      snapshots: selected.map((selection) => ({
+        id: selection.id,
+        bounds: { ...selection.region.bounds },
+        seed: { ...selection.region.seed },
+        polygon: selection.polygon?.map((item) => ({ ...item })),
+      })),
+    };
+  }
+
+  function cloneRegion(region: Region, dx = 0, dy = 0): Region {
+    return {
+      bounds: {
+        minX: region.bounds.minX + dx,
+        minY: region.bounds.minY + dy,
+        maxX: region.bounds.maxX + dx,
+        maxY: region.bounds.maxY + dy,
+      },
+      seed: translatePoint(region.seed, dx, dy),
+      count: region.count,
+      alphaCanvas: cloneCanvas(region.alphaCanvas),
+      width: region.width,
+      height: region.height,
+    };
+  }
+
+  function copySelectedSelections() {
+    const source = selectedSelections;
+    if (source.length === 0) return;
+    clipboardRef.current = source.map((selection) => ({
+      usageId: selection.usageId,
+      opacity: selection.opacity,
+      totalPixels: selection.totalPixels,
+      source: selection.source === "merged" ? "merged" : "copy",
+      polygon: selection.polygon?.map((point) => ({ ...point })),
+      region: cloneRegion(selection.region),
+    }));
+    setClipboardCount(clipboardRef.current.length);
+    setStatus(`${clipboardRef.current.length} aree copiate`);
+  }
+
+  function pasteCopiedSelections() {
+    if (!hasPdf || clipboardRef.current.length === 0) return;
+    const offset = Math.max(18, Math.round(24 * runtimeRef.current.renderScale));
+    const snapshots = clipboardRef.current.map<DragSnapshot>((item, index) => ({
+      id: String(index),
+      bounds: item.region.bounds,
+      seed: item.region.seed,
+      polygon: item.polygon,
+    }));
+    const { dx, dy } = clampDeltaForSnapshots(snapshots, offset, offset);
+    const pastedIds: string[] = [];
+    const pageSelections = currentSelections();
+    clipboardRef.current.forEach((item) => {
+      const usage = usageById(item.usageId);
+      const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
+      const region = cloneRegion(item.region, dx, dy);
+      const selection: AreaSelection = {
+        id,
+        page: runtimeRef.current.currentPage,
+        usageId: item.usageId,
+        color: usage.color,
+        opacity: item.opacity,
+        totalPixels: getCanvasTotalPixels(),
+        region,
+        bitmap: createTintedCanvas(region, usage.color, item.opacity),
+        source: "copy",
+        polygon: item.polygon?.map((point) => translatePoint(point, dx, dy)),
+      };
+      pageSelections.push(selection);
+      runtimeRef.current.history.push(id);
+      pastedIds.push(id);
+    });
+    setSelectedSelectionIds(pastedIds);
+    redrawMasks();
+    setStatus(`${pastedIds.length} aree incollate`);
+    markDirty();
+    bumpRevision();
+  }
+
+  function mergeSelectedSelections() {
+    const selected = selectedCurrentPageSelections;
+    if (selected.length < 2) return;
+    const { pdfCanvas } = getCanvases();
+    const canvas = document.createElement("canvas");
+    canvas.width = pdfCanvas.width;
+    canvas.height = pdfCanvas.height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return;
+    selected.forEach((selection) => {
+      context.drawImage(selection.region.alphaCanvas, selection.region.bounds.minX, selection.region.bounds.minY);
+    });
+    const first = selected[0];
+    const center = selected.reduce(
+      (acc, selection) => ({
+        x: acc.x + selection.region.seed.x / selected.length,
+        y: acc.y + selection.region.seed.y / selected.length,
+      }),
+      { x: 0, y: 0 },
+    );
+    const region = regionFromAlphaCanvas(canvas, {
+      x: Math.round(center.x),
+      y: Math.round(center.y),
+    });
+    if (!region) return;
+    const ids = new Set(selected.map((selection) => selection.id));
+    const pageSelections = currentSelections();
+    for (let index = pageSelections.length - 1; index >= 0; index--) {
+      if (ids.has(pageSelections[index].id)) pageSelections.splice(index, 1);
+    }
+    runtimeRef.current.history = runtimeRef.current.history.filter((id) => !ids.has(id));
+    const mergedId = commitSelection(region, first.usageId, first.opacity, "merged");
+    if (mergedId) setSelectedSelectionIds([mergedId]);
+    setStatus(`${selected.length} aree unite`);
+  }
+
+  function applyCalibrationSegment(start: CanvasPoint, end: CanvasPoint) {
+    const canvas = pdfCanvasRef.current;
+    if (!canvas) return;
+    const segmentPixels = distance(start, end);
+    if (segmentPixels < 12 || knownSegmentMeters <= 0) {
+      setStatus("Segmento di taratura troppo corto");
+      return;
+    }
+    const sheet = orientedSheetSize(sheetSize, canvas.width, canvas.height);
+    const dxMm = (end.x - start.x) * (sheet.widthMm / canvas.width);
+    const dyMm = (end.y - start.y) * (sheet.heightMm / canvas.height);
+    const segmentMmOnSheet = Math.hypot(dxMm, dyMm);
+    if (segmentMmOnSheet <= 0) return;
+    const nextScale = Math.round((knownSegmentMeters * 1000) / segmentMmOnSheet);
+    const clampedScale = Math.min(20000, Math.max(20, nextScale));
+    const nextCalibration = {
+      page: runtimeRef.current.currentPage,
+      knownMeters: knownSegmentMeters,
+      scaleDenominator: clampedScale,
+      start,
+      end,
+    };
+    setScaleDenominator(clampedScale);
+    setCalibration(nextCalibration);
+    setCalibrationDraft(null);
+    setStatus(`Scala tarata a 1:${clampedScale}`);
+    markDirty();
+    bumpRevision();
+  }
+
   function exportComposite() {
     const { pdfCanvas, maskCanvas } = getCanvases();
     const canvas = document.createElement("canvas");
@@ -2032,14 +2583,146 @@ export default function PlanimetriaEditor({
 
   function onStagePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0 || !hasPdf || busy) return;
-    const stage = stageRef.current;
-    const pdfCanvas = pdfCanvasRef.current;
-    if (!stage || !pdfCanvas) return;
-    const rect = stage.getBoundingClientRect();
-    const x = Math.floor((event.clientX - rect.left) * (pdfCanvas.width / rect.width));
-    const y = Math.floor((event.clientY - rect.top) * (pdfCanvas.height / rect.height));
-    if (x < 0 || y < 0 || x >= pdfCanvas.width || y >= pdfCanvas.height) return;
-    void fillAtCanvasPoint(x, y);
+    const point = canvasPointFromEvent(event);
+    if (!point) return;
+
+    if (activeTool === "smart") {
+      void fillAtCanvasPoint(point.x, point.y);
+      return;
+    }
+
+    if (activeTool === "polygon") {
+      const firstPoint = polygonDraft[0];
+      const closeThreshold = Math.max(12, Math.round(12 * runtimeRef.current.renderScale));
+      if (firstPoint && polygonDraft.length >= 3 && distance(point, firstPoint) <= closeThreshold) {
+        const region = createPolygonRegion(polygonDraft);
+        if (region) {
+          commitSelection(region, activeUsage, opacityPercent / 100, "polygon", polygonDraft);
+          setPolygonDraft([]);
+          setPointerPreview(null);
+          setStatus("Poligono chiuso");
+        }
+        return;
+      }
+      setPolygonDraft((current) => [...current, point]);
+      setPointerPreview(point);
+      setStatus("Aggiungi vertici, poi clicca sul primo punto per chiudere");
+      return;
+    }
+
+    if (activeTool === "calibrate") {
+      calibrationDragRef.current = point;
+      setCalibrationDraft({
+        page: runtimeRef.current.currentPage,
+        knownMeters: knownSegmentMeters,
+        scaleDenominator,
+        start: point,
+        end: point,
+      });
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+
+    const hit = hitTestSelection(point);
+    if (!hit) {
+      if (!event.shiftKey && !event.metaKey && !event.ctrlKey) setSelectedSelectionIds([]);
+      redrawMasks();
+      return;
+    }
+
+    let nextSelectedIds: string[];
+    const alreadySelected = selectedSelectionIds.includes(hit.id);
+    if (event.shiftKey || event.metaKey || event.ctrlKey) {
+      nextSelectedIds = alreadySelected
+        ? selectedSelectionIds.filter((id) => id !== hit.id)
+        : [...selectedSelectionIds, hit.id];
+    } else {
+      nextSelectedIds = alreadySelected ? selectedSelectionIds : [hit.id];
+    }
+    setSelectedSelectionIds(nextSelectedIds);
+    if (nextSelectedIds.includes(hit.id)) {
+      startSelectionDrag(point, nextSelectedIds);
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+  }
+
+  function onStagePointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (!hasPdf) return;
+    const point = canvasPointFromEvent(event);
+    if (!point) return;
+
+    if (activeTool === "polygon" && polygonDraft.length > 0) {
+      setPointerPreview(point);
+      return;
+    }
+
+    if (activeTool === "calibrate" && calibrationDragRef.current) {
+      setCalibrationDraft({
+        page: runtimeRef.current.currentPage,
+        knownMeters: knownSegmentMeters,
+        scaleDenominator,
+        start: calibrationDragRef.current,
+        end: point,
+      });
+      return;
+    }
+
+    const dragState = dragStateRef.current;
+    if (activeTool === "select" && dragState) {
+      const rawDx = point.x - dragState.start.x;
+      const rawDy = point.y - dragState.start.y;
+      const { dx, dy } = clampDeltaForSnapshots(dragState.snapshots, rawDx, rawDy);
+      applyDragDelta(dragState, dx, dy);
+    }
+  }
+
+  function onStagePointerUp(event: PointerEvent<HTMLDivElement>) {
+    if (!hasPdf) return;
+    const point = canvasPointFromEvent(event);
+
+    function releasePointer() {
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture may already be released when the pointer leaves the stage.
+      }
+    }
+
+    if (activeTool === "calibrate" && calibrationDragRef.current && point) {
+      applyCalibrationSegment(calibrationDragRef.current, point);
+      calibrationDragRef.current = null;
+      releasePointer();
+      return;
+    }
+
+    if (activeTool === "calibrate" && calibrationDragRef.current) {
+      calibrationDragRef.current = null;
+      setCalibrationDraft(null);
+      releasePointer();
+      return;
+    }
+
+    const dragState = dragStateRef.current;
+    if (activeTool === "select" && dragState && point) {
+      const rawDx = point.x - dragState.start.x;
+      const rawDy = point.y - dragState.start.y;
+      const { dx, dy } = clampDeltaForSnapshots(dragState.snapshots, rawDx, rawDy);
+      applyDragDelta(dragState, dx, dy);
+      dragStateRef.current = null;
+      if (dx !== 0 || dy !== 0) {
+        setStatus(`${dragState.snapshots.length} aree spostate`);
+        markDirty();
+        bumpRevision();
+      }
+      releasePointer();
+      return;
+    }
+
+    if (activeTool === "select" && dragState) {
+      dragStateRef.current = null;
+      redrawMasks();
+      releasePointer();
+    }
   }
 
   function updateZoom(nextZoom: number) {
@@ -2054,6 +2737,22 @@ export default function PlanimetriaEditor({
     runtimeRef.current.wallKey = "";
     setStatus(nextStatus);
     bumpRevision();
+  }
+
+  function selectTool(tool: EditorTool) {
+    setActiveTool(tool);
+    if (tool !== "polygon") {
+      setPolygonDraft([]);
+      setPointerPreview(null);
+    }
+    if (tool !== "calibrate") {
+      calibrationDragRef.current = null;
+      setCalibrationDraft(null);
+    }
+    if (tool === "select") setStatus("Seleziona aree, trascina o usa copia/incolla");
+    if (tool === "smart") setStatus("Smart selection attiva");
+    if (tool === "polygon") setStatus("Disegna i vertici del poligono");
+    if (tool === "calibrate") setStatus("Trascina un segmento di misura nota");
   }
 
   return (
@@ -2121,6 +2820,29 @@ export default function PlanimetriaEditor({
           </div>
           <section className="tool-block">
             <div className="tool-block-head">
+              <h2>Strumenti</h2>
+              <span>{TOOL_OPTIONS.find((tool) => tool.id === activeTool)?.label}</span>
+            </div>
+            <div className="tool-mode-grid">
+              {TOOL_OPTIONS.map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  className={`tool-mode-button ${activeTool === tool.id ? "active" : ""}`}
+                  onClick={() => selectTool(tool.id)}
+                >
+                  {tool.icon}
+                  <span>
+                    <strong>{tool.label}</strong>
+                    <small>{tool.description}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="tool-block">
+            <div className="tool-block-head">
               <h2>Destinazione d'uso</h2>
               <span style={{ color: activeUsageOption.color }}>{activeUsageOption.shortLabel}</span>
             </div>
@@ -2153,12 +2875,12 @@ export default function PlanimetriaEditor({
                 <strong>1:</strong>
                 <input
                   type="number"
-                  min={50}
-                  max={5000}
+                  min={20}
+                  max={20000}
                   step={10}
                   value={scaleDenominator}
                   onChange={(event) => {
-                    setScaleDenominator(Math.min(5000, Math.max(50, Number(event.target.value) || 50)));
+                    setScaleDenominator(Math.min(20000, Math.max(20, Number(event.target.value) || 20)));
                     markDirty();
                   }}
                 />
@@ -2181,6 +2903,35 @@ export default function PlanimetriaEditor({
             <div className="calibration-card">
               <span>Area reale foglio</span>
               <strong>{formatM2(pageRealAreaM2(sheetSize, scaleDenominator))}</strong>
+            </div>
+            <div className="calibration-controls">
+              <label className="scale-field">
+                <span>Segmento noto in metri</span>
+                <div>
+                  <strong>m</strong>
+                  <input
+                    type="number"
+                    min={0.1}
+                    step={0.1}
+                    value={knownSegmentMeters}
+                    onChange={(event) => setKnownSegmentMeters(Math.max(0.1, Number(event.target.value) || 0.1))}
+                  />
+                </div>
+              </label>
+              <button
+                className={`button soft full-width ${activeTool === "calibrate" ? "active-tool-button" : ""}`}
+                disabled={!hasPdf}
+                onClick={() => selectTool("calibrate")}
+              >
+                <Ruler size={16} />
+                Taratura con segmento
+              </button>
+              {calibration && (
+                <div className="calibration-segment-info">
+                  <span>Segmento tarato</span>
+                  <strong>{areaFormatter.format(calibration.knownMeters)} m {"->"} 1:{calibration.scaleDenominator}</strong>
+                </div>
+              )}
             </div>
           </section>
 
@@ -2399,8 +3150,10 @@ export default function PlanimetriaEditor({
             <div className="plan-stage-wrap">
               <div
                 ref={stageRef}
-                className={`plan-stage ${busy ? "is-busy" : ""} ${!hasPdf ? "is-hidden" : ""}`}
+                className={`plan-stage tool-${activeTool} ${busy ? "is-busy" : ""} ${!hasPdf ? "is-hidden" : ""}`}
                 onPointerDown={onStagePointerDown}
+                onPointerMove={onStagePointerMove}
+                onPointerUp={onStagePointerUp}
               >
                 <canvas ref={pdfCanvasRef} />
                 <canvas ref={maskCanvasRef} />
@@ -2451,7 +3204,33 @@ export default function PlanimetriaEditor({
           <section className="selected-areas-list">
             <div className="tool-block-head">
               <h2>Aree selezionate</h2>
-              <span>{selectedAreas.length}</span>
+              <span>{selectedSelectionIds.length}/{selectedAreas.length}</span>
+            </div>
+            <div className="selection-action-row">
+              <button
+                className="icon-button"
+                title="Copia aree selezionate"
+                disabled={selectedSelections.length === 0}
+                onClick={copySelectedSelections}
+              >
+                <Copy size={16} />
+              </button>
+              <button
+                className="icon-button"
+                title="Incolla aree copiate"
+                disabled={clipboardCount === 0 || !hasPdf}
+                onClick={pasteCopiedSelections}
+              >
+                <ClipboardPaste size={16} />
+              </button>
+              <button
+                className="button secondary compact-button"
+                disabled={selectedCurrentPageSelections.length < 2}
+                onClick={mergeSelectedSelections}
+              >
+                <Combine size={15} />
+                Unisci
+              </button>
             </div>
             {selectedAreas.length === 0 ? (
               <div className="areas-empty">
@@ -2460,16 +3239,39 @@ export default function PlanimetriaEditor({
               </div>
             ) : (
               selectedAreas.map(({ selection, index, usage, area, amount }) => (
-                <article key={selection.id} className="area-row">
+                <article
+                  key={selection.id}
+                  className={`area-row ${selectedSelectionIds.includes(selection.id) ? "selected" : ""}`}
+                  onClick={() =>
+                    setSelectedSelectionIds((current) =>
+                      current.includes(selection.id)
+                        ? current.filter((id) => id !== selection.id)
+                        : [...current, selection.id],
+                    )
+                  }
+                >
                   <div className="area-row-head">
+                    <input
+                      type="checkbox"
+                      checked={selectedSelectionIds.includes(selection.id)}
+                      onChange={() => undefined}
+                      aria-label={`Seleziona area ${index + 1}`}
+                    />
                     <span style={{ background: usage.color }} />
                     <strong>Area {index + 1} - pagina {selection.page}</strong>
-                    <button title="Rimuovi area" onClick={() => removeSelection(selection.id)}>
+                    <button
+                      title="Rimuovi area"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        removeSelection(selection.id);
+                      }}
+                    >
                       <X size={15} />
                     </button>
                   </div>
                   <select
                     value={selection.usageId}
+                    onClick={(event) => event.stopPropagation()}
                     onChange={(event) => changeSelectionUsage(selection.id, event.target.value as UsageId)}
                   >
                     {USAGES.map((usageOption) => (

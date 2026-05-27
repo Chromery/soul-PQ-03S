@@ -67,8 +67,8 @@ export class PropertiesService {
       !payload.document ||
       (payload.sheetSize !== "A3" && payload.sheetSize !== "A4") ||
       typeof payload.scaleDenominator !== "number" ||
-      payload.scaleDenominator < 50 ||
-      payload.scaleDenominator > 5000 ||
+      payload.scaleDenominator < 20 ||
+      payload.scaleDenominator > 20000 ||
       !Array.isArray(payload.selections) ||
       !savedAt ||
       Number.isNaN(savedAt.getTime())
