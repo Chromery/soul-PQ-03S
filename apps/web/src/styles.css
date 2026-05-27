@@ -2212,24 +2212,50 @@ a.button {
 .editor-shell {
   height: 100dvh;
   min-height: 0;
+  grid-template-columns: 78px minmax(0, 1fr);
   overflow: hidden;
+}
+
+.editor-shell.sidebar-collapsed {
+  grid-template-columns: 78px minmax(0, 1fr);
 }
 
 .editor-shell .sidebar {
   height: 100dvh;
+  padding: 14px 10px;
+  gap: 18px;
+}
+
+.editor-shell .brand-row {
+  justify-content: center;
+}
+
+.editor-shell .brand,
+.editor-shell .sidebar-toggle,
+.editor-shell .nav-item span,
+.editor-shell .operator-card {
+  display: none;
+}
+
+.editor-shell .nav-item {
+  min-height: 48px;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
 }
 
 .editor-layout {
   height: 100dvh;
   min-height: 0;
   display: grid;
-  grid-template-rows: 88px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 
 .plan-editor {
   min-width: 0;
-  padding: 24px;
+  padding: 12px;
+  background: #f3f6fb;
 }
 
 .editor-layout .plan-editor {
@@ -2237,7 +2263,7 @@ a.button {
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 16px;
+  gap: 10px;
   overflow: hidden;
 }
 
@@ -2254,40 +2280,84 @@ a.button {
 }
 
 .editor-layout .plan-editor-header {
-  margin-bottom: 0;
-}
-
-.plan-editor-title {
+  min-height: 68px;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 20px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 0;
+  padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #fff;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.plan-editor-header .back-link {
+  min-height: 38px;
+  flex: 0 0 auto;
+  margin-bottom: 0;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  white-space: nowrap;
+}
+
+.plan-editor-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.plan-editor-title > div:first-child {
+  min-width: 0;
 }
 
 .plan-editor-title h1 {
   margin: 0;
+  overflow: hidden;
   color: var(--text);
-  font-size: 30px;
+  font-size: 22px;
   line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .plan-editor-title p {
-  margin: 7px 0 0;
+  margin: 3px 0 0;
   color: #334155;
-  font-size: 14px;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-editor-title .eyebrow {
+  margin: 0;
+  color: var(--primary);
+  font-size: 11px;
+  text-transform: uppercase;
 }
 
 .plan-editor-actions {
+  flex: 0 0 auto;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+}
+
+.plan-editor-actions .button {
+  min-height: 38px;
 }
 
 .draft-state {
@@ -2300,6 +2370,7 @@ a.button {
   background: #f1f5f9;
   font-size: 12px;
   font-weight: 750;
+  white-space: nowrap;
 }
 
 .draft-state.unsaved {
@@ -2314,8 +2385,8 @@ a.button {
 
 .plan-editor-grid {
   display: grid;
-  grid-template-columns: 310px minmax(0, 1fr) 340px;
-  gap: 16px;
+  grid-template-columns: 280px minmax(0, 1fr) 300px;
+  gap: 10px;
   align-items: start;
 }
 
@@ -2326,11 +2397,11 @@ a.button {
 }
 
 .plan-editor-grid.left-collapsed {
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 300px;
 }
 
 .plan-editor-grid.right-collapsed {
-  grid-template-columns: 310px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
 }
 
 .plan-editor-grid.left-collapsed.right-collapsed {
@@ -2341,7 +2412,7 @@ a.button {
 .areas-panel {
   min-width: 0;
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .editor-layout .plan-tool-panel,
@@ -2350,7 +2421,7 @@ a.button {
   align-content: start;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  padding-right: 4px;
+  padding-right: 2px;
 }
 
 .aside-panel-head {
@@ -2372,7 +2443,7 @@ a.button {
 .tool-block,
 .selected-areas-list,
 .usage-breakdown {
-  padding: 16px;
+  padding: 12px;
 }
 
 .tool-block-head {
@@ -2380,7 +2451,7 @@ a.button {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .tool-block-head h2 {
@@ -2399,11 +2470,11 @@ a.button {
 
 .usage-grid {
   display: grid;
-  gap: 8px;
+  gap: 7px;
 }
 
 .usage-button {
-  min-height: 38px;
+  min-height: 36px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2514,7 +2585,7 @@ a.button {
   display: grid;
   gap: 3px;
   margin-top: 10px;
-  padding: 11px;
+  padding: 10px;
   border-radius: 7px;
   background: #f8fafc;
 }
@@ -2535,7 +2606,7 @@ a.button {
   grid-template-columns: 28px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
-  margin-top: 12px;
+  margin-top: 10px;
   color: #31506f;
 }
 
@@ -2551,7 +2622,7 @@ a.button {
 .slider-field {
   display: grid;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .slider-field input {
@@ -2572,12 +2643,13 @@ a.button {
 }
 
 .canvas-toolbar {
-  min-height: 58px;
-  display: flex;
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  padding: 12px 14px;
+  gap: 10px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   background: #fbfdff;
 }
@@ -2585,9 +2657,10 @@ a.button {
 .canvas-toolbar-controls,
 .canvas-toolbar-meta {
   display: flex;
-  flex-wrap: wrap;
+  min-width: 0;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .canvas-toolbar-meta {
@@ -2595,6 +2668,7 @@ a.button {
   color: var(--secondary);
   font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .panel-toggle {
@@ -2613,6 +2687,44 @@ a.button {
   background: #fff;
   font-size: 13px;
   font-weight: 850;
+  white-space: nowrap;
+}
+
+.usage-quickbar {
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0;
+  scrollbar-width: thin;
+}
+
+.usage-quickbar button {
+  min-height: 30px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: #173154;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.usage-quickbar button span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--usage-color);
+}
+
+.usage-quickbar button.active {
+  color: var(--usage-color);
+  border-color: color-mix(in srgb, var(--usage-color), #ffffff 44%);
+  background: color-mix(in srgb, var(--usage-color), #ffffff 90%);
 }
 
 .status-pill span {
@@ -2660,8 +2772,8 @@ a.button {
   min-width: 100%;
   min-height: 100%;
   display: grid;
-  place-items: center;
-  padding: 28px;
+  place-items: start center;
+  padding: 16px;
 }
 
 .plan-stage {
@@ -2712,17 +2824,17 @@ a.button {
 }
 
 .selected-property-card {
-  min-height: 96px;
+  min-height: 76px;
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 10px;
   align-items: center;
-  padding: 14px;
+  padding: 12px;
 }
 
 .property-symbol {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
   border-radius: 8px;
@@ -2758,7 +2870,7 @@ a.button {
 .area-totals > div {
   display: grid;
   gap: 3px;
-  padding: 15px;
+  padding: 12px;
   background: #fff;
 }
 
@@ -2768,7 +2880,7 @@ a.button {
 
 .area-totals strong {
   color: var(--text);
-  font-size: 22px;
+  font-size: 19px;
   line-height: 1.15;
   overflow-wrap: anywhere;
 }
@@ -2785,7 +2897,7 @@ a.button {
 }
 
 .areas-empty {
-  min-height: 112px;
+  min-height: 92px;
   display: grid;
   place-items: center;
   align-content: center;
@@ -2802,8 +2914,8 @@ a.button {
 
 .area-row {
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #fff;
@@ -2934,11 +3046,11 @@ a.button {
   }
 
   .plan-editor-grid {
-    grid-template-columns: 260px minmax(0, 1fr) 290px;
+    grid-template-columns: 260px minmax(0, 1fr) 280px;
   }
 
   .plan-editor-grid.left-collapsed {
-    grid-template-columns: minmax(0, 1fr) 290px;
+    grid-template-columns: minmax(0, 1fr) 280px;
   }
 
   .plan-editor-grid.right-collapsed {
@@ -3115,7 +3227,7 @@ a.button {
     height: auto;
     min-height: 0;
     flex: 1 1 auto;
-    grid-template-rows: 74px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .dashboard-grid,

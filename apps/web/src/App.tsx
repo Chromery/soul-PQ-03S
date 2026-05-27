@@ -1189,6 +1189,10 @@ function googleEarthUrl(property: PropertyItem) {
   return `https://earth.google.com/web/search/${encodeURIComponent(propertyLocation(property))}`;
 }
 
+function forMapsUrl() {
+  return "https://www.formaps.it/";
+}
+
 function getInitials(name: string) {
   return name
     .split(" ")
@@ -2184,46 +2188,48 @@ function Shell({
       </aside>
 
       <div className={`content-shell ${editorMode ? "editor-layout" : ""}`}>
-        <header className="topbar">
-          <label className="search-field global-search">
-            <Search size={18} />
-            <input
-              id="global-search"
-              aria-label="Cerca aziende, immobili o studi"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Cerca aziende, immobili, studi..."
-            />
-            <kbd>Ctrl K</kbd>
-          </label>
+        {!editorMode && (
+          <header className="topbar">
+            <label className="search-field global-search">
+              <Search size={18} />
+              <input
+                id="global-search"
+                aria-label="Cerca aziende, immobili o studi"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Cerca aziende, immobili, studi..."
+              />
+              <kbd>Ctrl K</kbd>
+            </label>
 
-          <button className="date-picker" disabled title="Filtro periodo in preparazione">
-            <CalendarDays size={18} />
-            01 Mag 2026 - 31 Mag 2026
-            <ChevronDown size={15} />
-          </button>
+            <button className="date-picker" disabled title="Filtro periodo in preparazione">
+              <CalendarDays size={18} />
+              01 Mag 2026 - 31 Mag 2026
+              <ChevronDown size={15} />
+            </button>
 
-          <button className="button primary top-action" disabled title="Disponibile dopo integrazione ERP">
-            <RefreshCw size={18} />
-            Sincronizza ERP
-          </button>
+            <button className="button primary top-action" disabled title="Disponibile dopo integrazione ERP">
+              <RefreshCw size={18} />
+              Sincronizza ERP
+            </button>
 
-          <div className="top-icons">
-            <button className="icon-button notification" title="Notifiche in preparazione" disabled aria-label="Notifiche in preparazione">
-              <Bell size={19} />
-              <span>8</span>
-            </button>
-            <button className="icon-button" title="Aiuto in preparazione" disabled aria-label="Aiuto in preparazione">
-              <CircleHelp size={19} />
-            </button>
-            <button className="icon-button" title="Impostazioni" onClick={() => onNavigate({ view: "settings" })} aria-label="Impostazioni">
-              <SlidersHorizontal size={19} />
-            </button>
-            <button className="icon-button" title="Altre azioni in preparazione" disabled aria-label="Altre azioni in preparazione">
-              <MoreVertical size={19} />
-            </button>
-          </div>
-        </header>
+            <div className="top-icons">
+              <button className="icon-button notification" title="Notifiche in preparazione" disabled aria-label="Notifiche in preparazione">
+                <Bell size={19} />
+                <span>8</span>
+              </button>
+              <button className="icon-button" title="Aiuto in preparazione" disabled aria-label="Aiuto in preparazione">
+                <CircleHelp size={19} />
+              </button>
+              <button className="icon-button" title="Impostazioni" onClick={() => onNavigate({ view: "settings" })} aria-label="Impostazioni">
+                <SlidersHorizontal size={19} />
+              </button>
+              <button className="icon-button" title="Altre azioni in preparazione" disabled aria-label="Altre azioni in preparazione">
+                <MoreVertical size={19} />
+              </button>
+            </div>
+          </header>
+        )}
         {children}
       </div>
 
@@ -2958,15 +2964,16 @@ function StudyDetail({
     );
   }
 
-  function openSelected(service: "maps" | "earth") {
+  function openSelected(service: "maps" | "earth" | "formaps") {
     selectedProperties.forEach((property) => {
-      const url = service === "maps" ? googleMapsUrl(property) : googleEarthUrl(property);
+      const url =
+        service === "maps"
+          ? googleMapsUrl(property)
+          : service === "earth"
+            ? googleEarthUrl(property)
+            : forMapsUrl();
       window.open(url, "_blank", "noopener,noreferrer");
     });
-  }
-
-  function notifyFormAbs() {
-    onNotice("Collegamento FormABS in attesa delle specifiche di integrazione.");
   }
 
   function handleDrop(targetPropertyId: string) {
@@ -3046,9 +3053,13 @@ function StudyDetail({
               ? `${selectedProperties.length} immobili selezionati`
               : "Seleziona uno o piu immobili per azioni multiple"}
           </span>
-          <button className="button secondary compact-button" disabled={selectedProperties.length === 0} onClick={notifyFormAbs}>
+          <button
+            className="button secondary compact-button"
+            disabled={selectedProperties.length === 0}
+            onClick={() => openSelected("formaps")}
+          >
             <Building2 size={15} />
-            Apri su FormABS
+            Apri su forMaps
           </button>
           <button
             className="button secondary compact-button"
@@ -3154,10 +3165,10 @@ function StudyDetail({
                     </td>
                     <td>
                       <div className="property-external-actions">
-                        <button type="button" onClick={notifyFormAbs} title="In attesa della regola FormABS">
+                        <a href={forMapsUrl()} target="_blank" rel="noreferrer" title="Apri forMaps">
                           <Building2 size={14} />
-                          FormABS
-                        </button>
+                          forMaps
+                        </a>
                         <a href={googleEarthUrl(property)} target="_blank" rel="noreferrer">
                           <Globe size={14} />
                           Earth

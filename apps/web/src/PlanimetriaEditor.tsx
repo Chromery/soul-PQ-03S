@@ -2356,6 +2356,24 @@ export default function PlanimetriaEditor({
                 <span className={busy ? "busy-dot" : ""} />
                 {status}
               </div>
+              <div className="usage-quickbar" aria-label="Destinazione d'uso rapida">
+                {USAGES.map((usage) => (
+                  <button
+                    key={usage.id}
+                    type="button"
+                    className={activeUsage === usage.id ? "active" : ""}
+                    style={{ "--usage-color": usage.color } as CSSProperties}
+                    onClick={() => {
+                      setActiveUsage(usage.id);
+                      markDirty();
+                    }}
+                    title={usage.label}
+                  >
+                    <span />
+                    {usage.shortLabel}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="canvas-toolbar-meta">
               <span>{canvasPixels}</span>
