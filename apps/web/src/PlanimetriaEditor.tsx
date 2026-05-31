@@ -556,6 +556,7 @@ export default function PlanimetriaEditor({
   const polygonEditDragRef = useRef<PolygonEditDragState | null>(null);
   const rulerDragRef = useRef<CanvasPoint | null>(null);
   const clipboardRef = useRef<ClipboardSelection[]>([]);
+  const outlinePathCacheRef = useRef<WeakMap<HTMLCanvasElement, CanvasPoint[][]>>(new WeakMap());
 
   const [status, setStatus] = useState("Caricamento planimetria");
   const [busy, setBusy] = useState(false);
@@ -2475,22 +2476,107 @@ export default function PlanimetriaEditor({
     if (closePath) context.closePath();
   }
 
+  function boundaryPathsForRegion(region: Region) {
+    const cached = outlinePathCacheRef.current.get(region.alphaCanvas);
+    if (cached) return cached;
+
+    const context = region.alphaCanvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return [];
+
+    const { width, height } = region;
+    const data = context.getImageData(0, 0, width, height).data;
+    const segments: Array<{ start: CanvasPoint; end: CanvasPoint }> = [];
+    const adjacency = new Map<string, number[]>();
+
+    function alphaAt(x: number, y: number) {
+      if (x < 0 || y < 0 || x >= width || y >= height) return 0;
+      return data[(y * width + x) * 4 + 3];
+    }
+
+    function pointKey(point: CanvasPoint) {
+      return `${point.x}:${point.y}`;
+    }
+
+    function samePoint(a: CanvasPoint, b: CanvasPoint) {
+      return a.x === b.x && a.y === b.y;
+    }
+
+    function addAdjacency(point: CanvasPoint, segmentIndex: number) {
+      const key = pointKey(point);
+      const items = adjacency.get(key);
+      if (items) items.push(segmentIndex);
+      else adjacency.set(key, [segmentIndex]);
+    }
+
+    function addSegment(start: CanvasPoint, end: CanvasPoint) {
+      const index = segments.length;
+      segments.push({ start, end });
+      addAdjacency(start, index);
+      addAdjacency(end, index);
+    }
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (alphaAt(x, y) <= 8) continue;
+        if (alphaAt(x, y - 1) <= 8) addSegment({ x, y }, { x: x + 1, y });
+        if (alphaAt(x + 1, y) <= 8) addSegment({ x: x + 1, y }, { x: x + 1, y: y + 1 });
+        if (alphaAt(x, y + 1) <= 8) addSegment({ x: x + 1, y: y + 1 }, { x, y: y + 1 });
+        if (alphaAt(x - 1, y) <= 8) addSegment({ x, y: y + 1 }, { x, y });
+      }
+    }
+
+    const used = new Uint8Array(segments.length);
+    const paths: CanvasPoint[][] = [];
+    for (let index = 0; index < segments.length; index++) {
+      if (used[index]) continue;
+      const firstSegment = segments[index];
+      const firstKey = pointKey(firstSegment.start);
+      const path = [firstSegment.start, firstSegment.end];
+      used[index] = 1;
+
+      let current = firstSegment.end;
+      for (let guard = 0; guard < segments.length; guard++) {
+        if (pointKey(current) === firstKey) break;
+        const nextSegmentIndex = (adjacency.get(pointKey(current)) ?? []).find((segmentIndex) => !used[segmentIndex]);
+        if (nextSegmentIndex === undefined) break;
+        used[nextSegmentIndex] = 1;
+        const nextSegment = segments[nextSegmentIndex];
+        current = samePoint(nextSegment.start, current) ? nextSegment.end : nextSegment.start;
+        path.push(current);
+      }
+
+      if (path.length > 1) paths.push(path);
+    }
+
+    outlinePathCacheRef.current.set(region.alphaCanvas, paths);
+    return paths;
+  }
+
+  function drawRegionBoundaryOutline(context: CanvasRenderingContext2D, selection: AreaSelection) {
+    const paths = boundaryPathsForRegion(selection.region);
+    if (paths.length === 0) return;
+
+    const { bounds } = selection.region;
+    context.beginPath();
+    paths.forEach((path) => {
+      context.moveTo(bounds.minX + path[0].x, bounds.minY + path[0].y);
+      path.slice(1).forEach((point) => context.lineTo(bounds.minX + point.x, bounds.minY + point.y));
+    });
+    context.stroke();
+  }
+
   function drawSelectionOutline(context: CanvasRenderingContext2D, selection: AreaSelection) {
     context.save();
     context.strokeStyle = "#0d6efd";
     context.lineWidth = 3;
+    context.lineJoin = "round";
+    context.lineCap = "round";
     context.setLineDash([12, 8]);
     if (selection.polygon && selection.polygon.length >= 3) {
       drawPolygonPath(context, selection.polygon, true);
       context.stroke();
     } else {
-      const { bounds } = selection.region;
-      context.strokeRect(
-        bounds.minX - 2,
-        bounds.minY - 2,
-        bounds.maxX - bounds.minX + 5,
-        bounds.maxY - bounds.minY + 5,
-      );
+      drawRegionBoundaryOutline(context, selection);
     }
     context.restore();
   }
