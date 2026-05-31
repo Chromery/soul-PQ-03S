@@ -14,6 +14,7 @@ import {
   FileText,
   Home,
   Layers,
+  Maximize2,
   MousePointer2,
   Move,
   PanelLeftClose,
@@ -21,11 +22,14 @@ import {
   PanelRightClose,
   PanelRightOpen,
   PencilLine,
-  RotateCcw,
+  Redo2,
   Ruler,
   Trash2,
+  Undo2,
   Upload,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -42,7 +46,8 @@ type UsageId =
   | "sistemazione-esterna"
   | "verde"
   | "lotto";
-type EditorTool = "select" | "smart" | "polygon" | "calibrate";
+type EditorTool = "select" | "smart" | "polygon" | "ruler";
+type LegacyEditorTool = EditorTool | "calibrate";
 type SelectionSource = "smart" | "polygon" | "merged" | "copy";
 
 type CanvasPoint = {
@@ -127,6 +132,12 @@ type SavedCalibration = {
   end: CanvasPoint;
 };
 
+type MeasureSegment = {
+  page: number;
+  start: CanvasPoint;
+  end: CanvasPoint;
+};
+
 type SavedDraft = {
   version: 1;
   propertyId: string;
@@ -140,7 +151,7 @@ type SavedDraft = {
   inflate: number;
   gap: number;
   dash: number;
-  activeTool?: EditorTool;
+  activeTool?: LegacyEditorTool;
   calibration?: SavedCalibration | null;
   totalArea?: number;
   totalEstimatedAmount?: number;
@@ -157,6 +168,7 @@ type DragSnapshot = {
 type DragState = {
   start: CanvasPoint;
   snapshots: DragSnapshot[];
+  historyRecorded: boolean;
 };
 
 type ClipboardSelection = {
@@ -177,6 +189,8 @@ type Runtime = {
   zoom: number;
   selectionsByPage: Map<number, AreaSelection[]>;
   history: string[];
+  undoStack: EditorSnapshot[];
+  redoStack: EditorSnapshot[];
   wallMap: Uint8Array | null;
   wallKey: string;
   structureCanvas: HTMLCanvasElement | null;
@@ -186,6 +200,15 @@ type Runtime = {
   renderTask: { promise: Promise<unknown>; cancel: () => void } | null;
   renderToken: number;
   animating: boolean;
+};
+
+type EditorSnapshot = {
+  selectionsByPage: Map<number, AreaSelection[]>;
+  selectedIds: string[];
+  history: string[];
+  calibration: SavedCalibration | null;
+  rulerSegment: MeasureSegment | null;
+  scaleDenominator: number;
 };
 
 type CanvasBundle = {
@@ -285,9 +308,9 @@ const TOOL_OPTIONS: Array<{
     icon: <PencilLine size={17} />,
   },
   {
-    id: "calibrate",
-    label: "Taratura",
-    description: "Disegna un segmento noto",
+    id: "ruler",
+    label: "Righello",
+    description: "Misura distanza tra due punti",
     icon: <Ruler size={17} />,
   },
 ];
@@ -317,6 +340,8 @@ function createRuntime(): Runtime {
     zoom: 1,
     selectionsByPage: new Map(),
     history: [],
+    undoStack: [],
+    redoStack: [],
     wallMap: null,
     wallKey: "",
     structureCanvas: null,
@@ -366,6 +391,17 @@ function orientedSheetSize(sheetSize: SheetSize, canvasWidth: number, canvasHeig
 
 function distance(a: CanvasPoint, b: CanvasPoint) {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function parseNumberInput(value: string) {
+  const normalized = value.trim().replace(",", ".");
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeEditorTool(tool?: LegacyEditorTool): EditorTool {
+  return tool === "calibrate" ? "ruler" : tool ?? "smart";
 }
 
 function translatePoint(point: CanvasPoint, dx: number, dy: number): CanvasPoint {
@@ -443,7 +479,7 @@ export default function PlanimetriaEditor({
   const runtimeRef = useRef<Runtime>(createRuntime());
   const pendingDraftRef = useRef<SavedDraft | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
-  const calibrationDragRef = useRef<CanvasPoint | null>(null);
+  const rulerDragRef = useRef<CanvasPoint | null>(null);
   const clipboardRef = useRef<ClipboardSelection[]>([]);
 
   const [status, setStatus] = useState("Caricamento planimetria");
@@ -456,8 +492,12 @@ export default function PlanimetriaEditor({
   const [scaleDenominator, setScaleDenominator] = useState(500);
   const [sheetSize, setSheetSize] = useState<SheetSize>("A3");
   const [activeTool, setActiveTool] = useState<EditorTool>("smart");
+  const [scaleInputValue, setScaleInputValue] = useState("500");
   const [knownSegmentMeters, setKnownSegmentMeters] = useState(50);
+  const [knownSegmentInputValue, setKnownSegmentInputValue] = useState("50");
   const [calibration, setCalibration] = useState<SavedCalibration | null>(null);
+  const [rulerSegment, setRulerSegment] = useState<MeasureSegment | null>(null);
+  const [rulerSegmentSelected, setRulerSegmentSelected] = useState(false);
   const [zoomPercent, setZoomPercent] = useState(100);
   const [opacityPercent, setOpacityPercent] = useState(44);
   const [threshold, setThreshold] = useState(236);
@@ -472,7 +512,7 @@ export default function PlanimetriaEditor({
   const [selectedSelectionIds, setSelectedSelectionIds] = useState<string[]>([]);
   const [polygonDraft, setPolygonDraft] = useState<CanvasPoint[]>([]);
   const [pointerPreview, setPointerPreview] = useState<CanvasPoint | null>(null);
-  const [calibrationDraft, setCalibrationDraft] = useState<SavedCalibration | null>(null);
+  const [rulerDraft, setRulerDraft] = useState<MeasureSegment | null>(null);
   const [clipboardCount, setClipboardCount] = useState(0);
   const [revision, setRevision] = useState(0);
 
@@ -489,6 +529,8 @@ export default function PlanimetriaEditor({
   const selectedCurrentPageSelections = selections.filter((selection) =>
     selectedSelectionIds.includes(selection.id),
   );
+  const canUndo = runtimeRef.current.undoStack.length > 0;
+  const canRedo = runtimeRef.current.redoStack.length > 0;
 
   const selectedAreas = useMemo(
     () =>
@@ -521,6 +563,7 @@ export default function PlanimetriaEditor({
       { area: 0, amount: 0 },
     );
   }, [selectedAreas]);
+  const rulerDistanceMeters = rulerSegment ? segmentMetersFromScale(rulerSegment) : 0;
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -532,6 +575,14 @@ export default function PlanimetriaEditor({
   }, [leftPanelOpen, rightPanelOpen]);
 
   useEffect(() => {
+    setScaleInputValue(String(scaleDenominator));
+  }, [scaleDenominator]);
+
+  useEffect(() => {
+    setKnownSegmentInputValue(String(knownSegmentMeters));
+  }, [knownSegmentMeters]);
+
+  useEffect(() => {
     if (hasPdf) redrawMasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -540,7 +591,9 @@ export default function PlanimetriaEditor({
     polygonDraft,
     pointerPreview,
     calibration,
-    calibrationDraft,
+    rulerDraft,
+    rulerSegment,
+    rulerSegmentSelected,
     revision,
     hasPdf,
   ]);
@@ -550,21 +603,38 @@ export default function PlanimetriaEditor({
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select")) return;
       const modifier = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+
+      if (event.key === "Backspace" || event.key === "Delete") {
+        event.preventDefault();
+        deleteSelectedObjects();
+        return;
+      }
+
       if (!modifier) return;
-      if (event.key.toLowerCase() === "c") {
+      if (key === "c") {
         event.preventDefault();
         copySelectedSelections();
       }
-      if (event.key.toLowerCase() === "v") {
+      if (key === "v") {
         event.preventDefault();
         pasteCopiedSelections();
+      }
+      if (key === "z") {
+        event.preventDefault();
+        if (event.shiftKey) redoSelectionEdit();
+        else undoSelectionEdit();
+      }
+      if (key === "y") {
+        event.preventDefault();
+        redoSelectionEdit();
       }
     }
 
     window.addEventListener("keydown", handleKeyboard);
     return () => window.removeEventListener("keydown", handleKeyboard);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSelectionIds, clipboardCount, currentPage, hasPdf]);
+  }, [selectedSelectionIds, clipboardCount, currentPage, hasPdf, revision]);
 
   useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
@@ -588,12 +658,14 @@ export default function PlanimetriaEditor({
     setDocumentSource(null);
     setActiveTool("smart");
     setCalibration(null);
-    setCalibrationDraft(null);
+    setRulerSegment(null);
+    setRulerSegmentSelected(false);
+    setRulerDraft(null);
     setSelectedSelectionIds([]);
     setPolygonDraft([]);
     setPointerPreview(null);
     dragStateRef.current = null;
-    calibrationDragRef.current = null;
+    rulerDragRef.current = null;
     setDirty(false);
     setSavedAt("");
     setRevision((value) => value + 1);
@@ -621,9 +693,14 @@ export default function PlanimetriaEditor({
       setInflate(draft.inflate);
       setGap(draft.gap);
       setDash(draft.dash);
-      setActiveTool(draft.activeTool ?? "smart");
+      setActiveTool(normalizeEditorTool(draft.activeTool));
       setCalibration(draft.calibration ?? null);
       setKnownSegmentMeters(draft.calibration?.knownMeters ?? 50);
+      setRulerSegment(
+        draft.calibration
+          ? { page: draft.calibration.page, start: draft.calibration.start, end: draft.calibration.end }
+          : null,
+      );
       if (draft.document.kind === "sample") {
         void loadSample(draft.document.url, draft.document.fileName, draft, true);
       } else {
@@ -2033,6 +2110,112 @@ export default function PlanimetriaEditor({
     return canvas;
   }
 
+  function cloneSelection(selection: AreaSelection): AreaSelection {
+    const region = cloneRegion(selection.region);
+    return {
+      ...selection,
+      region,
+      bitmap: cloneCanvas(selection.bitmap),
+      polygon: selection.polygon?.map((point) => ({ ...point })),
+    };
+  }
+
+  function cloneSelectionsByPage(source: Map<number, AreaSelection[]>) {
+    const next = new Map<number, AreaSelection[]>();
+    source.forEach((items, page) => {
+      next.set(page, items.map(cloneSelection));
+    });
+    return next;
+  }
+
+  function takeEditorSnapshot(): EditorSnapshot {
+    return {
+      selectionsByPage: cloneSelectionsByPage(runtimeRef.current.selectionsByPage),
+      selectedIds: [...selectedSelectionIds],
+      history: [...runtimeRef.current.history],
+      calibration: calibration
+        ? {
+            ...calibration,
+            start: { ...calibration.start },
+            end: { ...calibration.end },
+          }
+        : null,
+      rulerSegment: rulerSegment
+        ? {
+            page: rulerSegment.page,
+            start: { ...rulerSegment.start },
+            end: { ...rulerSegment.end },
+          }
+        : null,
+      scaleDenominator,
+    };
+  }
+
+  function recordUndoState() {
+    const runtime = runtimeRef.current;
+    runtime.undoStack.push(takeEditorSnapshot());
+    if (runtime.undoStack.length > 40) runtime.undoStack.shift();
+    runtime.redoStack = [];
+  }
+
+  function restoreEditorSnapshot(snapshot: EditorSnapshot) {
+    runtimeRef.current.selectionsByPage = cloneSelectionsByPage(snapshot.selectionsByPage);
+    runtimeRef.current.history = [...snapshot.history];
+    const existingIds = new Set(
+      Array.from(runtimeRef.current.selectionsByPage.values())
+        .flat()
+        .map((selection) => selection.id),
+    );
+    setSelectedSelectionIds(snapshot.selectedIds.filter((id) => existingIds.has(id)));
+    setCalibration(
+      snapshot.calibration
+        ? {
+            ...snapshot.calibration,
+            start: { ...snapshot.calibration.start },
+            end: { ...snapshot.calibration.end },
+          }
+        : null,
+    );
+    setRulerSegment(
+      snapshot.rulerSegment
+        ? {
+            page: snapshot.rulerSegment.page,
+            start: { ...snapshot.rulerSegment.start },
+            end: { ...snapshot.rulerSegment.end },
+          }
+        : snapshot.calibration
+          ? {
+              page: snapshot.calibration.page,
+              start: { ...snapshot.calibration.start },
+              end: { ...snapshot.calibration.end },
+            }
+          : null,
+    );
+    setRulerSegmentSelected(false);
+    setScaleDenominator(snapshot.scaleDenominator);
+    redrawMasks();
+    markDirty();
+    bumpRevision();
+  }
+
+  function undoSelectionEdit() {
+    const runtime = runtimeRef.current;
+    const previous = runtime.undoStack.pop();
+    if (!previous) return;
+    runtime.redoStack.push(takeEditorSnapshot());
+    restoreEditorSnapshot(previous);
+    setStatus("Modifica annullata");
+  }
+
+  function redoSelectionEdit() {
+    const runtime = runtimeRef.current;
+    const next = runtime.redoStack.pop();
+    if (!next) return;
+    runtime.undoStack.push(takeEditorSnapshot());
+    restoreEditorSnapshot(next);
+    setStatus("Modifica ripristinata");
+  }
+
   function sameRegion(a: Region, b: Region) {
     return (
       a.count === b.count &&
@@ -2049,12 +2232,16 @@ export default function PlanimetriaEditor({
     opacity: number,
     source: SelectionSource = "smart",
     polygon?: CanvasPoint[],
+    options: { recordHistory?: boolean; select?: boolean } = {},
   ) {
     const usage = usageById(usageId);
     const selectionsForPage = currentSelections();
     const duplicateIndex = selectionsForPage.findIndex((selection) => sameRegion(selection.region, region));
+    const shouldRecord = options.recordHistory !== false;
+    const shouldSelect = options.select !== false;
 
     if (duplicateIndex >= 0) {
+      if (shouldRecord) recordUndoState();
       const selection = selectionsForPage[duplicateIndex];
       selection.usageId = usageId;
       selection.color = usage.color;
@@ -2065,12 +2252,14 @@ export default function PlanimetriaEditor({
       selection.polygon = polygon;
       redrawMasks();
       setStatus(`Area ${duplicateIndex + 1} aggiornata`);
-      setSelectedSelectionIds([selection.id]);
+      if (shouldSelect) setSelectedSelectionIds([selection.id]);
+      setRulerSegmentSelected(false);
       markDirty();
       bumpRevision();
       return selection.id;
     }
 
+    if (shouldRecord) recordUndoState();
     const selection = {
       id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
       page: runtimeRef.current.currentPage,
@@ -2087,7 +2276,8 @@ export default function PlanimetriaEditor({
     runtimeRef.current.history.push(selection.id);
     redrawMasks();
     setStatus(`Area ${selectionsForPage.length} tracciata`);
-    setSelectedSelectionIds([selection.id]);
+    if (shouldSelect) setSelectedSelectionIds([selection.id]);
+    setRulerSegmentSelected(false);
     markDirty();
     bumpRevision();
     return selection.id;
@@ -2125,6 +2315,53 @@ export default function PlanimetriaEditor({
     context.restore();
   }
 
+  function drawSegmentOverlay(
+    context: CanvasRenderingContext2D,
+    segment: MeasureSegment | SavedCalibration,
+    color: string,
+    dashed = false,
+    label?: string,
+    selected = false,
+  ) {
+    context.save();
+    if (selected) {
+      context.strokeStyle = "rgba(13, 110, 253, 0.24)";
+      context.lineWidth = 16;
+      context.setLineDash([]);
+      context.beginPath();
+      context.moveTo(segment.start.x, segment.start.y);
+      context.lineTo(segment.end.x, segment.end.y);
+      context.stroke();
+    }
+    context.strokeStyle = color;
+    context.fillStyle = color;
+    context.lineWidth = selected ? 6 : 4;
+    context.setLineDash(dashed ? [12, 8] : []);
+    context.beginPath();
+    context.moveTo(segment.start.x, segment.start.y);
+    context.lineTo(segment.end.x, segment.end.y);
+    context.stroke();
+    [segment.start, segment.end].forEach((point) => {
+      context.beginPath();
+      context.arc(point.x, point.y, 7, 0, Math.PI * 2);
+      context.fill();
+      context.lineWidth = 2;
+      context.strokeStyle = "#ffffff";
+      context.stroke();
+    });
+    if (label) {
+      const midX = (segment.start.x + segment.end.x) / 2;
+      const midY = (segment.start.y + segment.end.y) / 2;
+      context.font = "700 28px Inter, system-ui, sans-serif";
+      const metrics = context.measureText(label);
+      context.fillStyle = "rgba(15, 23, 42, 0.86)";
+      context.fillRect(midX - metrics.width / 2 - 12, midY - 44, metrics.width + 24, 34);
+      context.fillStyle = "#ffffff";
+      context.fillText(label, midX - metrics.width / 2, midY - 20);
+    }
+    context.restore();
+  }
+
   function drawEditorOverlays(context: CanvasRenderingContext2D) {
     selectedCurrentPageSelections.forEach((selection) => drawSelectionOutline(context, selection));
 
@@ -2148,26 +2385,35 @@ export default function PlanimetriaEditor({
       context.restore();
     }
 
-    const segment = calibrationDraft ?? calibration;
-    if (segment) {
-      context.save();
-      context.strokeStyle = calibrationDraft ? "#f59e0b" : "#0f766e";
-      context.fillStyle = calibrationDraft ? "#f59e0b" : "#0f766e";
-      context.lineWidth = 4;
-      context.setLineDash(calibrationDraft ? [12, 8] : []);
-      context.beginPath();
-      context.moveTo(segment.start.x, segment.start.y);
-      context.lineTo(segment.end.x, segment.end.y);
-      context.stroke();
-      [segment.start, segment.end].forEach((point) => {
-        context.beginPath();
-        context.arc(point.x, point.y, 7, 0, Math.PI * 2);
-        context.fill();
-        context.lineWidth = 2;
-        context.strokeStyle = "#ffffff";
-        context.stroke();
-      });
-      context.restore();
+    if (calibration && calibration.page === runtimeRef.current.currentPage) {
+      drawSegmentOverlay(
+        context,
+        calibration,
+        "#0f766e",
+        false,
+        `${areaFormatter.format(calibration.knownMeters)} m`,
+        rulerSegmentSelected,
+      );
+    }
+
+    const segment = rulerDraft ?? rulerSegment;
+    const segmentIsCalibrated =
+      Boolean(calibration && segment) &&
+      calibration?.page === segment?.page &&
+      calibration?.start.x === segment?.start.x &&
+      calibration?.start.y === segment?.start.y &&
+      calibration?.end.x === segment?.end.x &&
+      calibration?.end.y === segment?.end.y;
+    if (segment && segment.page === runtimeRef.current.currentPage && !segmentIsCalibrated) {
+      const meters = segmentMetersFromScale(segment);
+      drawSegmentOverlay(
+        context,
+        segment,
+        rulerDraft ? "#f59e0b" : "#0d6efd",
+        Boolean(rulerDraft),
+        `${areaFormatter.format(meters)} m`,
+        rulerSegmentSelected,
+      );
     }
   }
 
@@ -2249,7 +2495,7 @@ export default function PlanimetriaEditor({
     });
   }
 
-  async function fillAtCanvasPoint(x: number, y: number) {
+  async function fillAtCanvasPoint(x: number, y: number, appendToSelection = false) {
     const runtime = runtimeRef.current;
     if (!runtime.pdfDoc || runtime.animating) return;
     setEditorBusy(true);
@@ -2263,7 +2509,11 @@ export default function PlanimetriaEditor({
       }
       const opacity = opacityPercent / 100;
       await animateWave(region, activeUsageOption.color, opacity);
-      commitSelection(region, activeUsage, opacity, "smart");
+      if (appendToSelection) {
+        appendSmartRegion(region, opacity);
+      } else {
+        commitSelection(region, activeUsage, opacity, "smart");
+      }
     } catch (error) {
       console.error(error);
       setStatus("Selezione non riuscita");
@@ -2272,42 +2522,54 @@ export default function PlanimetriaEditor({
     }
   }
 
-  function removeSelection(id: string) {
+  function removeSelections(ids: string[]) {
+    const idsToRemove = new Set(ids);
+    const hasAny = Array.from(runtimeRef.current.selectionsByPage.values())
+      .flat()
+      .some((selection) => idsToRemove.has(selection.id));
+    if (!hasAny) return;
+
+    recordUndoState();
     for (const [page, pageSelections] of runtimeRef.current.selectionsByPage.entries()) {
-      const index = pageSelections.findIndex((selection) => selection.id === id);
-      if (index >= 0) {
-        pageSelections.splice(index, 1);
-        runtimeRef.current.history = runtimeRef.current.history.filter((selectionId) => selectionId !== id);
-        setSelectedSelectionIds((current) => current.filter((selectionId) => selectionId !== id));
-        if (page === runtimeRef.current.currentPage) redrawMasks();
-        setStatus("Area rimossa");
-        markDirty();
-        bumpRevision();
-        return;
+      for (let index = pageSelections.length - 1; index >= 0; index--) {
+        if (idsToRemove.has(pageSelections[index].id)) pageSelections.splice(index, 1);
       }
+      if (page === runtimeRef.current.currentPage) redrawMasks();
     }
+    runtimeRef.current.history = runtimeRef.current.history.filter((selectionId) => !idsToRemove.has(selectionId));
+    setSelectedSelectionIds((current) => current.filter((selectionId) => !idsToRemove.has(selectionId)));
+    setStatus(idsToRemove.size === 1 ? "Area rimossa" : "Aree rimosse");
+    markDirty();
+    bumpRevision();
   }
 
-  function undoLastSelection() {
-    const id = runtimeRef.current.history.pop();
-    if (!id) return;
-    for (const [page, pageSelections] of runtimeRef.current.selectionsByPage.entries()) {
-      const index = pageSelections.findIndex((selection) => selection.id === id);
-      if (index >= 0) {
-        pageSelections.splice(index, 1);
-        setSelectedSelectionIds((current) => current.filter((selectionId) => selectionId !== id));
-        if (page === runtimeRef.current.currentPage) redrawMasks();
-        setStatus("Annullamento completato");
-        markDirty();
-        bumpRevision();
-        return;
-      }
-    }
+  function removeSelection(id: string) {
+    removeSelections([id]);
+  }
+
+  function removeMeasureSegment() {
+    if (!rulerSegment && !calibration) return;
+    recordUndoState();
+    setRulerSegment(null);
+    setCalibration(null);
+    setRulerSegmentSelected(false);
+    setStatus("Segmento rimosso");
+    markDirty();
     bumpRevision();
+  }
+
+  function deleteSelectedObjects() {
+    if (selectedSelectionIds.length > 0) {
+      removeSelections(selectedSelectionIds);
+      return;
+    }
+    if (rulerSegmentSelected) removeMeasureSegment();
   }
 
   function clearCurrentPage() {
     const pageSelections = currentSelections();
+    if (pageSelections.length === 0) return;
+    recordUndoState();
     const currentPageIds = new Set(pageSelections.map((selection) => selection.id));
     pageSelections.splice(0);
     setSelectedSelectionIds((current) => current.filter((id) => !currentPageIds.has(id)));
@@ -2328,6 +2590,7 @@ export default function PlanimetriaEditor({
     for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
       const selection = pageSelections.find((item) => item.id === id);
       if (!selection) continue;
+      recordUndoState();
       selection.usageId = usageId;
       selection.color = usage.color;
       selection.bitmap = createTintedCanvas(selection.region, usage.color, selection.opacity);
@@ -2340,6 +2603,7 @@ export default function PlanimetriaEditor({
 
   function updateMaskOpacity(nextOpacityPercent: number) {
     const opacity = nextOpacityPercent / 100;
+    if (runtimeRef.current.selectionsByPage.size > 0) recordUndoState();
     setOpacityPercent(nextOpacityPercent);
     for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
       pageSelections.forEach((selection) => {
@@ -2386,6 +2650,27 @@ export default function PlanimetriaEditor({
     return null;
   }
 
+  function distanceToSegment(point: CanvasPoint, start: CanvasPoint, end: CanvasPoint) {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared === 0) return distance(point, start);
+    const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+    const projection = { x: start.x + t * dx, y: start.y + t * dy };
+    return distance(point, projection);
+  }
+
+  function activeMeasureSegment() {
+    return rulerSegment ?? (calibration ? { page: calibration.page, start: calibration.start, end: calibration.end } : null);
+  }
+
+  function hitTestMeasureSegment(point: CanvasPoint) {
+    const segment = activeMeasureSegment();
+    if (!segment || segment.page !== runtimeRef.current.currentPage) return false;
+    const threshold = Math.max(12, Math.round(10 * runtimeRef.current.renderScale));
+    return distanceToSegment(point, segment.start, segment.end) <= threshold;
+  }
+
   function clampDeltaForSnapshots(snapshots: DragSnapshot[], dx: number, dy: number) {
     const canvas = pdfCanvasRef.current;
     if (!canvas) return { dx, dy };
@@ -2424,6 +2709,7 @@ export default function PlanimetriaEditor({
     if (selected.length === 0) return;
     dragStateRef.current = {
       start: point,
+      historyRecorded: false,
       snapshots: selected.map((selection) => ({
         id: selection.id,
         bounds: { ...selection.region.bounds },
@@ -2466,6 +2752,7 @@ export default function PlanimetriaEditor({
 
   function pasteCopiedSelections() {
     if (!hasPdf || clipboardRef.current.length === 0) return;
+    recordUndoState();
     const offset = Math.max(18, Math.round(24 * runtimeRef.current.renderScale));
     const snapshots = clipboardRef.current.map<DragSnapshot>((item, index) => ({
       id: String(index),
@@ -2503,18 +2790,60 @@ export default function PlanimetriaEditor({
     bumpRevision();
   }
 
-  function mergeSelectedSelections() {
-    const selected = selectedCurrentPageSelections;
-    if (selected.length < 2) return;
+  function unionRegions(regions: Region[], seed: CanvasPoint) {
     const { pdfCanvas } = getCanvases();
     const canvas = document.createElement("canvas");
     canvas.width = pdfCanvas.width;
     canvas.height = pdfCanvas.height;
     const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) return;
-    selected.forEach((selection) => {
-      context.drawImage(selection.region.alphaCanvas, selection.region.bounds.minX, selection.region.bounds.minY);
+    if (!context) return null;
+    regions.forEach((region) => {
+      context.drawImage(region.alphaCanvas, region.bounds.minX, region.bounds.minY);
     });
+    return regionFromAlphaCanvas(canvas, seed);
+  }
+
+  function removeSelectionsFromCurrentPage(ids: Set<string>) {
+    const pageSelections = currentSelections();
+    for (let index = pageSelections.length - 1; index >= 0; index--) {
+      if (ids.has(pageSelections[index].id)) pageSelections.splice(index, 1);
+    }
+    runtimeRef.current.history = runtimeRef.current.history.filter((id) => !ids.has(id));
+  }
+
+  function appendSmartRegion(region: Region, opacity: number) {
+    const selected = selectedCurrentPageSelections;
+    if (selected.length === 0) {
+      commitSelection(region, activeUsage, opacity, "smart");
+      return;
+    }
+
+    recordUndoState();
+    const regions = [...selected.map((selection) => selection.region), region];
+    const seed = {
+      x: Math.round(
+        (selected.reduce((sum, selection) => sum + selection.region.seed.x, 0) + region.seed.x) /
+          (selected.length + 1),
+      ),
+      y: Math.round(
+        (selected.reduce((sum, selection) => sum + selection.region.seed.y, 0) + region.seed.y) /
+          (selected.length + 1),
+      ),
+    };
+    const mergedRegion = unionRegions(regions, seed);
+    if (!mergedRegion) return;
+    removeSelectionsFromCurrentPage(new Set(selected.map((selection) => selection.id)));
+    const mergedId = commitSelection(mergedRegion, activeUsage, opacity, "merged", undefined, {
+      recordHistory: false,
+    });
+    if (mergedId) setSelectedSelectionIds([mergedId]);
+    setStatus(`${selected.length + 1} aree unite con Smart Selection`);
+  }
+
+  function mergeSelectedSelections() {
+    const selected = selectedCurrentPageSelections;
+    if (selected.length < 2) return;
+    recordUndoState();
     const first = selected[0];
     const center = selected.reduce(
       (acc, selection) => ({
@@ -2523,47 +2852,68 @@ export default function PlanimetriaEditor({
       }),
       { x: 0, y: 0 },
     );
-    const region = regionFromAlphaCanvas(canvas, {
+    const region = unionRegions(selected.map((selection) => selection.region), {
       x: Math.round(center.x),
       y: Math.round(center.y),
     });
     if (!region) return;
     const ids = new Set(selected.map((selection) => selection.id));
-    const pageSelections = currentSelections();
-    for (let index = pageSelections.length - 1; index >= 0; index--) {
-      if (ids.has(pageSelections[index].id)) pageSelections.splice(index, 1);
-    }
-    runtimeRef.current.history = runtimeRef.current.history.filter((id) => !ids.has(id));
-    const mergedId = commitSelection(region, first.usageId, first.opacity, "merged");
+    removeSelectionsFromCurrentPage(ids);
+    const mergedId = commitSelection(region, first.usageId, first.opacity, "merged", undefined, {
+      recordHistory: false,
+    });
     if (mergedId) setSelectedSelectionIds([mergedId]);
     setStatus(`${selected.length} aree unite`);
   }
 
-  function applyCalibrationSegment(start: CanvasPoint, end: CanvasPoint) {
+  function segmentMetersFromScale(segment: MeasureSegment, scale = scaleDenominator) {
     const canvas = pdfCanvasRef.current;
-    if (!canvas) return;
-    const segmentPixels = distance(start, end);
-    if (segmentPixels < 12 || knownSegmentMeters <= 0) {
+    if (!canvas) return 0;
+    const sheet = orientedSheetSize(sheetSize, canvas.width, canvas.height);
+    const dxMm = (segment.end.x - segment.start.x) * (sheet.widthMm / canvas.width);
+    const dyMm = (segment.end.y - segment.start.y) * (sheet.heightMm / canvas.height);
+    return (Math.hypot(dxMm, dyMm) * scale) / 1000;
+  }
+
+  function scaleFromKnownSegment(segment: MeasureSegment, knownMeters: number) {
+    const canvas = pdfCanvasRef.current;
+    if (!canvas) return null;
+    const segmentPixels = distance(segment.start, segment.end);
+    if (segmentPixels < 12 || knownMeters <= 0) {
       setStatus("Segmento di taratura troppo corto");
-      return;
+      return null;
     }
     const sheet = orientedSheetSize(sheetSize, canvas.width, canvas.height);
-    const dxMm = (end.x - start.x) * (sheet.widthMm / canvas.width);
-    const dyMm = (end.y - start.y) * (sheet.heightMm / canvas.height);
+    const dxMm = (segment.end.x - segment.start.x) * (sheet.widthMm / canvas.width);
+    const dyMm = (segment.end.y - segment.start.y) * (sheet.heightMm / canvas.height);
     const segmentMmOnSheet = Math.hypot(dxMm, dyMm);
-    if (segmentMmOnSheet <= 0) return;
-    const nextScale = Math.round((knownSegmentMeters * 1000) / segmentMmOnSheet);
-    const clampedScale = Math.min(20000, Math.max(20, nextScale));
+    if (segmentMmOnSheet <= 0) return null;
+    return Math.min(20000, Math.max(20, Math.round((knownMeters * 1000) / segmentMmOnSheet)));
+  }
+
+  function applyCalibrationFromRuler() {
+    if (!rulerSegment) {
+      setStatus("Disegna prima un segmento con il righello");
+      return;
+    }
+    const knownMeters = commitKnownSegmentInput();
+    if (!knownMeters) {
+      setStatus("Inserisci la distanza nota del segmento");
+      return;
+    }
+    const clampedScale = scaleFromKnownSegment(rulerSegment, knownMeters);
+    if (!clampedScale) return;
+    recordUndoState();
     const nextCalibration = {
       page: runtimeRef.current.currentPage,
-      knownMeters: knownSegmentMeters,
+      knownMeters,
       scaleDenominator: clampedScale,
-      start,
-      end,
+      start: rulerSegment.start,
+      end: rulerSegment.end,
     };
     setScaleDenominator(clampedScale);
     setCalibration(nextCalibration);
-    setCalibrationDraft(null);
+    setRulerSegment(rulerSegment);
     setStatus(`Scala tarata a 1:${clampedScale}`);
     markDirty();
     bumpRevision();
@@ -2587,7 +2937,7 @@ export default function PlanimetriaEditor({
     if (!point) return;
 
     if (activeTool === "smart") {
-      void fillAtCanvasPoint(point.x, point.y);
+      void fillAtCanvasPoint(point.x, point.y, event.shiftKey);
       return;
     }
 
@@ -2610,12 +2960,10 @@ export default function PlanimetriaEditor({
       return;
     }
 
-    if (activeTool === "calibrate") {
-      calibrationDragRef.current = point;
-      setCalibrationDraft({
+    if (activeTool === "ruler") {
+      rulerDragRef.current = point;
+      setRulerDraft({
         page: runtimeRef.current.currentPage,
-        knownMeters: knownSegmentMeters,
-        scaleDenominator,
         start: point,
         end: point,
       });
@@ -2624,8 +2972,19 @@ export default function PlanimetriaEditor({
     }
 
     const hit = hitTestSelection(point);
+    const hitSegment = hitTestMeasureSegment(point);
+    if (!hit && hitSegment) {
+      setSelectedSelectionIds([]);
+      setRulerSegmentSelected(true);
+      redrawMasks();
+      return;
+    }
+
     if (!hit) {
-      if (!event.shiftKey && !event.metaKey && !event.ctrlKey) setSelectedSelectionIds([]);
+      if (!event.shiftKey && !event.metaKey && !event.ctrlKey) {
+        setSelectedSelectionIds([]);
+        setRulerSegmentSelected(false);
+      }
       redrawMasks();
       return;
     }
@@ -2640,6 +2999,7 @@ export default function PlanimetriaEditor({
       nextSelectedIds = alreadySelected ? selectedSelectionIds : [hit.id];
     }
     setSelectedSelectionIds(nextSelectedIds);
+    setRulerSegmentSelected(false);
     if (nextSelectedIds.includes(hit.id)) {
       startSelectionDrag(point, nextSelectedIds);
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -2656,12 +3016,10 @@ export default function PlanimetriaEditor({
       return;
     }
 
-    if (activeTool === "calibrate" && calibrationDragRef.current) {
-      setCalibrationDraft({
+    if (activeTool === "ruler" && rulerDragRef.current) {
+      setRulerDraft({
         page: runtimeRef.current.currentPage,
-        knownMeters: knownSegmentMeters,
-        scaleDenominator,
-        start: calibrationDragRef.current,
+        start: rulerDragRef.current,
         end: point,
       });
       return;
@@ -2672,6 +3030,10 @@ export default function PlanimetriaEditor({
       const rawDx = point.x - dragState.start.x;
       const rawDy = point.y - dragState.start.y;
       const { dx, dy } = clampDeltaForSnapshots(dragState.snapshots, rawDx, rawDy);
+      if ((dx !== 0 || dy !== 0) && !dragState.historyRecorded) {
+        recordUndoState();
+        dragState.historyRecorded = true;
+      }
       applyDragDelta(dragState, dx, dy);
     }
   }
@@ -2688,16 +3050,31 @@ export default function PlanimetriaEditor({
       }
     }
 
-    if (activeTool === "calibrate" && calibrationDragRef.current && point) {
-      applyCalibrationSegment(calibrationDragRef.current, point);
-      calibrationDragRef.current = null;
+    if (activeTool === "ruler" && rulerDragRef.current && point) {
+      const segment = {
+        page: runtimeRef.current.currentPage,
+        start: rulerDragRef.current,
+        end: point,
+      };
+      if (distance(segment.start, segment.end) >= 12) {
+        recordUndoState();
+        setRulerSegment(segment);
+        setRulerSegmentSelected(true);
+        setSelectedSelectionIds([]);
+        setRulerDraft(null);
+        setStatus(`Distanza misurata: ${areaFormatter.format(segmentMetersFromScale(segment))} m`);
+      } else {
+        setRulerDraft(null);
+        setStatus("Segmento troppo corto");
+      }
+      rulerDragRef.current = null;
       releasePointer();
       return;
     }
 
-    if (activeTool === "calibrate" && calibrationDragRef.current) {
-      calibrationDragRef.current = null;
-      setCalibrationDraft(null);
+    if (activeTool === "ruler" && rulerDragRef.current) {
+      rulerDragRef.current = null;
+      setRulerDraft(null);
       releasePointer();
       return;
     }
@@ -2732,6 +3109,39 @@ export default function PlanimetriaEditor({
     if (runtime.pdfDoc) applyStageSize();
   }
 
+  function commitScaleInput() {
+    const parsed = parseNumberInput(scaleInputValue);
+    if (parsed === null) {
+      setScaleInputValue("");
+      return null;
+    }
+    const nextScale = Math.min(20000, Math.max(20, Math.round(parsed)));
+    setScaleDenominator(nextScale);
+    setScaleInputValue(String(nextScale));
+    markDirty();
+    return nextScale;
+  }
+
+  function restoreScaleInput() {
+    setScaleInputValue(String(scaleDenominator));
+  }
+
+  function commitKnownSegmentInput() {
+    const parsed = parseNumberInput(knownSegmentInputValue);
+    if (parsed === null) {
+      setKnownSegmentInputValue("");
+      return null;
+    }
+    const nextMeters = Math.max(0.1, parsed);
+    setKnownSegmentMeters(nextMeters);
+    setKnownSegmentInputValue(String(nextMeters));
+    return nextMeters;
+  }
+
+  function restoreKnownSegmentInput() {
+    setKnownSegmentInputValue(String(knownSegmentMeters));
+  }
+
   function invalidateWallMap(nextStatus = "Parametri tracciamento aggiornati") {
     runtimeRef.current.wallMap = null;
     runtimeRef.current.wallKey = "";
@@ -2745,14 +3155,14 @@ export default function PlanimetriaEditor({
       setPolygonDraft([]);
       setPointerPreview(null);
     }
-    if (tool !== "calibrate") {
-      calibrationDragRef.current = null;
-      setCalibrationDraft(null);
+    if (tool !== "ruler") {
+      rulerDragRef.current = null;
+      setRulerDraft(null);
     }
     if (tool === "select") setStatus("Seleziona aree, trascina o usa copia/incolla");
     if (tool === "smart") setStatus("Smart selection attiva");
     if (tool === "polygon") setStatus("Disegna i vertici del poligono");
-    if (tool === "calibrate") setStatus("Trascina un segmento di misura nota");
+    if (tool === "ruler") setStatus("Traccia una distanza tra due punti");
   }
 
   return (
@@ -2806,40 +3216,18 @@ export default function PlanimetriaEditor({
         className={`plan-editor-grid ${leftPanelOpen ? "" : "left-collapsed"} ${rightPanelOpen ? "" : "right-collapsed"}`}
       >
         {leftPanelOpen && (
-          <aside className="plan-tool-panel" aria-label="Strumenti planimetria">
+          <aside className="plan-tool-panel" aria-label="Impostazioni planimetria">
           <div className="aside-panel-head">
-            <strong>Strumenti</strong>
+            <strong>Impostazioni</strong>
             <button
               className="icon-button"
               onClick={() => setLeftPanelOpen(false)}
-              title="Nascondi strumenti"
-              aria-label="Nascondi strumenti"
+              title="Nascondi impostazioni"
+              aria-label="Nascondi impostazioni"
             >
               <PanelLeftClose size={18} />
             </button>
           </div>
-          <section className="tool-block">
-            <div className="tool-block-head">
-              <h2>Strumenti</h2>
-              <span>{TOOL_OPTIONS.find((tool) => tool.id === activeTool)?.label}</span>
-            </div>
-            <div className="tool-mode-grid">
-              {TOOL_OPTIONS.map((tool) => (
-                <button
-                  key={tool.id}
-                  type="button"
-                  className={`tool-mode-button ${activeTool === tool.id ? "active" : ""}`}
-                  onClick={() => selectTool(tool.id)}
-                >
-                  {tool.icon}
-                  <span>
-                    <strong>{tool.label}</strong>
-                    <small>{tool.description}</small>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </section>
 
           <section className="tool-block">
             <div className="tool-block-head">
@@ -2874,14 +3262,18 @@ export default function PlanimetriaEditor({
               <div>
                 <strong>1:</strong>
                 <input
-                  type="number"
-                  min={20}
-                  max={20000}
-                  step={10}
-                  value={scaleDenominator}
+                  type="text"
+                  inputMode="numeric"
+                  value={scaleInputValue}
                   onChange={(event) => {
-                    setScaleDenominator(Math.min(20000, Math.max(20, Number(event.target.value) || 20)));
-                    markDirty();
+                    setScaleInputValue(event.target.value);
+                  }}
+                  onBlur={() => {
+                    if (scaleInputValue === "") restoreScaleInput();
+                    else commitScaleInput();
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
                   }}
                 />
               </div>
@@ -2904,35 +3296,14 @@ export default function PlanimetriaEditor({
               <span>Area reale foglio</span>
               <strong>{formatM2(pageRealAreaM2(sheetSize, scaleDenominator))}</strong>
             </div>
-            <div className="calibration-controls">
-              <label className="scale-field">
-                <span>Segmento noto in metri</span>
-                <div>
-                  <strong>m</strong>
-                  <input
-                    type="number"
-                    min={0.1}
-                    step={0.1}
-                    value={knownSegmentMeters}
-                    onChange={(event) => setKnownSegmentMeters(Math.max(0.1, Number(event.target.value) || 0.1))}
-                  />
-                </div>
-              </label>
-              <button
-                className={`button soft full-width ${activeTool === "calibrate" ? "active-tool-button" : ""}`}
-                disabled={!hasPdf}
-                onClick={() => selectTool("calibrate")}
-              >
-                <Ruler size={16} />
-                Taratura con segmento
-              </button>
-              {calibration && (
-                <div className="calibration-segment-info">
-                  <span>Segmento tarato</span>
-                  <strong>{areaFormatter.format(calibration.knownMeters)} m {"->"} 1:{calibration.scaleDenominator}</strong>
-                </div>
-              )}
-            </div>
+            {calibration && (
+              <div className="calibration-segment-info">
+                <span>Taratura attiva</span>
+                <strong>
+                  {areaFormatter.format(calibration.knownMeters)} m {"->"} 1:{calibration.scaleDenominator}
+                </strong>
+              </div>
+            )}
           </section>
 
           <section className="tool-block">
@@ -2984,33 +3355,7 @@ export default function PlanimetriaEditor({
               >
                 <ChevronRight size={18} />
               </button>
-              <button
-                className="icon-button"
-                title="Annulla ultima area"
-                disabled={runtimeRef.current.history.length === 0 || busy}
-                onClick={undoLastSelection}
-              >
-                <RotateCcw size={18} />
-              </button>
-              <button
-                className="icon-button"
-                title="Cancella aree pagina"
-                disabled={!hasPdf || selections.length === 0 || busy}
-                onClick={clearCurrentPage}
-              >
-                <Trash2 size={18} />
-              </button>
             </div>
-            <label className="slider-field">
-              <span>Zoom {zoomPercent}%</span>
-              <input
-                type="range"
-                min={35}
-                max={165}
-                value={zoomPercent}
-                onChange={(event) => updateZoom(Number(event.target.value))}
-              />
-            </label>
             <label className="slider-field">
               <span>Opacita maschere {opacityPercent}%</span>
               <input
@@ -3021,8 +3366,9 @@ export default function PlanimetriaEditor({
                 onChange={(event) => updateMaskOpacity(Number(event.target.value))}
               />
             </label>
-            <button className="button soft full-width" disabled={!hasPdf} onClick={fitPageToViewport}>
-              Adatta alla vista
+            <button className="button soft full-width" disabled={!hasPdf || selections.length === 0 || busy} onClick={clearCurrentPage}>
+              <Trash2 size={16} />
+              Cancella aree pagina
             </button>
           </section>
 
@@ -3097,36 +3443,92 @@ export default function PlanimetriaEditor({
               <button
                 className="icon-button panel-toggle"
                 onClick={() => setLeftPanelOpen((open) => !open)}
-                title={leftPanelOpen ? "Nascondi strumenti" : "Mostra strumenti"}
-                aria-label={leftPanelOpen ? "Nascondi strumenti" : "Mostra strumenti"}
+                title={leftPanelOpen ? "Nascondi impostazioni" : "Mostra impostazioni"}
+                aria-label={leftPanelOpen ? "Nascondi impostazioni" : "Mostra impostazioni"}
                 aria-expanded={leftPanelOpen}
               >
                 {leftPanelOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
               </button>
-              <div className="status-pill">
-                <span className={busy ? "busy-dot" : ""} />
-                {status}
-              </div>
-              <div className="usage-quickbar" aria-label="Destinazione d'uso rapida">
-                {USAGES.map((usage) => (
+              <div className="tool-quickbar" aria-label="Strumenti rapidi">
+                {TOOL_OPTIONS.map((tool) => (
                   <button
-                    key={usage.id}
+                    key={tool.id}
                     type="button"
-                    className={activeUsage === usage.id ? "active" : ""}
-                    style={{ "--usage-color": usage.color } as CSSProperties}
-                    onClick={() => {
-                      setActiveUsage(usage.id);
-                      markDirty();
-                    }}
-                    title={usage.label}
+                    className={activeTool === tool.id ? "active" : ""}
+                    onClick={() => selectTool(tool.id)}
+                    title={tool.label}
+                    aria-label={tool.label}
                   >
-                    <span />
-                    {usage.shortLabel}
+                    {tool.icon}
                   </button>
                 ))}
               </div>
+              {(activeTool === "ruler" || rulerSegment) && (
+                <div className={`measure-inline-card ${rulerSegmentSelected ? "selected" : ""}`}>
+                  <button
+                    type="button"
+                    className={`mini-tool-button ${activeTool === "ruler" ? "active" : ""}`}
+                    disabled={!hasPdf}
+                    onClick={() => selectTool("ruler")}
+                  >
+                    <Ruler size={15} />
+                    Righello
+                  </button>
+                  <label>
+                    <span>m</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={knownSegmentInputValue}
+                      onChange={(event) => setKnownSegmentInputValue(event.target.value)}
+                      onBlur={() => {
+                        if (knownSegmentInputValue === "") restoreKnownSegmentInput();
+                        else commitKnownSegmentInput();
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="mini-tool-button"
+                    disabled={!hasPdf || !rulerSegment}
+                    onClick={applyCalibrationFromRuler}
+                  >
+                    Taratura
+                  </button>
+                  <strong>{rulerSegment ? `${areaFormatter.format(rulerDistanceMeters)} m` : "Nessun segmento"}</strong>
+                </div>
+              )}
             </div>
             <div className="canvas-toolbar-meta">
+              <div className="canvas-edit-actions">
+                <button
+                  className="icon-button"
+                  title="Indietro"
+                  disabled={!canUndo || busy}
+                  onClick={undoSelectionEdit}
+                >
+                  <Undo2 size={17} />
+                </button>
+                <button
+                  className="icon-button"
+                  title="Avanti"
+                  disabled={!canRedo || busy}
+                  onClick={redoSelectionEdit}
+                >
+                  <Redo2 size={17} />
+                </button>
+                <button
+                  className="icon-button danger-icon"
+                  title="Cancella elemento selezionato"
+                  disabled={(selectedSelectionIds.length === 0 && !rulerSegmentSelected) || busy}
+                  onClick={deleteSelectedObjects}
+                >
+                  <Trash2 size={17} />
+                </button>
+              </div>
               <span>{canvasPixels}</span>
               <span>{sheetSize} 1:{scaleDenominator}</span>
               <button
@@ -3160,6 +3562,37 @@ export default function PlanimetriaEditor({
                 <canvas ref={waveCanvasRef} />
               </div>
             </div>
+          </div>
+          <div className="canvas-zoom-dock" aria-label="Zoom planimetria">
+            <button
+              className="icon-button"
+              title="Riduci zoom"
+              disabled={!hasPdf || zoomPercent <= 35}
+              onClick={() => updateZoom(Math.max(35, zoomPercent - 10))}
+            >
+              <ZoomOut size={17} />
+            </button>
+            <label>
+              <span>{zoomPercent}%</span>
+              <input
+                type="range"
+                min={35}
+                max={165}
+                value={zoomPercent}
+                onChange={(event) => updateZoom(Number(event.target.value))}
+              />
+            </label>
+            <button
+              className="icon-button"
+              title="Aumenta zoom"
+              disabled={!hasPdf || zoomPercent >= 165}
+              onClick={() => updateZoom(Math.min(165, zoomPercent + 10))}
+            >
+              <ZoomIn size={17} />
+            </button>
+            <button className="icon-button" title="Adatta alla vista" disabled={!hasPdf} onClick={fitPageToViewport}>
+              <Maximize2 size={17} />
+            </button>
           </div>
         </section>
 
@@ -3230,6 +3663,14 @@ export default function PlanimetriaEditor({
               >
                 <Combine size={15} />
                 Unisci
+              </button>
+              <button
+                className="icon-button danger-icon"
+                title="Cancella elemento selezionato"
+                disabled={selectedSelectionIds.length === 0 && !rulerSegmentSelected}
+                onClick={deleteSelectedObjects}
+              >
+                <Trash2 size={16} />
               </button>
             </div>
             {selectedAreas.length === 0 ? (

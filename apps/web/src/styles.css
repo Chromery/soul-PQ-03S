@@ -2613,7 +2613,7 @@ a.button {
 }
 
 .page-controls {
-  grid-template-columns: repeat(4, 40px);
+  grid-template-columns: repeat(2, 40px);
 }
 
 .sheet-toggle button,
@@ -2715,6 +2715,7 @@ a.button {
 
 .plan-canvas-panel {
   min-width: 0;
+  position: relative;
   overflow: hidden;
 }
 
@@ -2746,6 +2747,10 @@ a.button {
   gap: 8px;
 }
 
+.canvas-toolbar-controls {
+  overflow: hidden;
+}
+
 .canvas-toolbar-meta {
   justify-content: flex-end;
   color: var(--secondary);
@@ -2758,8 +2763,113 @@ a.button {
   flex: 0 0 auto;
 }
 
+.tool-quickbar,
+.canvas-edit-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid #d8e6f7;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.tool-quickbar button {
+  width: 32px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: #526172;
+  background: transparent;
+}
+
+.tool-quickbar button.active {
+  color: var(--primary);
+  background: #eef5ff;
+}
+
+.measure-inline-card {
+  position: absolute;
+  top: 66px;
+  left: 12px;
+  z-index: 6;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(520px, calc(100% - 24px));
+  padding: 4px 6px;
+  border: 1px solid #d8e6f7;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+}
+
+.mini-tool-button {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #173154;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.mini-tool-button.active {
+  color: var(--primary);
+  border-color: #b8d7ff;
+  background: #eef5ff;
+}
+
+.measure-inline-card label {
+  height: 28px;
+  display: grid;
+  grid-template-columns: auto 64px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #173154;
+  background: #f8fafc;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.measure-inline-card input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: #173154;
+  background: transparent;
+  font-weight: 850;
+}
+
+.measure-inline-card strong {
+  max-width: 96px;
+  overflow: hidden;
+  color: var(--secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.danger-icon:not(:disabled) {
+  color: var(--danger);
+}
+
 .status-pill {
   min-height: 32px;
+  max-width: min(260px, 100%);
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -2770,11 +2880,14 @@ a.button {
   background: #fff;
   font-size: 13px;
   font-weight: 850;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .usage-quickbar {
   min-width: 0;
+  flex: 1 1 220px;
   display: flex;
   gap: 6px;
   overflow-x: auto;
@@ -2846,6 +2959,46 @@ a.button {
   background-size: 24px 24px;
 }
 
+.canvas-zoom-dock {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(420px, calc(100% - 28px));
+  padding: 7px;
+  border: 1px solid rgba(184, 215, 255, 0.92);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(10px);
+}
+
+.measure-inline-card.selected {
+  border-color: #8bbfff;
+  box-shadow:
+    0 0 0 3px rgba(13, 110, 253, 0.14),
+    0 14px 30px rgba(15, 23, 42, 0.14);
+}
+
+.canvas-zoom-dock label {
+  width: 174px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: #173154;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.canvas-zoom-dock input {
+  width: 100%;
+  accent-color: var(--primary);
+}
+
 .editor-layout .plan-canvas-shell {
   height: auto;
   min-height: 0;
@@ -2878,7 +3031,7 @@ a.button {
   cursor: grabbing;
 }
 
-.plan-stage.tool-calibrate {
+.plan-stage.tool-ruler {
   cursor: crosshair;
 }
 
@@ -3462,7 +3615,7 @@ a.button {
   }
 
   .page-controls {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .page-controls .icon-button {
