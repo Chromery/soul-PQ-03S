@@ -2351,6 +2351,31 @@ a.button {
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
 }
 
+.plan-editor.focus-mode {
+  padding: 6px;
+}
+
+.editor-layout .plan-editor.focus-mode {
+  gap: 6px;
+}
+
+.editor-layout .plan-editor.focus-mode .plan-editor-header {
+  min-height: 42px;
+  padding: 6px 8px;
+}
+
+.plan-editor.focus-mode .back-link,
+.plan-editor.focus-mode .plan-editor-title .eyebrow,
+.plan-editor.focus-mode .plan-editor-title p,
+.plan-editor.focus-mode .draft-state,
+.plan-editor.focus-mode .plan-editor-actions .button {
+  display: none;
+}
+
+.plan-editor.focus-mode .plan-editor-title h1 {
+  font-size: 15px;
+}
+
 .plan-editor-header .back-link {
   min-height: 38px;
   flex: 0 0 auto;
@@ -2419,6 +2444,19 @@ a.button {
   min-height: 38px;
 }
 
+.plan-editor-actions .focus-toggle {
+  width: 38px;
+  height: 38px;
+  border-color: #b8d7ff;
+  color: var(--primary);
+  background: #eef5ff;
+}
+
+.plan-editor.focus-mode .plan-editor-actions .focus-toggle {
+  width: 32px;
+  height: 32px;
+}
+
 .draft-state {
   min-height: 32px;
   display: inline-flex;
@@ -2467,10 +2505,16 @@ a.button {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.plan-tool-panel,
-.areas-panel {
+.plan-tool-panel {
   min-width: 0;
   display: grid;
+  gap: 10px;
+}
+
+.areas-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
@@ -2478,9 +2522,16 @@ a.button {
 .editor-layout .areas-panel {
   min-height: 0;
   align-content: start;
-  overflow-y: auto;
   scrollbar-gutter: stable;
   padding-right: 2px;
+}
+
+.editor-layout .plan-tool-panel {
+  overflow-y: auto;
+}
+
+.editor-layout .areas-panel {
+  overflow: hidden;
 }
 
 .aside-panel-head {
@@ -2505,12 +2556,75 @@ a.button {
   padding: 12px;
 }
 
+.area-totals,
+.selected-property-card,
+.usage-breakdown {
+  flex: 0 0 auto;
+}
+
+.selected-areas-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.selected-areas-list.collapsed {
+  flex: 0 0 auto;
+  grid-template-rows: auto;
+}
+
 .tool-block-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
+}
+
+.tool-block-toggle {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-block.collapsed .tool-block-toggle {
+  margin-bottom: 0;
+}
+
+.tool-block-title {
+  min-width: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.tool-block-meta {
+  min-width: 0;
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 850;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-block-chevron {
+  color: var(--secondary);
+  transition: transform 160ms ease;
+}
+
+.tool-block.collapsed .tool-block-chevron {
+  transform: rotate(-90deg);
 }
 
 .tool-block-head h2 {
@@ -2623,7 +2737,7 @@ a.button {
 .slider-field span,
 .loaded-doc span,
 .selected-property-card span,
-.area-totals span {
+.area-totals-content span {
   color: var(--secondary);
   font-size: 12px;
   font-weight: 800;
@@ -2653,6 +2767,21 @@ a.button {
   color: #173154;
   background: transparent;
   font-weight: 800;
+}
+
+.modal-sheet-section {
+  display: grid;
+  gap: 8px;
+}
+
+.modal-sheet-section > span {
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.modal-sheet-section .sheet-toggle {
+  margin-top: 0;
 }
 
 .sheet-toggle,
@@ -2699,6 +2828,10 @@ a.button {
   padding: 10px;
   border-radius: 7px;
   background: #f8fafc;
+}
+
+.scale-preview-card {
+  margin-top: 0;
 }
 
 .calibration-card span {
@@ -3107,7 +3240,7 @@ a.button {
   right: 14px;
   bottom: 14px;
   z-index: 5;
-  width: min(360px, calc(100% - 28px));
+  width: min(372px, calc(100% - 28px));
   display: grid;
   gap: 6px;
   padding: 7px;
@@ -3116,6 +3249,10 @@ a.button {
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 16px 32px rgba(15, 23, 42, 0.16);
   backdrop-filter: blur(10px);
+}
+
+.canvas-zoom-dock:not(.opacity-open) {
+  width: min(336px, calc(100% - 28px));
 }
 
 .measure-inline-card.selected {
@@ -3127,7 +3264,7 @@ a.button {
 
 .canvas-zoom-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 36px 36px;
+  grid-template-columns: 36px minmax(0, 1fr) 36px 36px 36px;
   align-items: center;
   gap: 6px;
 }
@@ -3146,6 +3283,12 @@ a.button {
 .canvas-opacity-row {
   grid-template-columns: 78px minmax(0, 1fr);
   padding: 2px 5px;
+}
+
+.canvas-dock-toggle.active {
+  color: var(--primary);
+  border-color: #b8d7ff;
+  background: #eef5ff;
 }
 
 .canvas-zoom-dock input {
@@ -3178,11 +3321,11 @@ a.button {
 }
 
 .plan-stage.tool-select {
-  cursor: grab;
+  cursor: default;
 }
 
 .plan-stage.tool-select:active {
-  cursor: grabbing;
+  cursor: default;
 }
 
 .plan-stage.tool-ruler {
@@ -3269,29 +3412,76 @@ a.button {
 .area-totals {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1px;
+  gap: 0;
   overflow: hidden;
 }
 
-.area-totals > div {
+.right-panel-toggle {
+  width: 100%;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.right-panel-toggle span {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 850;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.right-panel-toggle strong {
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.right-panel-toggle svg {
+  color: var(--secondary);
+  transition: transform 160ms ease;
+}
+
+.area-totals.collapsed .right-panel-toggle svg,
+.selected-areas-list.collapsed .right-panel-toggle svg,
+.usage-breakdown.collapsed .right-panel-toggle svg {
+  transform: rotate(-90deg);
+}
+
+.area-totals-content {
+  display: grid;
+  gap: 1px;
+  border-top: 1px solid var(--border);
+}
+
+.area-totals-content > div {
   display: grid;
   gap: 3px;
   padding: 12px;
   background: #fff;
 }
 
-.area-totals > div + div {
+.area-totals-content > div + div {
   border-top: 1px solid var(--border);
 }
 
-.area-totals strong {
+.area-totals-content strong {
   color: var(--text);
   font-size: 19px;
   line-height: 1.15;
   overflow-wrap: anywhere;
 }
 
-.area-totals small {
+.area-totals-content small {
   color: #9a6700;
   font-size: 11px;
   font-weight: 750;
@@ -3300,17 +3490,43 @@ a.button {
 .selected-areas-list {
   display: grid;
   gap: 10px;
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .selection-action-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 34px 34px 34px minmax(72px, 1fr) 34px;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
+}
+
+.selection-action-row .icon-button {
+  width: 34px;
+  height: 34px;
+  min-width: 0;
+}
+
+.area-toggle-all-button:not(.all-collapsed) svg {
+  transform: rotate(-90deg);
 }
 
 .selection-action-row .compact-button {
-  flex: 1 1 auto;
-  min-height: 38px;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.areas-scroll-list {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
 }
 
 .areas-empty {
@@ -3330,13 +3546,13 @@ a.button {
 }
 
 .area-row {
+  min-width: 0;
   display: grid;
   gap: 8px;
-  padding: 10px;
+  padding: 9px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #fff;
-  cursor: pointer;
 }
 
 .area-row.selected {
@@ -3345,11 +3561,17 @@ a.button {
   box-shadow: inset 3px 0 0 var(--primary);
 }
 
+.area-row.collapsed {
+  gap: 0;
+}
+
 .area-row-head {
+  min-width: 0;
   display: grid;
-  grid-template-columns: 18px 12px minmax(0, 1fr) 28px;
-  gap: 8px;
+  grid-template-columns: 18px 10px minmax(0, 1fr) 26px;
+  gap: 7px;
   align-items: center;
+  cursor: pointer;
 }
 
 .area-row-head input {
@@ -3359,19 +3581,36 @@ a.button {
 }
 
 .area-row-head span {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
 }
 
-.area-row-head strong {
+.area-row-title {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.area-row-title strong {
   color: var(--text);
   font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.area-row-title em {
+  color: var(--secondary);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 850;
+  white-space: nowrap;
 }
 
 .area-row-head button {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
   border: 1px solid var(--line);
@@ -3389,6 +3628,55 @@ a.button {
   background: #fff;
   font-size: 13px;
   font-weight: 800;
+}
+
+.area-visual-controls {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 6px;
+  align-items: stretch;
+}
+
+.area-color-field,
+.area-opacity-field {
+  min-width: 0;
+  display: grid;
+  align-items: center;
+  gap: 5px;
+  padding: 6px;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.area-color-field {
+  grid-template-columns: auto 24px;
+}
+
+.area-opacity-field {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.area-color-field span,
+.area-opacity-field span {
+  color: var(--secondary);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.area-color-field input {
+  width: 24px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.area-opacity-field input {
+  width: 100%;
+  height: 18px;
+  accent-color: var(--primary);
 }
 
 .area-row dl {
@@ -3419,6 +3707,37 @@ a.button {
   font-size: 13px;
   font-weight: 850;
   overflow-wrap: anywhere;
+}
+
+.area-row dd:has(.area-value-input) {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.area-value-input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #173154;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.area-value-input:focus {
+  outline: 2px solid rgba(13, 110, 253, 0.18);
+  border-color: #b8d7ff;
+}
+
+.area-value-unit {
+  flex: 0 0 auto;
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: 850;
 }
 
 .usage-breakdown {

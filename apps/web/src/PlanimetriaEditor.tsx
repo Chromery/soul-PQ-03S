@@ -11,9 +11,7 @@ import {
   Combine,
   Copy,
   Download,
-  Factory,
   FileText,
-  Home,
   Layers,
   Maximize2,
   MousePointer2,
@@ -96,6 +94,7 @@ type AreaSelection = {
   usageId: UsageId;
   color: string;
   opacity: number;
+  rate: number;
   totalPixels: number;
   region: Region;
   bitmap: HTMLCanvasElement;
@@ -111,6 +110,7 @@ type SavedSelection = {
   id: string;
   page: number;
   usageId: UsageId;
+  rate?: number;
   opacity: number;
   totalPixels: number;
   source?: SelectionSource;
@@ -172,9 +172,46 @@ type DragState = {
   historyRecorded: boolean;
 };
 
+type MarqueeState = {
+  start: CanvasPoint;
+  current: CanvasPoint;
+};
+
+type MarqueeDragState = {
+  start: CanvasPoint;
+  append: boolean;
+  initialSelectedIds: string[];
+  initialRulerSelected: boolean;
+};
+
+type SegmentDragState = {
+  mode: "body" | "start" | "end";
+  start: CanvasPoint;
+  initialSegment: MeasureSegment;
+  historyRecorded: boolean;
+};
+
+type PolygonEditDragState = {
+  selectionId: string;
+  vertexIndex: number;
+  historyRecorded: boolean;
+};
+
+type PolygonInsertTarget = {
+  selectionId: string;
+  edgeIndex: number;
+  point: CanvasPoint;
+};
+
+type SelectedPolygonVertex = {
+  selectionId: string;
+  vertexIndex: number;
+};
+
 type ClipboardSelection = {
   usageId: UsageId;
   opacity: number;
+  rate: number;
   totalPixels: number;
   source: SelectionSource;
   polygon?: CanvasPoint[];
@@ -210,7 +247,18 @@ type EditorSnapshot = {
   calibration: SavedCalibration | null;
   rulerSegment: MeasureSegment | null;
   scaleDenominator: number;
+  sheetSize: SheetSize;
+  activeUsage: UsageId;
+  opacityPercent: number;
+  threshold: number;
+  inflate: number;
+  gap: number;
+  dash: number;
+  knownSegmentMeters: number;
 };
+
+type ToolSectionId = "usage" | "planimetry" | "smart";
+type RightPanelSectionId = "totals" | "areas" | "breakdown";
 
 type CanvasBundle = {
   pdfCanvas: HTMLCanvasElement;
@@ -288,33 +336,55 @@ const TOOL_OPTIONS: Array<{
   id: EditorTool;
   label: string;
   description: string;
+  shortcut: string;
   icon: ReactNode;
 }> = [
   {
     id: "select",
     label: "Seleziona",
     description: "Sposta, copia e unisci aree",
+    shortcut: "V",
     icon: <Move size={17} />,
   },
   {
     id: "smart",
     label: "Smart selection",
     description: "Clicca dentro un'area chiusa",
+    shortcut: "S",
     icon: <MousePointer2 size={17} />,
   },
   {
     id: "polygon",
     label: "Poligono",
     description: "Disegno manuale per vertici",
+    shortcut: "P",
     icon: <PencilLine size={17} />,
   },
   {
     id: "ruler",
     label: "Righello",
     description: "Misura distanza tra due punti",
+    shortcut: "R",
     icon: <Ruler size={17} />,
   },
 ];
+
+const SHORTCUTS = {
+  undo: "Ctrl/Cmd+Z",
+  redo: "Ctrl/Cmd+Shift+Z o Ctrl/Cmd+Y",
+  copy: "Ctrl/Cmd+C",
+  paste: "Ctrl/Cmd+V",
+  delete: "Backspace/Delete",
+  select: "V",
+  smart: "S",
+  polygon: "P",
+  ruler: "R",
+  focus: "F",
+};
+
+function withShortcut(label: string, shortcut?: string) {
+  return shortcut ? `${label} (${shortcut})` : label;
+}
 
 const areaFormatter = new Intl.NumberFormat("it-IT", {
   minimumFractionDigits: 2,
@@ -471,6 +541,7 @@ export default function PlanimetriaEditor({
   onBack,
   onDirtyChange,
 }: PlanimetriaEditorProps) {
+  const editorRootRef = useRef<HTMLElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const waveCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -480,6 +551,9 @@ export default function PlanimetriaEditor({
   const runtimeRef = useRef<Runtime>(createRuntime());
   const pendingDraftRef = useRef<SavedDraft | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
+  const marqueeDragRef = useRef<MarqueeDragState | null>(null);
+  const segmentDragRef = useRef<SegmentDragState | null>(null);
+  const polygonEditDragRef = useRef<PolygonEditDragState | null>(null);
   const rulerDragRef = useRef<CanvasPoint | null>(null);
   const clipboardRef = useRef<ClipboardSelection[]>([]);
 
@@ -511,9 +585,26 @@ export default function PlanimetriaEditor({
   const [leftPanelOpen, setLeftPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.left));
   const [rightPanelOpen, setRightPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.right));
   const [scaleModalOpen, setScaleModalOpen] = useState(false);
+  const [scaleModalSheetSize, setScaleModalSheetSize] = useState<SheetSize>("A3");
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
   const [clearPageConfirmOpen, setClearPageConfirmOpen] = useState(false);
+  const [opacityDockOpen, setOpacityDockOpen] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Record<ToolSectionId, boolean>>({
+    usage: false,
+    planimetry: false,
+    smart: false,
+  });
+  const [collapsedRightSections, setCollapsedRightSections] = useState<Record<RightPanelSectionId, boolean>>({
+    totals: false,
+    areas: false,
+    breakdown: false,
+  });
+  const [collapsedAreaIds, setCollapsedAreaIds] = useState<string[]>([]);
+  const [selectedPolygonVertex, setSelectedPolygonVertex] = useState<SelectedPolygonVertex | null>(null);
+  const [hoverPolygonInsert, setHoverPolygonInsert] = useState<PolygonInsertTarget | null>(null);
   const [selectedSelectionIds, setSelectedSelectionIds] = useState<string[]>([]);
+  const [marqueeDraft, setMarqueeDraft] = useState<MarqueeState | null>(null);
   const [polygonDraft, setPolygonDraft] = useState<CanvasPoint[]>([]);
   const [pointerPreview, setPointerPreview] = useState<CanvasPoint | null>(null);
   const [rulerDraft, setRulerDraft] = useState<MeasureSegment | null>(null);
@@ -535,7 +626,7 @@ export default function PlanimetriaEditor({
   );
   const canUndo = runtimeRef.current.undoStack.length > 0;
   const canRedo = runtimeRef.current.redoStack.length > 0;
-  const canDeleteSelectedObject = selectedSelectionIds.length > 0 || rulerSegmentSelected;
+  const canDeleteSelectedObject = selectedSelectionIds.length > 0 || rulerSegmentSelected || Boolean(selectedPolygonVertex);
   const hasCurrentPageAreas = selections.length > 0;
 
   const selectedAreas = useMemo(
@@ -553,7 +644,7 @@ export default function PlanimetriaEditor({
           index,
           usage,
           area,
-          amount: area * usage.rate,
+          amount: area * selection.rate,
         };
       }),
     [allSelections, scaleDenominator, sheetSize, revision],
@@ -570,6 +661,11 @@ export default function PlanimetriaEditor({
     );
   }, [selectedAreas]);
   const rulerDistanceMeters = rulerSegment ? segmentMetersFromScale(rulerSegment) : 0;
+  const allAreasCollapsed = selectedAreas.length > 0 && collapsedAreaIds.length === selectedAreas.length;
+  const scaleModalPreviewScale = Math.min(
+    20000,
+    Math.max(20, Math.round(parseNumberInput(scaleInputValue) ?? scaleDenominator)),
+  );
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -594,30 +690,85 @@ export default function PlanimetriaEditor({
   }, [
     activeTool,
     selectedSelectionIds,
+    marqueeDraft,
     polygonDraft,
     pointerPreview,
     calibration,
     rulerDraft,
     rulerSegment,
     rulerSegmentSelected,
+    selectedPolygonVertex,
+    hoverPolygonInsert,
     revision,
     hasPdf,
   ]);
 
   useEffect(() => {
+    function handleFullscreenChange() {
+      if (!document.fullscreenElement) setFocusMode(false);
+    }
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    if (!hasPdf) return;
+    window.requestAnimationFrame(() => applyStageSize());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusMode, leftPanelOpen, rightPanelOpen, hasPdf]);
+
+  useEffect(() => {
     function handleKeyboard(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select")) return;
+      const isEditable = Boolean(target?.closest("input, textarea, select"));
       const modifier = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
 
-      if (event.key === "Backspace" || event.key === "Delete") {
+      if (modifier && (key === "z" || key === "y")) {
         event.preventDefault();
-        deleteSelectedObjects();
+        if (key === "z" && event.shiftKey) redoSelectionEdit();
+        else if (key === "z") undoSelectionEdit();
+        else redoSelectionEdit();
         return;
       }
 
-      if (!modifier) return;
+      if (isEditable) return;
+
+      if (event.key === "Backspace" || event.key === "Delete") {
+        event.preventDefault();
+        if (selectedPolygonVertex) deleteSelectedPolygonVertex();
+        else deleteSelectedObjects();
+        return;
+      }
+
+      if (!modifier) {
+        const usageShortcutIndex = /^[1-6]$/.test(key) ? Number(key) - 1 : -1;
+        if (
+          usageShortcutIndex >= 0 &&
+          (activeTool === "select" || activeTool === "smart" || activeTool === "polygon")
+        ) {
+          event.preventDefault();
+          const usage = USAGES[usageShortcutIndex];
+          changeActiveUsage(usage.id);
+          setStatus(`Destinazione d'uso: ${usage.label}`);
+          return;
+        }
+        if (key === "v") selectTool("select");
+        if (key === "s") selectTool("smart");
+        if (key === "p") selectTool("polygon");
+        if (key === "r") selectTool("ruler");
+        if (key === "f") void toggleFocusMode();
+        if (event.key === "Escape") {
+          setPolygonDraft([]);
+          setPointerPreview(null);
+          setSelectedPolygonVertex(null);
+          setHoverPolygonInsert(null);
+          setDeleteMenuOpen(false);
+          setOpacityDockOpen(false);
+        }
+        return;
+      }
       if (key === "c") {
         event.preventDefault();
         copySelectedSelections();
@@ -626,21 +777,12 @@ export default function PlanimetriaEditor({
         event.preventDefault();
         pasteCopiedSelections();
       }
-      if (key === "z") {
-        event.preventDefault();
-        if (event.shiftKey) redoSelectionEdit();
-        else undoSelectionEdit();
-      }
-      if (key === "y") {
-        event.preventDefault();
-        redoSelectionEdit();
-      }
     }
 
     window.addEventListener("keydown", handleKeyboard);
     return () => window.removeEventListener("keydown", handleKeyboard);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSelectionIds, clipboardCount, currentPage, hasPdf, revision]);
+  }, [selectedSelectionIds, selectedPolygonVertex, clipboardCount, currentPage, hasPdf, revision, focusMode, activeTool, activeUsage]);
 
   useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
@@ -668,10 +810,17 @@ export default function PlanimetriaEditor({
     setRulerSegmentSelected(false);
     setRulerDraft(null);
     setSelectedSelectionIds([]);
+    setMarqueeDraft(null);
     setPolygonDraft([]);
     setPointerPreview(null);
     dragStateRef.current = null;
+    marqueeDragRef.current = null;
+    segmentDragRef.current = null;
+    polygonEditDragRef.current = null;
     rulerDragRef.current = null;
+    setSelectedPolygonVertex(null);
+    setHoverPolygonInsert(null);
+    setCollapsedAreaIds([]);
     setDirty(false);
     setSavedAt("");
     setRevision((value) => value + 1);
@@ -913,6 +1062,7 @@ export default function PlanimetriaEditor({
         page: saved.page,
         usageId: saved.usageId,
         color: usage.color,
+        rate: saved.rate ?? usage.rate,
         opacity: saved.opacity,
         totalPixels: saved.totalPixels,
         region,
@@ -940,6 +1090,7 @@ export default function PlanimetriaEditor({
         id: selection.id,
         page: selection.page,
         usageId: selection.usageId,
+        rate: selection.rate,
         opacity: selection.opacity,
         totalPixels: selection.totalPixels,
         source: selection.source,
@@ -2154,6 +2305,14 @@ export default function PlanimetriaEditor({
           }
         : null,
       scaleDenominator,
+      sheetSize,
+      activeUsage,
+      opacityPercent,
+      threshold,
+      inflate,
+      gap,
+      dash,
+      knownSegmentMeters,
     };
   }
 
@@ -2198,7 +2357,19 @@ export default function PlanimetriaEditor({
           : null,
     );
     setRulerSegmentSelected(false);
+    setSelectedPolygonVertex(null);
+    setHoverPolygonInsert(null);
     setScaleDenominator(snapshot.scaleDenominator);
+    setSheetSize(snapshot.sheetSize);
+    setActiveUsage(snapshot.activeUsage);
+    setOpacityPercent(snapshot.opacityPercent);
+    setThreshold(snapshot.threshold);
+    setInflate(snapshot.inflate);
+    setGap(snapshot.gap);
+    setDash(snapshot.dash);
+    setKnownSegmentMeters(snapshot.knownSegmentMeters);
+    runtimeRef.current.wallMap = null;
+    runtimeRef.current.wallKey = "";
     redrawMasks();
     markDirty();
     bumpRevision();
@@ -2238,9 +2409,10 @@ export default function PlanimetriaEditor({
     opacity: number,
     source: SelectionSource = "smart",
     polygon?: CanvasPoint[],
-    options: { recordHistory?: boolean; select?: boolean } = {},
+    options: { recordHistory?: boolean; select?: boolean; rate?: number } = {},
   ) {
     const usage = usageById(usageId);
+    const rate = options.rate ?? usage.rate;
     const selectionsForPage = currentSelections();
     const duplicateIndex = selectionsForPage.findIndex((selection) => sameRegion(selection.region, region));
     const shouldRecord = options.recordHistory !== false;
@@ -2251,6 +2423,7 @@ export default function PlanimetriaEditor({
       const selection = selectionsForPage[duplicateIndex];
       selection.usageId = usageId;
       selection.color = usage.color;
+      selection.rate = rate;
       selection.opacity = opacity;
       selection.region = region;
       selection.bitmap = createTintedCanvas(region, usage.color, opacity);
@@ -2271,6 +2444,7 @@ export default function PlanimetriaEditor({
       page: runtimeRef.current.currentPage,
       usageId,
       color: usage.color,
+      rate,
       opacity,
       totalPixels: getCanvasTotalPixels(),
       region,
@@ -2317,6 +2491,44 @@ export default function PlanimetriaEditor({
         bounds.maxX - bounds.minX + 5,
         bounds.maxY - bounds.minY + 5,
       );
+    }
+    context.restore();
+  }
+
+  function drawPolygonEditHandles(context: CanvasRenderingContext2D, selection: AreaSelection) {
+    if (!selection.polygon || selection.polygon.length < 3) return;
+    if (activeTool !== "select" && activeTool !== "polygon") return;
+
+    const isSelectedVertex = (index: number) =>
+      selectedPolygonVertex?.selectionId === selection.id && selectedPolygonVertex.vertexIndex === index;
+
+    context.save();
+    selection.polygon.forEach((point, index) => {
+      context.beginPath();
+      context.arc(point.x, point.y, isSelectedVertex(index) ? 11 : 8, 0, Math.PI * 2);
+      context.fillStyle = isSelectedVertex(index) ? "#0d6efd" : "#ffffff";
+      context.fill();
+      context.lineWidth = isSelectedVertex(index) ? 4 : 3;
+      context.strokeStyle = selection.color;
+      context.stroke();
+    });
+
+    if (hoverPolygonInsert?.selectionId === selection.id) {
+      context.beginPath();
+      context.arc(hoverPolygonInsert.point.x, hoverPolygonInsert.point.y, 7, 0, Math.PI * 2);
+      context.fillStyle = "#ffffff";
+      context.fill();
+      context.lineWidth = 3;
+      context.strokeStyle = "#0d6efd";
+      context.setLineDash([4, 4]);
+      context.stroke();
+      context.setLineDash([]);
+      context.beginPath();
+      context.moveTo(hoverPolygonInsert.point.x - 5, hoverPolygonInsert.point.y);
+      context.lineTo(hoverPolygonInsert.point.x + 5, hoverPolygonInsert.point.y);
+      context.moveTo(hoverPolygonInsert.point.x, hoverPolygonInsert.point.y - 5);
+      context.lineTo(hoverPolygonInsert.point.x, hoverPolygonInsert.point.y + 5);
+      context.stroke();
     }
     context.restore();
   }
@@ -2369,7 +2581,22 @@ export default function PlanimetriaEditor({
   }
 
   function drawEditorOverlays(context: CanvasRenderingContext2D) {
-    selectedCurrentPageSelections.forEach((selection) => drawSelectionOutline(context, selection));
+    selectedCurrentPageSelections.forEach((selection) => {
+      drawSelectionOutline(context, selection);
+      drawPolygonEditHandles(context, selection);
+    });
+
+    if (marqueeDraft) {
+      const rect = rectFromPoints(marqueeDraft.start, marqueeDraft.current);
+      context.save();
+      context.fillStyle = "rgba(13, 110, 253, 0.12)";
+      context.strokeStyle = "#0d6efd";
+      context.lineWidth = 2;
+      context.setLineDash([10, 6]);
+      context.fillRect(rect.minX, rect.minY, rect.maxX - rect.minX, rect.maxY - rect.minY);
+      context.strokeRect(rect.minX, rect.minY, rect.maxX - rect.minX, rect.maxY - rect.minY);
+      context.restore();
+    }
 
     if (polygonDraft.length > 0) {
       const points = pointerPreview ? [...polygonDraft, pointerPreview] : polygonDraft;
@@ -2544,6 +2771,9 @@ export default function PlanimetriaEditor({
     }
     runtimeRef.current.history = runtimeRef.current.history.filter((selectionId) => !idsToRemove.has(selectionId));
     setSelectedSelectionIds((current) => current.filter((selectionId) => !idsToRemove.has(selectionId)));
+    setCollapsedAreaIds((current) => current.filter((selectionId) => !idsToRemove.has(selectionId)));
+    setSelectedPolygonVertex((current) => (current && idsToRemove.has(current.selectionId) ? null : current));
+    setHoverPolygonInsert((current) => (current && idsToRemove.has(current.selectionId) ? null : current));
     setStatus(idsToRemove.size === 1 ? "Area rimossa" : "Aree rimosse");
     markDirty();
     bumpRevision();
@@ -2566,6 +2796,10 @@ export default function PlanimetriaEditor({
 
   function deleteSelectedObjects() {
     setDeleteMenuOpen(false);
+    if (selectedPolygonVertex) {
+      deleteSelectedPolygonVertex();
+      return;
+    }
     if (selectedSelectionIds.length > 0) {
       removeSelections(selectedSelectionIds);
       return;
@@ -2591,6 +2825,9 @@ export default function PlanimetriaEditor({
     const currentPageIds = new Set(pageSelections.map((selection) => selection.id));
     pageSelections.splice(0);
     setSelectedSelectionIds((current) => current.filter((id) => !currentPageIds.has(id)));
+    setCollapsedAreaIds((current) => current.filter((id) => !currentPageIds.has(id)));
+    setSelectedPolygonVertex((current) => (current && currentPageIds.has(current.selectionId) ? null : current));
+    setHoverPolygonInsert((current) => (current && currentPageIds.has(current.selectionId) ? null : current));
     runtimeRef.current.history = runtimeRef.current.history.filter((id) => {
       for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
         if (pageSelections.some((selection) => selection.id === id)) return true;
@@ -2611,6 +2848,7 @@ export default function PlanimetriaEditor({
       recordUndoState();
       selection.usageId = usageId;
       selection.color = usage.color;
+      selection.rate = usage.rate;
       selection.bitmap = createTintedCanvas(selection.region, usage.color, selection.opacity);
       redrawMasks();
       markDirty();
@@ -2619,9 +2857,64 @@ export default function PlanimetriaEditor({
     }
   }
 
+  function changeSelectionColor(id: string, color: string) {
+    if (!/^#[0-9a-f]{6}$/i.test(color)) return;
+    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
+      const selection = pageSelections.find((item) => item.id === id);
+      if (!selection || selection.color.toLowerCase() === color.toLowerCase()) continue;
+      recordUndoState();
+      selection.color = color;
+      selection.bitmap = createTintedCanvas(selection.region, color, selection.opacity);
+      redrawMasks();
+      setStatus("Colore area aggiornato");
+      markDirty();
+      bumpRevision();
+      return;
+    }
+  }
+
+  function changeSelectionOpacity(id: string, nextOpacityPercent: number) {
+    const opacity = Math.min(100, Math.max(5, nextOpacityPercent)) / 100;
+    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
+      const selection = pageSelections.find((item) => item.id === id);
+      if (!selection || Math.round(selection.opacity * 100) === Math.round(opacity * 100)) continue;
+      recordUndoState();
+      selection.opacity = opacity;
+      selection.bitmap = createTintedCanvas(selection.region, selection.color, opacity);
+      redrawMasks();
+      setStatus("Opacita area aggiornata");
+      markDirty();
+      bumpRevision();
+      return;
+    }
+  }
+
+  function changeSelectionRate(id: string, rawValue: string) {
+    const parsed = parseNumberInput(rawValue);
+    if (parsed === null) {
+      setStatus("Inserisci un valore valido");
+      bumpRevision();
+      return null;
+    }
+    const nextRate = Math.max(0, parsed);
+    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
+      const selection = pageSelections.find((item) => item.id === id);
+      if (!selection) continue;
+      if (selection.rate === nextRate) return selection.rate;
+      recordUndoState();
+      selection.rate = nextRate;
+      setStatus("Valore area aggiornato");
+      markDirty();
+      bumpRevision();
+      return nextRate;
+    }
+    return null;
+  }
+
   function updateMaskOpacity(nextOpacityPercent: number) {
     const opacity = nextOpacityPercent / 100;
-    if (runtimeRef.current.selectionsByPage.size > 0) recordUndoState();
+    if (nextOpacityPercent === opacityPercent) return;
+    recordUndoState();
     setOpacityPercent(nextOpacityPercent);
     for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
       pageSelections.forEach((selection) => {
@@ -2634,13 +2927,19 @@ export default function PlanimetriaEditor({
     bumpRevision();
   }
 
-  function canvasPointFromEvent(event: PointerEvent<HTMLDivElement>) {
+  function canvasPointFromEvent(event: PointerEvent<HTMLDivElement>, options?: { clamp?: boolean }) {
     const stage = stageRef.current;
     const pdfCanvas = pdfCanvasRef.current;
     if (!stage || !pdfCanvas) return null;
     const rect = stage.getBoundingClientRect();
     const x = Math.floor((event.clientX - rect.left) * (pdfCanvas.width / rect.width));
     const y = Math.floor((event.clientY - rect.top) * (pdfCanvas.height / rect.height));
+    if (options?.clamp) {
+      return {
+        x: Math.max(0, Math.min(pdfCanvas.width - 1, x)),
+        y: Math.max(0, Math.min(pdfCanvas.height - 1, y)),
+      };
+    }
     if (x < 0 || y < 0 || x >= pdfCanvas.width || y >= pdfCanvas.height) return null;
     return { x, y };
   }
@@ -2668,6 +2967,96 @@ export default function PlanimetriaEditor({
     return null;
   }
 
+  function rectFromPoints(start: CanvasPoint, end: CanvasPoint): MaskBounds {
+    return {
+      minX: Math.min(start.x, end.x),
+      minY: Math.min(start.y, end.y),
+      maxX: Math.max(start.x, end.x),
+      maxY: Math.max(start.y, end.y),
+    };
+  }
+
+  function boundsIntersectRect(bounds: MaskBounds, rect: MaskBounds) {
+    return (
+      bounds.maxX >= rect.minX &&
+      bounds.minX <= rect.maxX &&
+      bounds.maxY >= rect.minY &&
+      bounds.minY <= rect.maxY
+    );
+  }
+
+  function selectionIntersectsRect(selection: AreaSelection, rect: MaskBounds) {
+    const { bounds } = selection.region;
+    if (!boundsIntersectRect(bounds, rect)) return false;
+
+    const minX = Math.max(bounds.minX, rect.minX);
+    const minY = Math.max(bounds.minY, rect.minY);
+    const maxX = Math.min(bounds.maxX, rect.maxX);
+    const maxY = Math.min(bounds.maxY, rect.maxY);
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+    if (width <= 0 || height <= 0) return false;
+    if (minX <= bounds.minX && minY <= bounds.minY && maxX >= bounds.maxX && maxY >= bounds.maxY) {
+      return selection.region.count > 0;
+    }
+
+    const context = selection.region.alphaCanvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return false;
+    const localX = minX - bounds.minX;
+    const localY = minY - bounds.minY;
+    const data = context.getImageData(localX, localY, width, height).data;
+    for (let index = 3; index < data.length; index += 4) {
+      if (data[index] > 8) return true;
+    }
+    return false;
+  }
+
+  function pointInRect(point: CanvasPoint, rect: MaskBounds) {
+    return point.x >= rect.minX && point.x <= rect.maxX && point.y >= rect.minY && point.y <= rect.maxY;
+  }
+
+  function segmentIntersectsRect(segment: MeasureSegment, rect: MaskBounds) {
+    if (pointInRect(segment.start, rect) || pointInRect(segment.end, rect)) return true;
+    const corners = [
+      { x: rect.minX, y: rect.minY },
+      { x: rect.maxX, y: rect.minY },
+      { x: rect.maxX, y: rect.maxY },
+      { x: rect.minX, y: rect.maxY },
+    ];
+    const edges: Array<[CanvasPoint, CanvasPoint]> = [
+      [corners[0], corners[1]],
+      [corners[1], corners[2]],
+      [corners[2], corners[3]],
+      [corners[3], corners[0]],
+    ];
+    return edges.some(([start, end]) => segmentsIntersect(segment.start, segment.end, start, end));
+  }
+
+  function segmentsIntersect(a: CanvasPoint, b: CanvasPoint, c: CanvasPoint, d: CanvasPoint) {
+    function orientation(p: CanvasPoint, q: CanvasPoint, r: CanvasPoint) {
+      const value = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+      if (Math.abs(value) < 0.0001) return 0;
+      return value > 0 ? 1 : 2;
+    }
+    function onSegment(p: CanvasPoint, q: CanvasPoint, r: CanvasPoint) {
+      return (
+        q.x <= Math.max(p.x, r.x) &&
+        q.x >= Math.min(p.x, r.x) &&
+        q.y <= Math.max(p.y, r.y) &&
+        q.y >= Math.min(p.y, r.y)
+      );
+    }
+    const o1 = orientation(a, b, c);
+    const o2 = orientation(a, b, d);
+    const o3 = orientation(c, d, a);
+    const o4 = orientation(c, d, b);
+    if (o1 !== o2 && o3 !== o4) return true;
+    if (o1 === 0 && onSegment(a, c, b)) return true;
+    if (o2 === 0 && onSegment(a, d, b)) return true;
+    if (o3 === 0 && onSegment(c, a, d)) return true;
+    return o4 === 0 && onSegment(c, b, d);
+  }
+
   function distanceToSegment(point: CanvasPoint, start: CanvasPoint, end: CanvasPoint) {
     const dx = end.x - start.x;
     const dy = end.y - start.y;
@@ -2687,6 +3076,64 @@ export default function PlanimetriaEditor({
     if (!segment || segment.page !== runtimeRef.current.currentPage) return false;
     const threshold = Math.max(12, Math.round(10 * runtimeRef.current.renderScale));
     return distanceToSegment(point, segment.start, segment.end) <= threshold;
+  }
+
+  function hitTestMeasureSegmentHandle(point: CanvasPoint) {
+    const segment = activeMeasureSegment();
+    if (!segment || segment.page !== runtimeRef.current.currentPage) return null;
+    const endpointThreshold = Math.max(14, Math.round(10 * runtimeRef.current.renderScale));
+    if (distance(point, segment.start) <= endpointThreshold) return "start" as const;
+    if (distance(point, segment.end) <= endpointThreshold) return "end" as const;
+    const bodyThreshold = Math.max(12, Math.round(8 * runtimeRef.current.renderScale));
+    if (distanceToSegment(point, segment.start, segment.end) <= bodyThreshold) return "body" as const;
+    return null;
+  }
+
+  function selectedEditablePolygons() {
+    return selectedCurrentPageSelections.filter(
+      (selection) => selection.polygon && selection.polygon.length >= 3,
+    );
+  }
+
+  function hitTestPolygonVertex(point: CanvasPoint) {
+    const threshold = Math.max(12, Math.round(9 * runtimeRef.current.renderScale));
+    const polygons = selectedEditablePolygons();
+    for (let selectionIndex = polygons.length - 1; selectionIndex >= 0; selectionIndex--) {
+      const selection = polygons[selectionIndex];
+      const points = selection.polygon;
+      if (!points) continue;
+      for (let index = points.length - 1; index >= 0; index--) {
+        if (distance(point, points[index]) <= threshold) {
+          return { selection, vertexIndex: index };
+        }
+      }
+    }
+    return null;
+  }
+
+  function hitTestPolygonInsert(point: CanvasPoint): PolygonInsertTarget | null {
+    const threshold = Math.max(10, Math.round(7 * runtimeRef.current.renderScale));
+    const polygons = selectedEditablePolygons();
+    for (let selectionIndex = polygons.length - 1; selectionIndex >= 0; selectionIndex--) {
+      const selection = polygons[selectionIndex];
+      const points = selection.polygon;
+      if (!points) continue;
+      for (let index = 0; index < points.length; index++) {
+        const start = points[index];
+        const end = points[(index + 1) % points.length];
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const lengthSquared = dx * dx + dy * dy;
+        if (lengthSquared === 0) continue;
+        const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+        if (t < 0.16 || t > 0.84) continue;
+        const projected = { x: Math.round(start.x + t * dx), y: Math.round(start.y + t * dy) };
+        if (distance(point, projected) <= threshold) {
+          return { selectionId: selection.id, edgeIndex: index, point: projected };
+        }
+      }
+    }
+    return null;
   }
 
   function clampDeltaForSnapshots(snapshots: DragSnapshot[], dx: number, dy: number) {
@@ -2737,6 +3184,165 @@ export default function PlanimetriaEditor({
     };
   }
 
+  function selectionIdsInRect(rect: MaskBounds) {
+    return currentSelections()
+      .filter((selection) => selectionIntersectsRect(selection, rect))
+      .map((selection) => selection.id);
+  }
+
+  function computeMarqueeSelection(current: CanvasPoint) {
+    const drag = marqueeDragRef.current;
+    if (!drag) return { ids: [] as string[], rulerSelected: false, rect: rectFromPoints(current, current) };
+    const rect = rectFromPoints(drag.start, current);
+    const hitIds = selectionIdsInRect(rect);
+    const ids = drag.append ? Array.from(new Set([...drag.initialSelectedIds, ...hitIds])) : hitIds;
+    const segment = activeMeasureSegment();
+    const rulerSelected =
+      drag.initialRulerSelected ||
+      Boolean(segment && segment.page === runtimeRef.current.currentPage && segmentIntersectsRect(segment, rect));
+    return { ids, rulerSelected, rect };
+  }
+
+  function updateMarqueeSelection(current: CanvasPoint) {
+    const drag = marqueeDragRef.current;
+    if (!drag) return;
+    setMarqueeDraft({ start: drag.start, current });
+    const { ids, rulerSelected, rect } = computeMarqueeSelection(current);
+    const tooSmall = rect.maxX - rect.minX < 5 && rect.maxY - rect.minY < 5;
+    setSelectedSelectionIds(tooSmall ? drag.initialSelectedIds : ids);
+    setRulerSegmentSelected(tooSmall ? drag.initialRulerSelected : rulerSelected);
+    setSelectedPolygonVertex(null);
+    setHoverPolygonInsert(null);
+  }
+
+  function finishMarqueeSelection(current: CanvasPoint) {
+    const drag = marqueeDragRef.current;
+    if (!drag) return;
+    const { ids, rulerSelected, rect } = computeMarqueeSelection(current);
+    const tooSmall = rect.maxX - rect.minX < 5 && rect.maxY - rect.minY < 5;
+    const finalIds = tooSmall ? drag.initialSelectedIds : ids;
+    setSelectedSelectionIds(finalIds);
+    setRulerSegmentSelected(tooSmall ? drag.initialRulerSelected : rulerSelected);
+    setMarqueeDraft(null);
+    marqueeDragRef.current = null;
+    if (!tooSmall) {
+      const total = finalIds.length + (rulerSelected ? 1 : 0);
+      setStatus(total === 1 ? "1 elemento selezionato" : `${total} elementi selezionati`);
+    }
+  }
+
+  function findSelectionById(id: string) {
+    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
+      const selection = pageSelections.find((item) => item.id === id);
+      if (selection) return selection;
+    }
+    return null;
+  }
+
+  function replacePolygonSelection(selectionId: string, points: CanvasPoint[]) {
+    if (points.length < 3) return false;
+    const selection = findSelectionById(selectionId);
+    if (!selection) return false;
+    const region = createPolygonRegion(points);
+    if (!region) return false;
+    selection.polygon = points.map((point) => ({ ...point }));
+    selection.region = region;
+    selection.totalPixels = getCanvasTotalPixels();
+    selection.bitmap = createTintedCanvas(region, selection.color, selection.opacity);
+    redrawMasks();
+    bumpRevision();
+    return true;
+  }
+
+  function deleteSelectedPolygonVertex() {
+    if (!selectedPolygonVertex) return;
+    const selection = findSelectionById(selectedPolygonVertex.selectionId);
+    if (!selection?.polygon) return;
+    if (selection.polygon.length <= 3) {
+      setStatus("Un poligono deve avere almeno tre vertici");
+      return;
+    }
+    recordUndoState();
+    const nextPoints = selection.polygon.filter((_, index) => index !== selectedPolygonVertex.vertexIndex);
+    if (!replacePolygonSelection(selection.id, nextPoints)) return;
+    setSelectedSelectionIds([selection.id]);
+    setSelectedPolygonVertex(null);
+    setStatus("Vertice rimosso");
+    markDirty();
+  }
+
+  function addPolygonVertex(target: PolygonInsertTarget) {
+    const selection = findSelectionById(target.selectionId);
+    if (!selection?.polygon) return null;
+    recordUndoState();
+    const nextPoints = selection.polygon.map((point) => ({ ...point }));
+    const vertexIndex = target.edgeIndex + 1;
+    nextPoints.splice(vertexIndex, 0, { ...target.point });
+    if (!replacePolygonSelection(selection.id, nextPoints)) return null;
+    setSelectedSelectionIds([selection.id]);
+    setSelectedPolygonVertex({ selectionId: selection.id, vertexIndex });
+    setStatus("Vertice aggiunto");
+    markDirty();
+    return { selectionId: selection.id, vertexIndex };
+  }
+
+  function updatePolygonVertex(selectionId: string, vertexIndex: number, point: CanvasPoint) {
+    const selection = findSelectionById(selectionId);
+    if (!selection?.polygon) return false;
+    const nextPoints = selection.polygon.map((item, index) =>
+      index === vertexIndex ? { ...point } : { ...item },
+    );
+    return replacePolygonSelection(selectionId, nextPoints);
+  }
+
+  function clampCanvasPoint(point: CanvasPoint) {
+    const canvas = pdfCanvasRef.current;
+    if (!canvas) return point;
+    return {
+      x: Math.max(0, Math.min(canvas.width - 1, Math.round(point.x))),
+      y: Math.max(0, Math.min(canvas.height - 1, Math.round(point.y))),
+    };
+  }
+
+  function clampSegment(segment: MeasureSegment) {
+    return {
+      page: segment.page,
+      start: clampCanvasPoint(segment.start),
+      end: clampCanvasPoint(segment.end),
+    };
+  }
+
+  function scaleFromKnownSegmentValue(segment: MeasureSegment, knownMeters: number) {
+    const canvas = pdfCanvasRef.current;
+    if (!canvas) return null;
+    const segmentPixels = distance(segment.start, segment.end);
+    if (segmentPixels < 12 || knownMeters <= 0) return null;
+    const sheet = orientedSheetSize(sheetSize, canvas.width, canvas.height);
+    const dxMm = (segment.end.x - segment.start.x) * (sheet.widthMm / canvas.width);
+    const dyMm = (segment.end.y - segment.start.y) * (sheet.heightMm / canvas.height);
+    const segmentMmOnSheet = Math.hypot(dxMm, dyMm);
+    if (segmentMmOnSheet <= 0) return null;
+    return Math.min(20000, Math.max(20, Math.round((knownMeters * 1000) / segmentMmOnSheet)));
+  }
+
+  function applySegmentEdit(nextSegment: MeasureSegment) {
+    const clamped = clampSegment(nextSegment);
+    setRulerSegment(clamped);
+    if (calibration) {
+      const nextScale = scaleFromKnownSegmentValue(clamped, calibration.knownMeters);
+      setCalibration({
+        ...calibration,
+        start: clamped.start,
+        end: clamped.end,
+        scaleDenominator: nextScale ?? calibration.scaleDenominator,
+      });
+      if (nextScale) setScaleDenominator(nextScale);
+    }
+    setRulerSegmentSelected(true);
+    redrawMasks();
+    bumpRevision();
+  }
+
   function cloneRegion(region: Region, dx = 0, dy = 0): Region {
     return {
       bounds: {
@@ -2759,6 +3365,7 @@ export default function PlanimetriaEditor({
     clipboardRef.current = source.map((selection) => ({
       usageId: selection.usageId,
       opacity: selection.opacity,
+      rate: selection.rate,
       totalPixels: selection.totalPixels,
       source: selection.source === "merged" ? "merged" : "copy",
       polygon: selection.polygon?.map((point) => ({ ...point })),
@@ -2790,6 +3397,7 @@ export default function PlanimetriaEditor({
         page: runtimeRef.current.currentPage,
         usageId: item.usageId,
         color: usage.color,
+        rate: item.rate,
         opacity: item.opacity,
         totalPixels: getCanvasTotalPixels(),
         region,
@@ -2879,6 +3487,7 @@ export default function PlanimetriaEditor({
     removeSelectionsFromCurrentPage(ids);
     const mergedId = commitSelection(region, first.usageId, first.opacity, "merged", undefined, {
       recordHistory: false,
+      rate: first.rate,
     });
     if (mergedId) setSelectedSelectionIds([mergedId]);
     setStatus(`${selected.length} aree unite`);
@@ -2914,7 +3523,7 @@ export default function PlanimetriaEditor({
       setStatus("Disegna prima un segmento con il righello");
       return;
     }
-    const knownMeters = commitKnownSegmentInput();
+    const knownMeters = commitKnownSegmentInput({ recordHistory: false });
     if (!knownMeters) {
       setStatus("Inserisci la distanza nota del segmento");
       return;
@@ -2953,6 +3562,56 @@ export default function PlanimetriaEditor({
     if (event.button !== 0 || !hasPdf || busy) return;
     const point = canvasPointFromEvent(event);
     if (!point) return;
+
+    if (activeTool === "select" || activeTool === "polygon") {
+      const vertexHit = hitTestPolygonVertex(point);
+      if (vertexHit) {
+        setSelectedSelectionIds([vertexHit.selection.id]);
+        setSelectedPolygonVertex({ selectionId: vertexHit.selection.id, vertexIndex: vertexHit.vertexIndex });
+        setRulerSegmentSelected(false);
+        polygonEditDragRef.current = {
+          selectionId: vertexHit.selection.id,
+          vertexIndex: vertexHit.vertexIndex,
+          historyRecorded: false,
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
+        return;
+      }
+
+      const insertHit = hitTestPolygonInsert(point);
+      if (insertHit) {
+        const inserted = addPolygonVertex(insertHit);
+        if (inserted) {
+          polygonEditDragRef.current = { ...inserted, historyRecorded: true };
+          setHoverPolygonInsert(null);
+          event.currentTarget.setPointerCapture(event.pointerId);
+          return;
+        }
+      }
+    }
+
+    if (activeTool === "select") {
+      const segmentHandle = hitTestMeasureSegmentHandle(point);
+      const segment = activeMeasureSegment();
+      if (segmentHandle && segment) {
+        setSelectedSelectionIds([]);
+        setSelectedPolygonVertex(null);
+        setHoverPolygonInsert(null);
+        setRulerSegmentSelected(true);
+        segmentDragRef.current = {
+          mode: segmentHandle,
+          start: point,
+          initialSegment: {
+            page: segment.page,
+            start: { ...segment.start },
+            end: { ...segment.end },
+          },
+          historyRecorded: false,
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
+        return;
+      }
+    }
 
     if (activeTool === "smart") {
       void fillAtCanvasPoint(point.x, point.y, event.shiftKey);
@@ -2993,15 +3652,37 @@ export default function PlanimetriaEditor({
     const hitSegment = hitTestMeasureSegment(point);
     if (!hit && hitSegment) {
       setSelectedSelectionIds([]);
+      setSelectedPolygonVertex(null);
+      setHoverPolygonInsert(null);
       setRulerSegmentSelected(true);
       redrawMasks();
       return;
     }
 
     if (!hit) {
+      if (activeTool === "select") {
+        const append = event.shiftKey || event.metaKey || event.ctrlKey;
+        marqueeDragRef.current = {
+          start: point,
+          append,
+          initialSelectedIds: append ? [...selectedSelectionIds] : [],
+          initialRulerSelected: append ? rulerSegmentSelected : false,
+        };
+        setMarqueeDraft({ start: point, current: point });
+        if (!append) {
+          setSelectedSelectionIds([]);
+          setRulerSegmentSelected(false);
+        }
+        setSelectedPolygonVertex(null);
+        setHoverPolygonInsert(null);
+        event.currentTarget.setPointerCapture(event.pointerId);
+        return;
+      }
       if (!event.shiftKey && !event.metaKey && !event.ctrlKey) {
         setSelectedSelectionIds([]);
         setRulerSegmentSelected(false);
+        setSelectedPolygonVertex(null);
+        setHoverPolygonInsert(null);
       }
       redrawMasks();
       return;
@@ -3017,6 +3698,8 @@ export default function PlanimetriaEditor({
       nextSelectedIds = alreadySelected ? selectedSelectionIds : [hit.id];
     }
     setSelectedSelectionIds(nextSelectedIds);
+    setSelectedPolygonVertex(null);
+    setHoverPolygonInsert(null);
     setRulerSegmentSelected(false);
     if (nextSelectedIds.includes(hit.id)) {
       startSelectionDrag(point, nextSelectedIds);
@@ -3026,8 +3709,72 @@ export default function PlanimetriaEditor({
 
   function onStagePointerMove(event: PointerEvent<HTMLDivElement>) {
     if (!hasPdf) return;
-    const point = canvasPointFromEvent(event);
+    const shouldClampPointer = Boolean(
+      segmentDragRef.current ||
+        polygonEditDragRef.current ||
+        marqueeDragRef.current ||
+        rulerDragRef.current ||
+        dragStateRef.current,
+    );
+    const point = canvasPointFromEvent(event, { clamp: shouldClampPointer });
     if (!point) return;
+
+    const segmentDrag = segmentDragRef.current;
+    if (segmentDrag) {
+      const rawDx = point.x - segmentDrag.start.x;
+      const rawDy = point.y - segmentDrag.start.y;
+      let nextSegment = segmentDrag.initialSegment;
+      if (segmentDrag.mode === "body") {
+        const canvas = pdfCanvasRef.current;
+        let dx = Math.round(rawDx);
+        let dy = Math.round(rawDy);
+        if (canvas) {
+          const minX = Math.min(segmentDrag.initialSegment.start.x, segmentDrag.initialSegment.end.x);
+          const maxX = Math.max(segmentDrag.initialSegment.start.x, segmentDrag.initialSegment.end.x);
+          const minY = Math.min(segmentDrag.initialSegment.start.y, segmentDrag.initialSegment.end.y);
+          const maxY = Math.max(segmentDrag.initialSegment.start.y, segmentDrag.initialSegment.end.y);
+          dx = Math.max(dx, -minX);
+          dx = Math.min(dx, canvas.width - 1 - maxX);
+          dy = Math.max(dy, -minY);
+          dy = Math.min(dy, canvas.height - 1 - maxY);
+        }
+        nextSegment = {
+          page: segmentDrag.initialSegment.page,
+          start: translatePoint(segmentDrag.initialSegment.start, dx, dy),
+          end: translatePoint(segmentDrag.initialSegment.end, dx, dy),
+        };
+      } else {
+        nextSegment = {
+          ...segmentDrag.initialSegment,
+          [segmentDrag.mode]: clampCanvasPoint(point),
+        };
+      }
+      if (!segmentDrag.historyRecorded && (rawDx !== 0 || rawDy !== 0)) {
+        recordUndoState();
+        segmentDrag.historyRecorded = true;
+      }
+      applySegmentEdit(nextSegment);
+      return;
+    }
+
+    const polygonEditDrag = polygonEditDragRef.current;
+    if (polygonEditDrag) {
+      if (!polygonEditDrag.historyRecorded) {
+        recordUndoState();
+        polygonEditDrag.historyRecorded = true;
+      }
+      updatePolygonVertex(polygonEditDrag.selectionId, polygonEditDrag.vertexIndex, clampCanvasPoint(point));
+      setSelectedPolygonVertex({
+        selectionId: polygonEditDrag.selectionId,
+        vertexIndex: polygonEditDrag.vertexIndex,
+      });
+      return;
+    }
+
+    if (marqueeDragRef.current) {
+      updateMarqueeSelection(point);
+      return;
+    }
 
     if (activeTool === "polygon" && polygonDraft.length > 0) {
       setPointerPreview(point);
@@ -3053,12 +3800,34 @@ export default function PlanimetriaEditor({
         dragState.historyRecorded = true;
       }
       applyDragDelta(dragState, dx, dy);
+      return;
+    }
+
+    if ((activeTool === "select" || activeTool === "polygon") && selectedEditablePolygons().length > 0) {
+      const insertHit = hitTestPolygonInsert(point);
+      const current = hoverPolygonInsert;
+      const changed =
+        Boolean(insertHit) !== Boolean(current) ||
+        insertHit?.selectionId !== current?.selectionId ||
+        insertHit?.edgeIndex !== current?.edgeIndex ||
+        insertHit?.point.x !== current?.point.x ||
+        insertHit?.point.y !== current?.point.y;
+      if (changed) setHoverPolygonInsert(insertHit);
+    } else if (hoverPolygonInsert) {
+      setHoverPolygonInsert(null);
     }
   }
 
   function onStagePointerUp(event: PointerEvent<HTMLDivElement>) {
     if (!hasPdf) return;
-    const point = canvasPointFromEvent(event);
+    const shouldClampPointer = Boolean(
+      segmentDragRef.current ||
+        polygonEditDragRef.current ||
+        marqueeDragRef.current ||
+        rulerDragRef.current ||
+        dragStateRef.current,
+    );
+    const point = canvasPointFromEvent(event, { clamp: shouldClampPointer });
 
     function releasePointer() {
       try {
@@ -3066,6 +3835,41 @@ export default function PlanimetriaEditor({
       } catch {
         // Pointer capture may already be released when the pointer leaves the stage.
       }
+    }
+
+    const segmentDrag = segmentDragRef.current;
+    if (segmentDrag) {
+      segmentDragRef.current = null;
+      if (segmentDrag.historyRecorded) {
+        const segment = activeMeasureSegment();
+        if (segment && distance(segment.start, segment.end) < 12) {
+          applySegmentEdit(segmentDrag.initialSegment);
+          setStatus("Segmento troppo corto");
+        } else {
+          setStatus(segmentDrag.mode === "body" ? "Segmento spostato" : "Estremo segmento aggiornato");
+          markDirty();
+        }
+      }
+      releasePointer();
+      return;
+    }
+
+    const polygonEditDrag = polygonEditDragRef.current;
+    if (polygonEditDrag) {
+      polygonEditDragRef.current = null;
+      if (polygonEditDrag.historyRecorded) {
+        setStatus("Vertice aggiornato");
+        markDirty();
+      }
+      releasePointer();
+      return;
+    }
+
+    const marqueeDrag = marqueeDragRef.current;
+    if (marqueeDrag) {
+      finishMarqueeSelection(point ?? marqueeDrag.start);
+      releasePointer();
+      return;
     }
 
     if (activeTool === "ruler" && rulerDragRef.current && point) {
@@ -3127,6 +3931,68 @@ export default function PlanimetriaEditor({
     if (runtime.pdfDoc) applyStageSize();
   }
 
+  function toggleToolSection(section: ToolSectionId) {
+    setCollapsedSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
+  }
+
+  function toggleRightPanelSection(section: RightPanelSectionId) {
+    setCollapsedRightSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
+  }
+
+  function collapseAllAreas() {
+    setCollapsedAreaIds(selectedAreas.map(({ selection }) => selection.id));
+  }
+
+  function expandAllAreas() {
+    setCollapsedAreaIds([]);
+  }
+
+  function changeActiveUsage(usageId: UsageId) {
+    if (usageId === activeUsage) return;
+    recordUndoState();
+    setActiveUsage(usageId);
+    markDirty();
+  }
+
+  function updateTraceSetting(
+    key: "threshold" | "inflate" | "gap" | "dash",
+    currentValue: number,
+    nextValue: number,
+  ) {
+    if (currentValue === nextValue) return;
+    recordUndoState();
+    if (key === "threshold") setThreshold(nextValue);
+    if (key === "inflate") setInflate(nextValue);
+    if (key === "gap") setGap(nextValue);
+    if (key === "dash") setDash(nextValue);
+    invalidateWallMap();
+    markDirty();
+  }
+
+  async function toggleFocusMode() {
+    const nextFocusMode = !focusMode;
+    setFocusMode(nextFocusMode);
+    if (nextFocusMode) {
+      try {
+        await editorRootRef.current?.requestFullscreen?.();
+      } catch {
+        // Focus mode still reduces the app chrome when browser fullscreen is unavailable.
+      }
+    } else if (document.fullscreenElement === editorRootRef.current) {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        // Leaving fullscreen is best effort.
+      }
+    }
+  }
+
   function commitScaleInput() {
     const parsed = parseNumberInput(scaleInputValue);
     if (parsed === null) {
@@ -3134,9 +4000,12 @@ export default function PlanimetriaEditor({
       return null;
     }
     const nextScale = Math.min(20000, Math.max(20, Math.round(parsed)));
+    const changed = nextScale !== scaleDenominator || scaleModalSheetSize !== sheetSize;
+    if (changed) recordUndoState();
     setScaleDenominator(nextScale);
+    setSheetSize(scaleModalSheetSize);
     setScaleInputValue(String(nextScale));
-    markDirty();
+    if (changed) markDirty();
     return nextScale;
   }
 
@@ -3153,13 +4022,14 @@ export default function PlanimetriaEditor({
     setScaleInputValue(String(scaleDenominator));
   }
 
-  function commitKnownSegmentInput() {
+  function commitKnownSegmentInput(options: { recordHistory?: boolean } = {}) {
     const parsed = parseNumberInput(knownSegmentInputValue);
     if (parsed === null) {
       setKnownSegmentInputValue("");
       return null;
     }
     const nextMeters = Math.max(0.1, parsed);
+    if (options.recordHistory !== false && nextMeters !== knownSegmentMeters) recordUndoState();
     setKnownSegmentMeters(nextMeters);
     setKnownSegmentInputValue(String(nextMeters));
     return nextMeters;
@@ -3182,6 +4052,10 @@ export default function PlanimetriaEditor({
       setPolygonDraft([]);
       setPointerPreview(null);
     }
+    if (tool !== "select" && tool !== "polygon") {
+      setSelectedPolygonVertex(null);
+      setHoverPolygonInsert(null);
+    }
     if (tool !== "ruler") {
       rulerDragRef.current = null;
       setRulerDraft(null);
@@ -3193,7 +4067,7 @@ export default function PlanimetriaEditor({
   }
 
   return (
-    <main className="plan-editor">
+    <main ref={editorRootRef} className={`plan-editor ${focusMode ? "focus-mode" : ""}`}>
       <div className="plan-editor-header">
         <button className="back-link" onClick={onBack}>
           <ArrowLeft size={17} />
@@ -3227,6 +4101,15 @@ export default function PlanimetriaEditor({
               <FileText size={17} />
               Salva bozza
             </button>
+            <button
+              className="icon-button focus-toggle"
+              type="button"
+              onClick={() => void toggleFocusMode()}
+              title={withShortcut(focusMode ? "Esci da focus" : "Focus editor", SHORTCUTS.focus)}
+              aria-label={focusMode ? "Esci da focus" : "Focus editor"}
+            >
+              {focusMode ? <X size={18} /> : <Maximize2 size={18} />}
+            </button>
           </div>
         </div>
       </div>
@@ -3256,148 +4139,112 @@ export default function PlanimetriaEditor({
             </button>
           </div>
 
-          <section className="tool-block">
-            <div className="tool-block-head">
-              <h2>Destinazione d'uso</h2>
-              <span style={{ color: activeUsageOption.color }}>{activeUsageOption.shortLabel}</span>
-            </div>
-            <div className="usage-grid">
-              {USAGES.map((usage) => (
-                <button
-                  key={usage.id}
-                  className={`usage-button ${activeUsage === usage.id ? "active" : ""}`}
-                  style={{ "--usage-color": usage.color } as CSSProperties}
-                  onClick={() => {
-                    setActiveUsage(usage.id);
-                    markDirty();
-                  }}
-                >
-                  <span />
-                  {usage.label}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="tool-block">
-            <div className="tool-block-head">
-              <h2>Formato foglio</h2>
-              <Ruler size={18} />
-            </div>
-            <div className="sheet-toggle" role="group" aria-label="Formato foglio">
-              {(["A3", "A4"] as SheetSize[]).map((size) => (
-                <button
-                  key={size}
-                  className={sheetSize === size ? "active" : ""}
-                  onClick={() => {
-                    setSheetSize(size);
-                    markDirty();
-                  }}
-                >
-                  {size}
-                </button>
-              ))}
-            </div>
-            <div className="calibration-card">
-              <span>Area reale foglio</span>
-              <strong>{formatM2(pageRealAreaM2(sheetSize, scaleDenominator))}</strong>
-            </div>
-            {calibration && (
-              <div className="calibration-segment-info">
-                <span>Taratura attiva</span>
-                <strong>
-                  {areaFormatter.format(calibration.knownMeters)} m {"->"} 1:{calibration.scaleDenominator}
-                </strong>
+          <section className={`tool-block ${collapsedSections.usage ? "collapsed" : ""}`}>
+            <button className="tool-block-toggle" type="button" onClick={() => toggleToolSection("usage")}>
+              <span className="tool-block-title">Destinazione d'uso</span>
+              <span className="tool-block-meta" style={{ color: activeUsageOption.color }}>
+                {activeUsageOption.shortLabel}
+              </span>
+              <ChevronDown className="tool-block-chevron" size={16} />
+            </button>
+            {!collapsedSections.usage && (
+              <div className="usage-grid">
+                {USAGES.map((usage, index) => (
+                  <button
+                    key={usage.id}
+                    className={`usage-button ${activeUsage === usage.id ? "active" : ""}`}
+                    style={{ "--usage-color": usage.color } as CSSProperties}
+                    title={`${index + 1} - ${usage.label}`}
+                    onClick={() => changeActiveUsage(usage.id)}
+                  >
+                    <span />
+                    {usage.label}
+                  </button>
+                ))}
               </div>
             )}
           </section>
 
-          <section className="tool-block">
-            <div className="tool-block-head">
-              <h2>Planimetria</h2>
+          <section className={`tool-block ${collapsedSections.planimetry ? "collapsed" : ""}`}>
+            <button className="tool-block-toggle" type="button" onClick={() => toggleToolSection("planimetry")}>
+              <span className="tool-block-title">Planimetria</span>
               <Layers size={18} />
-            </div>
-            <div className="sample-buttons">
-              {SAMPLE_PLANS.map((plan) => (
-                <button
-                  key={plan.url}
-                  className={fileName === plan.fileName ? "active" : ""}
-                  onClick={() => void loadSample(plan.url, plan.fileName)}
-                >
-                  {plan.label}
-                </button>
-              ))}
-            </div>
-            <div className="loaded-doc">
-              <FileText size={18} />
-              <div>
-                <span>PDF aperto</span>
-                <strong>{fileName || "Nessun documento"}</strong>
-              </div>
-            </div>
+              <ChevronDown className="tool-block-chevron" size={16} />
+            </button>
+            {!collapsedSections.planimetry && (
+              <>
+                <div className="sample-buttons">
+                  {SAMPLE_PLANS.map((plan) => (
+                    <button
+                      key={plan.url}
+                      className={fileName === plan.fileName ? "active" : ""}
+                      onClick={() => void loadSample(plan.url, plan.fileName)}
+                    >
+                      {plan.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="loaded-doc">
+                  <FileText size={18} />
+                  <div>
+                    <span>PDF aperto</span>
+                    <strong>{fileName || "Nessun documento"}</strong>
+                  </div>
+                </div>
+              </>
+            )}
           </section>
 
-          <section className="tool-block">
-            <div className="tool-block-head">
-              <h2>Smart Selection</h2>
+          <section className={`tool-block ${collapsedSections.smart ? "collapsed" : ""}`}>
+            <button className="tool-block-toggle" type="button" onClick={() => toggleToolSection("smart")}>
+              <span className="tool-block-title">Smart Selection</span>
               <MousePointer2 size={18} />
-            </div>
-            <label className="slider-field">
-              <span>Sensibilita linee {threshold}</span>
-              <input
-                type="range"
-                min={170}
-                max={252}
-                value={threshold}
-                onChange={(event) => {
-                  setThreshold(Number(event.target.value));
-                  invalidateWallMap();
-                  markDirty();
-                }}
-              />
-            </label>
-            <label className="slider-field">
-              <span>Spessore linee {inflate}</span>
-              <input
-                type="range"
-                min={0}
-                max={5}
-                value={inflate}
-                onChange={(event) => {
-                  setInflate(Number(event.target.value));
-                  invalidateWallMap();
-                  markDirty();
-                }}
-              />
-            </label>
-            <label className="slider-field">
-              <span>Chiusura gap {gap}</span>
-              <input
-                type="range"
-                min={0}
-                max={18}
-                value={gap}
-                onChange={(event) => {
-                  setGap(Number(event.target.value));
-                  invalidateWallMap();
-                  markDirty();
-                }}
-              />
-            </label>
-            <label className="slider-field">
-              <span>Ponte tratteggi {dash}</span>
-              <input
-                type="range"
-                min={0}
-                max={90}
-                value={dash}
-                onChange={(event) => {
-                  setDash(Number(event.target.value));
-                  invalidateWallMap();
-                  markDirty();
-                }}
-              />
-            </label>
+              <ChevronDown className="tool-block-chevron" size={16} />
+            </button>
+            {!collapsedSections.smart && (
+              <>
+                <label className="slider-field">
+                  <span>Sensibilita linee {threshold}</span>
+                  <input
+                    type="range"
+                    min={170}
+                    max={252}
+                    value={threshold}
+                    onChange={(event) => updateTraceSetting("threshold", threshold, Number(event.target.value))}
+                  />
+                </label>
+                <label className="slider-field">
+                  <span>Spessore linee {inflate}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={5}
+                    value={inflate}
+                    onChange={(event) => updateTraceSetting("inflate", inflate, Number(event.target.value))}
+                  />
+                </label>
+                <label className="slider-field">
+                  <span>Chiusura gap {gap}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={18}
+                    value={gap}
+                    onChange={(event) => updateTraceSetting("gap", gap, Number(event.target.value))}
+                  />
+                </label>
+                <label className="slider-field">
+                  <span>Ponte tratteggi {dash}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={90}
+                    value={dash}
+                    onChange={(event) => updateTraceSetting("dash", dash, Number(event.target.value))}
+                  />
+                </label>
+              </>
+            )}
           </section>
           </aside>
         )}
@@ -3421,7 +4268,7 @@ export default function PlanimetriaEditor({
                     type="button"
                     className={activeTool === tool.id ? "active" : ""}
                     onClick={() => selectTool(tool.id)}
-                    title={tool.label}
+                    title={withShortcut(tool.label, tool.shortcut)}
                     aria-label={tool.label}
                   >
                     {tool.icon}
@@ -3435,6 +4282,7 @@ export default function PlanimetriaEditor({
                     className={`mini-tool-button ${activeTool === "ruler" ? "active" : ""}`}
                     disabled={!hasPdf}
                     onClick={() => selectTool("ruler")}
+                    title={withShortcut("Righello", SHORTCUTS.ruler)}
                   >
                     <Ruler size={15} />
                     Righello
@@ -3471,7 +4319,7 @@ export default function PlanimetriaEditor({
               <div className="canvas-edit-actions">
                 <button
                   className="icon-button"
-                  title="Indietro"
+                  title={withShortcut("Indietro", SHORTCUTS.undo)}
                   disabled={!canUndo || busy}
                   onClick={undoSelectionEdit}
                 >
@@ -3479,7 +4327,7 @@ export default function PlanimetriaEditor({
                 </button>
                 <button
                   className="icon-button"
-                  title="Avanti"
+                  title={withShortcut("Avanti", SHORTCUTS.redo)}
                   disabled={!canRedo || busy}
                   onClick={redoSelectionEdit}
                 >
@@ -3488,7 +4336,7 @@ export default function PlanimetriaEditor({
                 <div className="delete-split-control">
                   <button
                     className="icon-button danger-icon"
-                    title="Cancella elemento selezionato"
+                    title={withShortcut("Cancella elemento selezionato", SHORTCUTS.delete)}
                     disabled={!canDeleteSelectedObject || busy}
                     onClick={deleteSelectedObjects}
                   >
@@ -3542,8 +4390,10 @@ export default function PlanimetriaEditor({
               <button
                 className="canvas-scale-button"
                 type="button"
+                title="Modifica scala e formato foglio"
                 onClick={() => {
                   setScaleInputValue(String(scaleDenominator));
+                  setScaleModalSheetSize(sheetSize);
                   setScaleModalOpen(true);
                 }}
               >
@@ -3581,7 +4431,7 @@ export default function PlanimetriaEditor({
               </div>
             </div>
           </div>
-          <div className="canvas-zoom-dock" aria-label="Vista planimetria">
+          <div className={`canvas-zoom-dock ${opacityDockOpen ? "opacity-open" : ""}`} aria-label="Vista planimetria">
             <div className="canvas-zoom-row">
               <button
                 className="icon-button"
@@ -3612,17 +4462,28 @@ export default function PlanimetriaEditor({
               <button className="icon-button" title="Adatta alla vista" disabled={!hasPdf} onClick={fitPageToViewport}>
                 <Maximize2 size={17} />
               </button>
+              <button
+                className={`icon-button canvas-dock-toggle ${opacityDockOpen ? "active" : ""}`}
+                title="Opacita"
+                aria-label="Opacita"
+                aria-expanded={opacityDockOpen}
+                onClick={() => setOpacityDockOpen((open) => !open)}
+              >
+                <Layers size={17} />
+              </button>
             </div>
-            <label className="canvas-opacity-row">
-              <span>Opacita {opacityPercent}%</span>
-              <input
-                type="range"
-                min={15}
-                max={75}
-                value={opacityPercent}
-                onChange={(event) => updateMaskOpacity(Number(event.target.value))}
-              />
-            </label>
+            {opacityDockOpen && (
+              <label className="canvas-opacity-row">
+                <span>Opacita {opacityPercent}%</span>
+                <input
+                  type="range"
+                  min={15}
+                  max={75}
+                  value={opacityPercent}
+                  onChange={(event) => updateMaskOpacity(Number(event.target.value))}
+                />
+              </label>
+            )}
           </div>
         </section>
 
@@ -3639,157 +4500,241 @@ export default function PlanimetriaEditor({
               <PanelRightClose size={18} />
             </button>
           </div>
-          <section className="selected-property-card">
-            <div className="property-symbol">
-              {property.categoria.startsWith("D/") ? <Factory size={22} /> : <Home size={22} />}
-            </div>
-            <div>
-              <span>Immobile selezionato</span>
-              <strong>{property.address}</strong>
-              <small>
-                {property.comune} - {property.categoria}
-              </small>
-            </div>
-          </section>
-
-          <section className="area-totals">
-            <div>
-              <span>Area totale tracciata</span>
-              <strong>{formatM2(totals.area)}</strong>
-            </div>
-            <div>
-              <span>Stima prototipo aree</span>
-              <strong>{moneyFormatter.format(totals.amount)}</strong>
-              <small>Coefficienti da validare</small>
-            </div>
-          </section>
-
-          <section className="selected-areas-list">
-            <div className="tool-block-head">
-              <h2>Aree selezionate</h2>
-              <span>{selectedSelectionIds.length}/{selectedAreas.length}</span>
-            </div>
-            <div className="selection-action-row">
-              <button
-                className="icon-button"
-                title="Copia aree selezionate"
-                disabled={selectedSelections.length === 0}
-                onClick={copySelectedSelections}
-              >
-                <Copy size={16} />
-              </button>
-              <button
-                className="icon-button"
-                title="Incolla aree copiate"
-                disabled={clipboardCount === 0 || !hasPdf}
-                onClick={pasteCopiedSelections}
-              >
-                <ClipboardPaste size={16} />
-              </button>
-              <button
-                className="button secondary compact-button"
-                disabled={selectedCurrentPageSelections.length < 2}
-                onClick={mergeSelectedSelections}
-              >
-                <Combine size={15} />
-                Unisci
-              </button>
-              <button
-                className="icon-button danger-icon"
-                title="Cancella elemento selezionato"
-                disabled={selectedSelectionIds.length === 0 && !rulerSegmentSelected}
-                onClick={deleteSelectedObjects}
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-            {selectedAreas.length === 0 ? (
-              <div className="areas-empty">
-                <MousePointer2 size={22} />
-                <strong>Nessuna area</strong>
+          <section className={`area-totals ${collapsedRightSections.totals ? "collapsed" : ""}`}>
+            <button className="right-panel-toggle" type="button" onClick={() => toggleRightPanelSection("totals")}>
+              <span>Riepilogo superfici</span>
+              <ChevronDown size={16} />
+            </button>
+            {!collapsedRightSections.totals && (
+              <div className="area-totals-content">
+                <div>
+                  <span>Area totale tracciata</span>
+                  <strong>{formatM2(totals.area)}</strong>
+                </div>
+                <div>
+                  <span>Stima prototipo aree</span>
+                  <strong>{moneyFormatter.format(totals.amount)}</strong>
+                  <small>Valori da validare</small>
+                </div>
               </div>
-            ) : (
-              selectedAreas.map(({ selection, index, usage, area, amount }) => (
-                <article
-                  key={selection.id}
-                  className={`area-row ${selectedSelectionIds.includes(selection.id) ? "selected" : ""}`}
-                  onClick={() =>
-                    setSelectedSelectionIds((current) =>
-                      current.includes(selection.id)
-                        ? current.filter((id) => id !== selection.id)
-                        : [...current, selection.id],
-                    )
-                  }
-                >
-                  <div className="area-row-head">
-                    <input
-                      type="checkbox"
-                      checked={selectedSelectionIds.includes(selection.id)}
-                      onChange={() => undefined}
-                      aria-label={`Seleziona area ${index + 1}`}
-                    />
-                    <span style={{ background: usage.color }} />
-                    <strong>Area {index + 1} - pagina {selection.page}</strong>
-                    <button
-                      title="Rimuovi area"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        removeSelection(selection.id);
-                      }}
-                    >
-                      <X size={15} />
-                    </button>
-                  </div>
-                  <select
-                    value={selection.usageId}
-                    onClick={(event) => event.stopPropagation()}
-                    onChange={(event) => changeSelectionUsage(selection.id, event.target.value as UsageId)}
-                  >
-                    {USAGES.map((usageOption) => (
-                      <option key={usageOption.id} value={usageOption.id}>
-                        {usageOption.label}
-                      </option>
-                    ))}
-                  </select>
-                  <dl>
-                    <div>
-                      <dt>Area</dt>
-                      <dd>{formatM2(area)}</dd>
-                    </div>
-                    <div>
-                      <dt>Coeff.</dt>
-                      <dd>{moneyFormatter.format(usage.rate)}/m2</dd>
-                    </div>
-                    <div>
-                      <dt>Stima</dt>
-                      <dd>{moneyFormatter.format(amount)}</dd>
-                    </div>
-                    <div>
-                      <dt>Pixel</dt>
-                      <dd>{selection.region.count.toLocaleString("it-IT")}</dd>
-                    </div>
-                  </dl>
-                </article>
-              ))
             )}
           </section>
 
-          <section className="usage-breakdown">
-            <div className="tool-block-head">
-              <h2>Ripartizione</h2>
-            </div>
-            {USAGES.map((usage) => {
-              const usageArea = selectedAreas
-                .filter((area) => area.usage.id === usage.id)
-                .reduce((sum, area) => sum + area.area, 0);
-              return (
-                <div key={usage.id} className="usage-breakdown-row">
-                  <span style={{ background: usage.color }} />
-                  <strong>{usage.shortLabel}</strong>
-                  <em>{formatCompactM2(usageArea)}</em>
+          <section className={`selected-areas-list ${collapsedRightSections.areas ? "collapsed" : ""}`}>
+            <button className="right-panel-toggle" type="button" onClick={() => toggleRightPanelSection("areas")}>
+              <span>Aree selezionate</span>
+              <strong>{selectedSelectionIds.length}/{selectedAreas.length}</strong>
+              <ChevronDown size={16} />
+            </button>
+            {!collapsedRightSections.areas && (
+              <>
+                <div className="selection-action-row">
+                  <button
+                    className="icon-button"
+                    title={withShortcut("Copia aree selezionate", SHORTCUTS.copy)}
+                    disabled={selectedSelections.length === 0}
+                    onClick={copySelectedSelections}
+                  >
+                    <Copy size={16} />
+                  </button>
+                  <button
+                    className="icon-button"
+                    title={withShortcut("Incolla aree copiate", SHORTCUTS.paste)}
+                    disabled={clipboardCount === 0 || !hasPdf}
+                    onClick={pasteCopiedSelections}
+                  >
+                    <ClipboardPaste size={16} />
+                  </button>
+                  <button
+                    className={`icon-button area-toggle-all-button ${allAreasCollapsed ? "all-collapsed" : ""}`}
+                    title={allAreasCollapsed ? "Espandi tutte le aree" : "Comprimi tutte le aree"}
+                    disabled={selectedAreas.length === 0}
+                    onClick={allAreasCollapsed ? expandAllAreas : collapseAllAreas}
+                  >
+                    <ChevronDown size={16} />
+                  </button>
+                  <button
+                    className="button secondary compact-button"
+                    disabled={selectedCurrentPageSelections.length < 2}
+                    onClick={mergeSelectedSelections}
+                  >
+                    <Combine size={15} />
+                    Unisci
+                  </button>
+                  <button
+                    className="icon-button danger-icon"
+                    title={withShortcut("Cancella elemento selezionato", SHORTCUTS.delete)}
+                    disabled={selectedSelectionIds.length === 0 && !rulerSegmentSelected}
+                    onClick={deleteSelectedObjects}
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </div>
-              );
-            })}
+                <div className="areas-scroll-list">
+                  {selectedAreas.length === 0 ? (
+                    <div className="areas-empty">
+                      <MousePointer2 size={22} />
+                      <strong>Nessuna area</strong>
+                    </div>
+                  ) : (
+                    selectedAreas.map(({ selection, index, usage, area, amount }) => {
+                      const areaCollapsed = collapsedAreaIds.includes(selection.id);
+                      return (
+                        <article
+                          key={selection.id}
+                          className={`area-row ${selectedSelectionIds.includes(selection.id) ? "selected" : ""} ${areaCollapsed ? "collapsed" : ""}`}
+                        >
+                          <div
+                            className="area-row-head"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() =>
+                              setCollapsedAreaIds((current) =>
+                                current.includes(selection.id)
+                                  ? current.filter((id) => id !== selection.id)
+                                  : [...current, selection.id],
+                              )
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                setCollapsedAreaIds((current) =>
+                                  current.includes(selection.id)
+                                    ? current.filter((id) => id !== selection.id)
+                                    : [...current, selection.id],
+                                );
+                              }
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedSelectionIds.includes(selection.id)}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={() =>
+                                setSelectedSelectionIds((current) =>
+                                  current.includes(selection.id)
+                                    ? current.filter((id) => id !== selection.id)
+                                    : [...current, selection.id],
+                                )
+                              }
+                              aria-label={`Seleziona area ${index + 1}`}
+                            />
+                            <span style={{ background: usage.color }} />
+                            <div className="area-row-title">
+                              <strong>Area {index + 1} - pagina {selection.page}</strong>
+                              {areaCollapsed && <em>{formatCompactM2(area)}</em>}
+                            </div>
+                            <button
+                              title={withShortcut("Rimuovi area", SHORTCUTS.delete)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                removeSelection(selection.id);
+                              }}
+                            >
+                              <X size={15} />
+                            </button>
+                          </div>
+                          {!areaCollapsed && (
+                            <>
+                              <select
+                                value={selection.usageId}
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={(event) => changeSelectionUsage(selection.id, event.target.value as UsageId)}
+                              >
+                                {USAGES.map((usageOption) => (
+                                  <option key={usageOption.id} value={usageOption.id}>
+                                    {usageOption.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <dl>
+                                <div>
+                                  <dt>Area</dt>
+                                  <dd>{formatM2(area)}</dd>
+                                </div>
+                                <div>
+                                  <dt>Valore</dt>
+                                  <dd>
+                                    <input
+                                      key={`${selection.id}-${selection.rate}`}
+                                      className="area-value-input"
+                                      type="text"
+                                      inputMode="decimal"
+                                      defaultValue={String(selection.rate).replace(".", ",")}
+                                      onClick={(event) => event.stopPropagation()}
+                                      onBlur={(event) => {
+                                        const nextRate = changeSelectionRate(selection.id, event.currentTarget.value);
+                                        event.currentTarget.value = String(nextRate ?? selection.rate).replace(".", ",");
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") event.currentTarget.blur();
+                                        if (event.key === "Escape") {
+                                          event.currentTarget.value = String(selection.rate).replace(".", ",");
+                                          event.currentTarget.blur();
+                                        }
+                                      }}
+                                    />
+                                    <span className="area-value-unit">€/m2</span>
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt>Stima</dt>
+                                  <dd>{moneyFormatter.format(amount)}</dd>
+                                </div>
+                                <div>
+                                  <dt>Pixel</dt>
+                                  <dd>{selection.region.count.toLocaleString("it-IT")}</dd>
+                                </div>
+                              </dl>
+                              <div className="area-visual-controls" onClick={(event) => event.stopPropagation()}>
+                                <label className="area-color-field">
+                                  <span>Colore</span>
+                                  <input
+                                    type="color"
+                                    value={selection.color}
+                                    onChange={(event) => changeSelectionColor(selection.id, event.target.value)}
+                                  />
+                                </label>
+                                <label className="area-opacity-field">
+                                  <span>Opacita {Math.round(selection.opacity * 100)}%</span>
+                                  <input
+                                    type="range"
+                                    min={5}
+                                    max={100}
+                                    value={Math.round(selection.opacity * 100)}
+                                    onChange={(event) => changeSelectionOpacity(selection.id, Number(event.target.value))}
+                                  />
+                                </label>
+                              </div>
+                            </>
+                          )}
+                        </article>
+                      );
+                    })
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+
+          <section className={`usage-breakdown ${collapsedRightSections.breakdown ? "collapsed" : ""}`}>
+            <button className="right-panel-toggle" type="button" onClick={() => toggleRightPanelSection("breakdown")}>
+              <span>Ripartizione</span>
+              <ChevronDown size={16} />
+            </button>
+            {!collapsedRightSections.breakdown &&
+              USAGES.map((usage) => {
+                const usageArea = selectedAreas
+                  .filter((area) => area.usage.id === usage.id)
+                  .reduce((sum, area) => sum + area.area, 0);
+                return (
+                  <div key={usage.id} className="usage-breakdown-row">
+                    <span style={{ background: usage.color }} />
+                    <strong>{usage.shortLabel}</strong>
+                    <em>{formatCompactM2(usageArea)}</em>
+                  </div>
+                );
+              })}
           </section>
           </aside>
         )}
@@ -3821,6 +4766,33 @@ export default function PlanimetriaEditor({
                 />
               </div>
             </label>
+            <div className="modal-sheet-section">
+              <span>Formato foglio</span>
+              <div className="sheet-toggle" role="group" aria-label="Formato foglio">
+                {(["A3", "A4"] as SheetSize[]).map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    className={scaleModalSheetSize === size ? "active" : ""}
+                    onClick={() => setScaleModalSheetSize(size)}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="calibration-card scale-preview-card">
+              <span>Area reale foglio</span>
+              <strong>{formatM2(pageRealAreaM2(scaleModalSheetSize, scaleModalPreviewScale))}</strong>
+            </div>
+            {calibration && (
+              <div className="calibration-segment-info">
+                <span>Taratura attiva</span>
+                <strong>
+                  {areaFormatter.format(calibration.knownMeters)} m {"->"} 1:{calibration.scaleDenominator}
+                </strong>
+              </div>
+            )}
             <p className="modal-note">La scala aggiorna subito il calcolo delle superfici gia tracciate.</p>
             <div className="modal-actions">
               <button className="button secondary" type="button" onClick={() => setScaleModalOpen(false)}>
