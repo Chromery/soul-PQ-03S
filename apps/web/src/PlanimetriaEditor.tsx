@@ -4,6 +4,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.js?url";
 import {
   ArrowLeft,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardPaste,
@@ -509,6 +510,9 @@ export default function PlanimetriaEditor({
   const [savedAt, setSavedAt] = useState("");
   const [leftPanelOpen, setLeftPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.left));
   const [rightPanelOpen, setRightPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.right));
+  const [scaleModalOpen, setScaleModalOpen] = useState(false);
+  const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
+  const [clearPageConfirmOpen, setClearPageConfirmOpen] = useState(false);
   const [selectedSelectionIds, setSelectedSelectionIds] = useState<string[]>([]);
   const [polygonDraft, setPolygonDraft] = useState<CanvasPoint[]>([]);
   const [pointerPreview, setPointerPreview] = useState<CanvasPoint | null>(null);
@@ -531,6 +535,8 @@ export default function PlanimetriaEditor({
   );
   const canUndo = runtimeRef.current.undoStack.length > 0;
   const canRedo = runtimeRef.current.redoStack.length > 0;
+  const canDeleteSelectedObject = selectedSelectionIds.length > 0 || rulerSegmentSelected;
+  const hasCurrentPageAreas = selections.length > 0;
 
   const selectedAreas = useMemo(
     () =>
@@ -2559,11 +2565,23 @@ export default function PlanimetriaEditor({
   }
 
   function deleteSelectedObjects() {
+    setDeleteMenuOpen(false);
     if (selectedSelectionIds.length > 0) {
       removeSelections(selectedSelectionIds);
       return;
     }
     if (rulerSegmentSelected) removeMeasureSegment();
+  }
+
+  function requestClearCurrentPage() {
+    setDeleteMenuOpen(false);
+    if (!hasCurrentPageAreas) return;
+    setClearPageConfirmOpen(true);
+  }
+
+  function confirmClearCurrentPage() {
+    setClearPageConfirmOpen(false);
+    clearCurrentPage();
   }
 
   function clearCurrentPage() {
@@ -3122,6 +3140,15 @@ export default function PlanimetriaEditor({
     return nextScale;
   }
 
+  function submitScaleModal() {
+    const nextScale = commitScaleInput();
+    if (!nextScale) {
+      setStatus("Inserisci una scala valida");
+      return;
+    }
+    setScaleModalOpen(false);
+  }
+
   function restoreScaleInput() {
     setScaleInputValue(String(scaleDenominator));
   }
@@ -3254,30 +3281,9 @@ export default function PlanimetriaEditor({
 
           <section className="tool-block">
             <div className="tool-block-head">
-              <h2>Scala e foglio</h2>
+              <h2>Formato foglio</h2>
               <Ruler size={18} />
             </div>
-            <label className="scale-field">
-              <span>Scala planimetria</span>
-              <div>
-                <strong>1:</strong>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={scaleInputValue}
-                  onChange={(event) => {
-                    setScaleInputValue(event.target.value);
-                  }}
-                  onBlur={() => {
-                    if (scaleInputValue === "") restoreScaleInput();
-                    else commitScaleInput();
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                  }}
-                />
-              </div>
-            </label>
             <div className="sheet-toggle" role="group" aria-label="Formato foglio">
               {(["A3", "A4"] as SheetSize[]).map((size) => (
                 <button
@@ -3329,47 +3335,6 @@ export default function PlanimetriaEditor({
                 <strong>{fileName || "Nessun documento"}</strong>
               </div>
             </div>
-          </section>
-
-          <section className="tool-block">
-            <div className="tool-block-head">
-              <h2>Pagina</h2>
-              <span>
-                {currentPage || 0}/{pageCount || 0}
-              </span>
-            </div>
-            <div className="page-controls">
-              <button
-                className="icon-button"
-                title="Pagina precedente"
-                disabled={!hasPdf || currentPage <= 1 || busy}
-                onClick={() => void renderPage(currentPage - 1)}
-              >
-                <ChevronLeft size={18} />
-              </button>
-              <button
-                className="icon-button"
-                title="Pagina successiva"
-                disabled={!hasPdf || currentPage >= pageCount || busy}
-                onClick={() => void renderPage(currentPage + 1)}
-              >
-                <ChevronRight size={18} />
-              </button>
-            </div>
-            <label className="slider-field">
-              <span>Opacita maschere {opacityPercent}%</span>
-              <input
-                type="range"
-                min={15}
-                max={75}
-                value={opacityPercent}
-                onChange={(event) => updateMaskOpacity(Number(event.target.value))}
-              />
-            </label>
-            <button className="button soft full-width" disabled={!hasPdf || selections.length === 0 || busy} onClick={clearCurrentPage}>
-              <Trash2 size={16} />
-              Cancella aree pagina
-            </button>
           </section>
 
           <section className="tool-block">
@@ -3520,17 +3485,70 @@ export default function PlanimetriaEditor({
                 >
                   <Redo2 size={17} />
                 </button>
-                <button
-                  className="icon-button danger-icon"
-                  title="Cancella elemento selezionato"
-                  disabled={(selectedSelectionIds.length === 0 && !rulerSegmentSelected) || busy}
-                  onClick={deleteSelectedObjects}
-                >
-                  <Trash2 size={17} />
-                </button>
+                <div className="delete-split-control">
+                  <button
+                    className="icon-button danger-icon"
+                    title="Cancella elemento selezionato"
+                    disabled={!canDeleteSelectedObject || busy}
+                    onClick={deleteSelectedObjects}
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                  <button
+                    className="icon-button danger-icon split-chevron"
+                    title="Altre azioni di cancellazione"
+                    disabled={!hasCurrentPageAreas || busy}
+                    onClick={() => setDeleteMenuOpen((open) => !open)}
+                    aria-expanded={deleteMenuOpen}
+                  >
+                    <ChevronDown size={15} />
+                  </button>
+                  {deleteMenuOpen && (
+                    <div className="delete-menu" role="menu">
+                      <button type="button" onClick={requestClearCurrentPage} disabled={!hasCurrentPageAreas}>
+                        <Trash2 size={15} />
+                        Cancella aree pagina
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               <span>{canvasPixels}</span>
-              <span>{sheetSize} 1:{scaleDenominator}</span>
+              {pageCount > 1 ? (
+                <div className="page-stepper" aria-label="Navigazione pagine PDF">
+                  <button
+                    className="icon-button"
+                    title="Pagina precedente"
+                    disabled={!hasPdf || currentPage <= 1 || busy}
+                    onClick={() => void renderPage(currentPage - 1)}
+                  >
+                    <ChevronLeft size={17} />
+                  </button>
+                  <span>
+                    {currentPage}/{pageCount}
+                  </span>
+                  <button
+                    className="icon-button"
+                    title="Pagina successiva"
+                    disabled={!hasPdf || currentPage >= pageCount || busy}
+                    onClick={() => void renderPage(currentPage + 1)}
+                  >
+                    <ChevronRight size={17} />
+                  </button>
+                </div>
+              ) : (
+                <span>Pagina {currentPage || 0}/{pageCount || 0}</span>
+              )}
+              <button
+                className="canvas-scale-button"
+                type="button"
+                onClick={() => {
+                  setScaleInputValue(String(scaleDenominator));
+                  setScaleModalOpen(true);
+                }}
+              >
+                {sheetSize} 1:{scaleDenominator}
+              </button>
               <button
                 className="icon-button panel-toggle"
                 onClick={() => setRightPanelOpen((open) => !open)}
@@ -3563,36 +3581,48 @@ export default function PlanimetriaEditor({
               </div>
             </div>
           </div>
-          <div className="canvas-zoom-dock" aria-label="Zoom planimetria">
-            <button
-              className="icon-button"
-              title="Riduci zoom"
-              disabled={!hasPdf || zoomPercent <= 35}
-              onClick={() => updateZoom(Math.max(35, zoomPercent - 10))}
-            >
-              <ZoomOut size={17} />
-            </button>
-            <label>
-              <span>{zoomPercent}%</span>
+          <div className="canvas-zoom-dock" aria-label="Vista planimetria">
+            <div className="canvas-zoom-row">
+              <button
+                className="icon-button"
+                title="Riduci zoom"
+                disabled={!hasPdf || zoomPercent <= 35}
+                onClick={() => updateZoom(Math.max(35, zoomPercent - 10))}
+              >
+                <ZoomOut size={17} />
+              </button>
+              <label>
+                <span>{zoomPercent}%</span>
+                <input
+                  type="range"
+                  min={35}
+                  max={165}
+                  value={zoomPercent}
+                  onChange={(event) => updateZoom(Number(event.target.value))}
+                />
+              </label>
+              <button
+                className="icon-button"
+                title="Aumenta zoom"
+                disabled={!hasPdf || zoomPercent >= 165}
+                onClick={() => updateZoom(Math.min(165, zoomPercent + 10))}
+              >
+                <ZoomIn size={17} />
+              </button>
+              <button className="icon-button" title="Adatta alla vista" disabled={!hasPdf} onClick={fitPageToViewport}>
+                <Maximize2 size={17} />
+              </button>
+            </div>
+            <label className="canvas-opacity-row">
+              <span>Opacita {opacityPercent}%</span>
               <input
                 type="range"
-                min={35}
-                max={165}
-                value={zoomPercent}
-                onChange={(event) => updateZoom(Number(event.target.value))}
+                min={15}
+                max={75}
+                value={opacityPercent}
+                onChange={(event) => updateMaskOpacity(Number(event.target.value))}
               />
             </label>
-            <button
-              className="icon-button"
-              title="Aumenta zoom"
-              disabled={!hasPdf || zoomPercent >= 165}
-              onClick={() => updateZoom(Math.min(165, zoomPercent + 10))}
-            >
-              <ZoomIn size={17} />
-            </button>
-            <button className="icon-button" title="Adatta alla vista" disabled={!hasPdf} onClick={fitPageToViewport}>
-              <Maximize2 size={17} />
-            </button>
           </div>
         </section>
 
@@ -3764,6 +3794,70 @@ export default function PlanimetriaEditor({
           </aside>
         )}
       </section>
+
+      {scaleModalOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setScaleModalOpen(false)}>
+          <div className="editor-modal" role="dialog" aria-modal="true" aria-labelledby="scale-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <h2 id="scale-modal-title">Scala planimetria</h2>
+              <button className="icon-button" type="button" onClick={() => setScaleModalOpen(false)} aria-label="Chiudi">
+                <X size={18} />
+              </button>
+            </div>
+            <label className="scale-field">
+              <span>Rapporto di scala</span>
+              <div>
+                <strong>1:</strong>
+                <input
+                  autoFocus
+                  type="text"
+                  inputMode="numeric"
+                  value={scaleInputValue}
+                  onChange={(event) => setScaleInputValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") submitScaleModal();
+                    if (event.key === "Escape") setScaleModalOpen(false);
+                  }}
+                />
+              </div>
+            </label>
+            <p className="modal-note">La scala aggiorna subito il calcolo delle superfici gia tracciate.</p>
+            <div className="modal-actions">
+              <button className="button secondary" type="button" onClick={() => setScaleModalOpen(false)}>
+                Annulla
+              </button>
+              <button className="button primary" type="button" onClick={submitScaleModal}>
+                Applica scala
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {clearPageConfirmOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setClearPageConfirmOpen(false)}>
+          <div className="editor-modal danger-modal" role="dialog" aria-modal="true" aria-labelledby="clear-page-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <h2 id="clear-page-title">Cancellare le aree della pagina?</h2>
+              <button className="icon-button" type="button" onClick={() => setClearPageConfirmOpen(false)} aria-label="Chiudi">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="modal-note">
+              Verranno rimosse tutte le aree tracciate nella pagina {currentPage}. Potrai recuperarle solo con Indietro finche resti nell'editor.
+            </p>
+            <div className="modal-actions">
+              <button className="button secondary" type="button" onClick={() => setClearPageConfirmOpen(false)}>
+                Annulla
+              </button>
+              <button className="button danger-button" type="button" onClick={confirmClearCurrentPage}>
+                <Trash2 size={16} />
+                Cancella aree pagina
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -1766,6 +1766,65 @@ a.button {
   font-weight: 700;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.editor-modal {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal-head h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.modal-note {
+  margin: 0;
+  color: var(--secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.button.danger-button,
+.danger-button {
+  color: #fff;
+  background: var(--danger);
+}
+
+.button.danger-button:hover,
+.danger-button:hover {
+  background: #b91c1c;
+}
+
 .detail-page {
   padding: 28px;
 }
@@ -2775,6 +2834,90 @@ a.button {
   background: #fff;
 }
 
+.delete-split-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.delete-split-control > .icon-button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.delete-split-control > .split-chevron {
+  width: 28px;
+  margin-left: -1px;
+  border-left: 1px solid var(--line);
+  border-radius: 0 6px 6px 0;
+}
+
+.delete-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 8;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+}
+
+.delete-menu button {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--danger);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 850;
+  text-align: left;
+}
+
+.delete-menu button:hover:not(:disabled) {
+  background: var(--danger-bg);
+}
+
+.page-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid #d8e6f7;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.page-stepper span {
+  min-width: 48px;
+  color: #173154;
+  text-align: center;
+}
+
+.canvas-scale-button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #d8e6f7;
+  border-radius: 7px;
+  color: #173154;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.canvas-scale-button:hover,
+.canvas-scale-button:focus-visible {
+  color: var(--primary);
+  border-color: #b8d7ff;
+  background: #eef5ff;
+}
+
 .tool-quickbar button {
   width: 32px;
   height: 30px;
@@ -2964,10 +3107,9 @@ a.button {
   right: 14px;
   bottom: 14px;
   z-index: 5;
-  display: inline-flex;
-  align-items: center;
+  width: min(360px, calc(100% - 28px));
+  display: grid;
   gap: 6px;
-  max-width: min(420px, calc(100% - 28px));
   padding: 7px;
   border: 1px solid rgba(184, 215, 255, 0.92);
   border-radius: 8px;
@@ -2983,8 +3125,15 @@ a.button {
     0 14px 30px rgba(15, 23, 42, 0.14);
 }
 
-.canvas-zoom-dock label {
-  width: 174px;
+.canvas-zoom-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 36px 36px;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-zoom-row label,
+.canvas-opacity-row {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
   align-items: center;
@@ -2992,6 +3141,11 @@ a.button {
   color: #173154;
   font-size: 12px;
   font-weight: 850;
+}
+
+.canvas-opacity-row {
+  grid-template-columns: 78px minmax(0, 1fr);
+  padding: 2px 5px;
 }
 
 .canvas-zoom-dock input {
