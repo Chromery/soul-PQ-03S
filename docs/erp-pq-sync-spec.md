@@ -10,7 +10,7 @@ PQ espone API server-to-server chiamate dall'ERP. L'autenticazione utenti intern
 
 - `appuntamento_fissato` viene rimosso: PQ considera urgente uno studio se `data_prossimo_appuntamento` esiste ed e successiva alla data corrente.
 - `responsabile_tecnico` diventa facoltativo: se assente, PQ assegna il responsabile tecnico di default configurato nel backend.
-- Gli upload documento non usano piu presigned URL e conferma successiva: l'ERP invia i PDF in base64 nello stesso `POST /studi/sync`; PQ salva i file nello storage configurato.
+- Gli upload documento non usano piu presigned URL e conferma successiva: l'ERP invia i PDF in base64 nello stesso `POST /studi/sync`; PQ salva i file su Backblaze B2 tramite API S3-compatible.
 - Non esiste push PQ verso ERP in questa fase: quando l'ERP vuole aggiornarsi, chiama un endpoint PQ di pull delle ultime modifiche.
 - Gli endpoint sono ridotti a quelli strettamente necessari alla sincronizzazione.
 
@@ -167,7 +167,8 @@ Regole:
 - `in_studio` e il nome canonico; `in_study` e `is_study` sono tollerati solo per retrocompatibilita.
 - `file_base64` puo essere una stringa base64 pura o una data URL `data:application/pdf;base64,...`.
 - Se viene passato `sha256`, PQ lo verifica sul file decodificato.
-- In questa fase PQ salva i file nello storage configurato dal backend e registra `storage_key`, `sha256` e dimensione.
+- PQ salva i file nel bucket Backblaze B2 configurato e registra `storage_key`, `sha256` e dimensione.
+- `storage_key` e la object key nel bucket S3/B2, non un percorso filesystem locale.
 
 ### 2. Lettura modifiche PQ da ERP
 
@@ -332,8 +333,10 @@ Codici principali:
 ## Note Implementative
 
 - Il backend accetta payload fino a `60mb`.
-- I PDF vengono salvati tramite `DocumentStorageService`; oggi usa filesystem locale configurato da `ERP_DOCUMENT_STORAGE_PATH`, domani puo essere sostituito da S3 mantenendo lo stesso contratto API.
-- In Docker Compose i documenti sono persistiti nel volume `document_storage`.
+- I PDF vengono salvati tramite `DocumentStorageService`, che usa Backblaze B2 via S3-compatible API.
+- Configurazione richiesta: `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
+- `S3_FORCE_PATH_STYLE` resta configurabile e di default e `true`, scelta conservativa per provider S3-compatible.
+- `S3_KEY_PREFIX` permette di cambiare prefisso delle object key, default `erp`.
 - Il campo `appuntamento_attivo` e sempre derivato, mai ricevuto dall'ERP.
 - `responsabile_tecnico` viene salvato solo se passato; altrimenti resta quello esistente o il default configurato.
 
@@ -343,4 +346,3 @@ Codici principali:
 - Dimensione massima realistica dei PDF inviati in base64.
 - Se in futuro convenga tornare a presigned URL per file molto grandi.
 - Se `elaborato_planimetrico` debba essere mostrato in UI o solo conservato per integrazione.
-

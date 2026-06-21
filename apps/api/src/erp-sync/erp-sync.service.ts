@@ -151,6 +151,23 @@ export class ErpSyncService {
       sourceSyncId: syncIdErp,
     };
 
+    for (const property of normalizedProperties) {
+      for (const document of property.documents) {
+        if (!document.fileBase64) continue;
+        const stored = await this.storage.storeBase64Pdf({
+          studioErpId,
+          immobileErpId: property.id,
+          tipo: document.rawType,
+          fileNome: document.fileName,
+          fileBase64: document.fileBase64,
+          expectedSha256: document.expectedSha256,
+        });
+        document.storageKey = stored.storageKey;
+        document.expectedSha256 = stored.sha256;
+        document.sizeBytes = stored.sizeBytes;
+      }
+    }
+
     const updateData = {
       ...createData,
       id: undefined,
@@ -208,20 +225,11 @@ export class ErpSyncService {
       });
 
       for (const document of property.documents) {
-        const stored = document.fileBase64
-          ? await this.storage.storeBase64Pdf({
-              studioErpId,
-              immobileErpId: property.id,
-              tipo: document.rawType,
-              fileNome: document.fileName,
-              fileBase64: document.fileBase64,
-              expectedSha256: document.expectedSha256,
-            })
-          : {
-              storageKey: document.storageKey,
-              sha256: document.expectedSha256,
-              sizeBytes: document.sizeBytes,
-            };
+        const stored = {
+          storageKey: document.storageKey,
+          sha256: document.expectedSha256,
+          sizeBytes: document.sizeBytes,
+        };
 
         if (!stored.storageKey) throw new BadRequestException(`storage_key o file_base64 obbligatorio per ${document.fileName}`);
         await this.prisma.propertyDocument.upsert({

@@ -1,7 +1,7 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, InternalServerErrorException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 type StoreDocumentInput = {
@@ -15,10 +15,23 @@ type StoreDocumentInput = {
 
 @Injectable()
 export class DocumentStorageService {
-  private readonly rootPath: string;
+  private readonly endpoint?: string;
+  private readonly region: string;
+  private readonly bucket?: string;
+  private readonly accessKeyId?: string;
+  private readonly secretAccessKey?: string;
+  private readonly forcePathStyle: boolean;
+  private readonly keyPrefix: string;
+  private s3Client?: S3Client;
 
   constructor(config: ConfigService) {
-    this.rootPath = config.get<string>("ERP_DOCUMENT_STORAGE_PATH", path.join(process.cwd(), "storage", "erp-documents"));
+    this.endpoint = optionalConfig(config.get<string>("S3_ENDPOINT"));
+    this.region = optionalConfig(config.get<string>("S3_REGION")) ?? "us-west-004";
+    this.bucket = optionalConfig(config.get<string>("S3_BUCKET"));
+    this.accessKeyId = optionalConfig(config.get<string>("S3_ACCESS_KEY_ID"));
+    this.secretAccessKey = optionalConfig(config.get<string>("S3_SECRET_ACCESS_KEY"));
+    this.forcePathStyle = config.get<string>("S3_FORCE_PATH_STYLE", "true") !== "false";
+    this.keyPrefix = optionalConfig(config.get<string>("S3_KEY_PREFIX")) ?? "erp";
   }
 
   async storeBase64Pdf(input: StoreDocumentInput) {
@@ -32,11 +45,15 @@ export class DocumentStorageService {
     const safeProperty = safePathPart(input.immobileErpId);
     const safeType = safePathPart(input.tipo);
     const safeFileName = safeFile(input.fileNome);
-    const storageKey = path.posix.join("erp", safeStudy, safeProperty, safeType, `${sha256.slice(0, 12)}-${safeFileName}`);
-    const absolutePath = path.join(this.rootPath, storageKey);
+    const storageKey = path.posix.join(
+      safePathPart(this.keyPrefix),
+      safeStudy,
+      safeProperty,
+      safeType,
+      `${sha256.slice(0, 12)}-${safeFileName}`,
+    );
 
-    await mkdir(path.dirname(absolutePath), { recursive: true });
-    await writeFile(absolutePath, buffer);
+    await this.putObject(storageKey, buffer, sha256, input.fileNome);
 
     return {
       storageKey,
@@ -53,6 +70,54 @@ export class DocumentStorageService {
     if (buffer.byteLength === 0) throw new BadRequestException(`file_base64 non valido per ${fileName}`);
     return buffer;
   }
+
+  private async putObject(key: string, body: Buffer, sha256: string, fileName: string) {
+    const bucket = this.requireBucket();
+    await this.client().send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: body,
+        ContentType: "application/pdf",
+        ContentLength: body.byteLength,
+        Metadata: {
+          sha256,
+          file_name: fileName,
+        },
+      }),
+    );
+  }
+
+  private client() {
+    if (this.s3Client) return this.s3Client;
+    const endpoint = this.requireValue(this.endpoint, "S3_ENDPOINT");
+    const accessKeyId = this.requireValue(this.accessKeyId, "S3_ACCESS_KEY_ID");
+    const secretAccessKey = this.requireValue(this.secretAccessKey, "S3_SECRET_ACCESS_KEY");
+    this.s3Client = new S3Client({
+      endpoint,
+      region: this.region,
+      forcePathStyle: this.forcePathStyle,
+      credentials: {
+        accessKeyId,
+        secretAccessKey,
+      },
+    });
+    return this.s3Client;
+  }
+
+  private requireBucket() {
+    return this.requireValue(this.bucket, "S3_BUCKET");
+  }
+
+  private requireValue(value: string | undefined, name: string) {
+    if (value && !value.includes("REPLACE_")) return value;
+    throw new InternalServerErrorException(`${name} non configurato per upload documenti ERP`);
+  }
+}
+
+function optionalConfig(value?: string) {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
 }
 
 function safePathPart(value: string) {
