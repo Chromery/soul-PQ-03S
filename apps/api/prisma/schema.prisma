@@ -10,6 +10,7 @@ datasource db {
 enum DocumentType {
   PLANIMETRIA
   VISURA
+  ELABORATO_PLANIMETRICO
 }
 
 enum DraftStatus {
@@ -19,6 +20,7 @@ enum DraftStatus {
 
 model FeasibilityStudy {
   id                 String         @id
+  companyErpId       String?
   company            String
   vat                String
   comune             String
@@ -38,6 +40,9 @@ model FeasibilityStudy {
   technicalOwner     String
   notes              String
   erpUrl             String?
+  erpImportedAt      DateTime?
+  erpUpdatedAt       DateTime?
+  sourceSyncId       String?
   importedAt         DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   properties         Property[]
@@ -90,9 +95,12 @@ model PropertyDocument {
   id                 String        @id @default(cuid())
   propertyId         String
   type               DocumentType
+  erpDocumentId      String?
   fileName           String
   storageKey         String
   mimeType           String        @default("application/pdf")
+  sha256             String?
+  sizeBytes          Int?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   property           Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)

@@ -12,8 +12,8 @@ async function bootstrap() {
   const origins = configuredOrigins.split(",").map((origin) => origin.trim());
 
   app.setGlobalPrefix("api");
-  app.use(json({ limit: "25mb" }));
-  app.use(urlencoded({ extended: true, limit: "25mb" }));
+  app.use(json({ limit: "60mb" }));
+  app.use(urlencoded({ extended: true, limit: "60mb" }));
   app.enableCors({ origin: origins, credentials: true });
   app.useGlobalPipes(
     new ValidationPipe({

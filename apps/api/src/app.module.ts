@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { HealthController } from "./health.controller.js";
+import { ErpSyncModule } from "./erp-sync/erp-sync.module.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { PropertiesModule } from "./properties/properties.module.js";
 import { StudiesModule } from "./studies/studies.module.js";
@@ -11,6 +12,7 @@ import { StudiesModule } from "./studies/studies.module.js";
     PrismaModule,
     StudiesModule,
     PropertiesModule,
+    ErpSyncModule,
   ],
   controllers: [HealthController],
 })
