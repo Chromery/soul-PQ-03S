@@ -3,4 +3,9 @@ dist
 *.tsbuildinfo
 .DS_Store
 .env
+.env.local
+*.local.md
+credentials/
+secrets/
+mock-documents/
 apps/api/src/generated/prisma

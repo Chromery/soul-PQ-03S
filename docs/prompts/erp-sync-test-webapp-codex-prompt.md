@@ -2,6 +2,8 @@
 
 Usa questo prompt in una nuova sessione Codex per creare una webapp molto semplice che simuli l'ERP e testi le API di sincronizzazione di Soul Prospect Qualifier.
 
+Nota locale: su questo server esiste anche `docs/prompts/erp-sync-test-webapp-codex-prompt.local.md`, ignorato da Git, con `VITE_PQ_API_BASE_URL`, `VITE_ERP_SYNC_TOKEN` ed endpoint gia compilati per i test locali.
+
 ```text
 Devi creare una webapp di testing per simulare la sincronizzazione ERP -> Soul Prospect Qualifier (PQ).
 
