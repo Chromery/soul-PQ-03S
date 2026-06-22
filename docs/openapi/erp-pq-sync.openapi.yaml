@@ -1,0 +1,730 @@
+openapi: 3.1.0
+info:
+  title: Soul Prospect Qualifier - ERP/PQ Sync API
+  version: 1.1.0
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+  description: |
+    API server-to-server esposte da Soul Prospect Qualifier per sincronizzare gli
+    studi di fattibilita dall'ERP e permettere all'ERP di leggere le modifiche
+    successive prodotte in PQ.
+
+    L'autenticazione e machine-to-machine tramite header:
+    `Authorization: Bearer <ERP_SYNC_TOKEN>`.
+servers:
+  - url: /api/integrations/erp/v1
+    description: Same-origin/proxy path
+  - url: http://{host}/api/integrations/erp/v1
+    description: Host configurabile, default Docker locale
+    variables:
+      host:
+        default: localhost:3001
+        description: Host e porta dell'API PQ
+security:
+  - bearerAuth: []
+tags:
+  - name: ERP Sync
+    description: Sincronizzazione dati ERP/PQ
+paths:
+  /studi/sync:
+    post:
+      tags:
+        - ERP Sync
+      operationId: syncStudiDaErp
+      summary: Sincronizza studi ERP verso PQ
+      description: |
+        Importa o aggiorna uno o piu studi di fattibilita. PQ fa upsert su
+        `studio_erp_id` e `immobile_erp_id`; reinviare lo stesso payload non
+        crea duplicati.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncStudiRequest"
+            examples:
+              studioConPdfBase64:
+                summary: Studio con un immobile e una visura PDF base64
+                value:
+                  sync_id_erp: ERP-SYNC-2026-06-22-0001
+                  studi:
+                    - studio_erp_id: SF-47824-2026-001
+                      company_erp_id: "47824"
+                      ragione_sociale: Azienda Srl
+                      partita_iva: IT00124252687
+                      codice_fiscale: "00124252687"
+                      indirizzo_sede:
+                        via: Via del Lavoro 1
+                        cap: "30199"
+                        comune: Bolzano
+                        provincia: BZ
+                        regione: Trentino-Alto Adige
+                      stato_studio: in_progress
+                      data_creazione_studio: "2026-06-10T10:15:00+02:00"
+                      data_importazione_erp: "2026-06-22T09:30:00+02:00"
+                      data_scadenza: "2026-07-15"
+                      data_esito: null
+                      data_prossimo_appuntamento: "2026-06-25T15:00:00+02:00"
+                      commerciale_assegnato:
+                        erp_user_id: USR-104
+                        nome: Mario Rossi
+                        email: mario.rossi@soul.it
+                      responsabile_tecnico: null
+                      note: Cliente prioritario. Verificare immobili in categoria D prima dell'appuntamento.
+                      link_studio_erp: https://erp.soul.example/studi/SF-47824-2026-001
+                      versione_numero: 1
+                      metriche:
+                        rendita_originale_totale: "60634.00"
+                        rendita_proposta_totale: "74500.00"
+                        differenza_rendita: "13866.00"
+                        imu_attuale_totale: "15420.00"
+                        imu_prevista_totale: "18890.00"
+                        differenza_imu: "3470.00"
+                        rendita_categoria_d: "60634.00"
+                      immobili:
+                        - immobile_erp_id: "162502"
+                          foglio: "9"
+                          particella: "804"
+                          sub: "4"
+                          ubicazione: OSIMO(AN) VIA ACHILLE GRANDI n. 1 Piano T-1
+                          indirizzo_normalizzato: Via Achille Grandi 1, 60027 Osimo AN
+                          comune: Osimo
+                          provincia: AN
+                          categoria: D/8
+                          classamento: Cat.D/8
+                          titolarita: proprietario
+                          rendita_attuale: "29890.00"
+                          rendita_proposta: "36000.00"
+                          imu_attuale: "7600.00"
+                          imu_prevista: "9200.00"
+                          in_studio: true
+                          esito: non_analizzato
+                          note_immobile: Planimetria disponibile, verificare tettoie.
+                          ordine_visualizzazione: 1
+                          documenti:
+                            - tipo: visura_catastale
+                              documento_erp_id: DOC-991
+                              file_nome: visura_162502.pdf
+                              mime_type: application/pdf
+                              file_base64: JVBERi0xLjQKMSAwIG9iaiA8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4gZW5kb2JqCjIgMCBvYmogPDwgL1R5cGUgL1BhZ2VzIC9Db3VudCAwID4+IGVuZG9iagp0cmFpbGVyIDw8IC9Sb290IDEgMCBSID4+CiUlRU9GCg==
+      responses:
+        "200":
+          description: Sincronizzazione completata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncStudiResponse"
+              examples:
+                ok:
+                  value:
+                    sync_id_pq: PQ-SYNC-01JY2TTN5E6A
+                    sync_id_erp: ERP-SYNC-2026-06-22-0001
+                    stato: completato
+                    ricevuti: 1
+                    creati: 1
+                    aggiornati: 0
+                    risultati:
+                      - studio_erp_id: SF-47824-2026-001
+                        azione: created
+                        immobili_upserted: 1
+                        documenti_salvati: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /studi/modifiche:
+    get:
+      tags:
+        - ERP Sync
+      operationId: getStudiModificati
+      summary: Legge le ultime modifiche PQ per ERP
+      description: |
+        Restituisce gli studi modificati in PQ dopo `modificati_dopo`. Se il
+        parametro non viene passato, restituisce tutti gli studi.
+      parameters:
+        - name: modificati_dopo
+          in: query
+          required: false
+          description: Data ISO 8601. Esempio `2026-06-22T00:00:00Z`.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Elenco studi modificati
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudiModificatiResponse"
+              examples:
+                ok:
+                  value:
+                    generato_il: "2026-06-22T10:00:00.000Z"
+                    modificati_dopo: "2026-06-22T00:00:00.000Z"
+                    totale: 1
+                    studi:
+                      - studio_erp_id: SF-47824-2026-001
+                        company_erp_id: "47824"
+                        ragione_sociale: Azienda Srl
+                        partita_iva: IT00124252687
+                        stato_studio: In lavorazione
+                        data_esito: null
+                        data_prossimo_appuntamento: "2026-06-25T13:00:00.000Z"
+                        appuntamento_attivo: true
+                        commerciale_assegnato: Mario Rossi
+                        responsabile_tecnico: Responsabile tecnico Soul
+                        note: Cliente prioritario.
+                        link_studio_erp: https://erp.soul.example/studi/SF-47824-2026-001
+                        modificato_il: "2026-06-22T09:45:12.000Z"
+                        metriche:
+                          rendita_originale_totale: "60634.00"
+                          rendita_proposta_totale: "74500.00"
+                          differenza_rendita: "13866.00"
+                          imu_attuale_totale: "15420.00"
+                          imu_prevista_totale: "18890.00"
+                          differenza_imu: "3470.00"
+                          rendita_categoria_d: "60634.00"
+                          numero_immobili: 1
+                          numero_immobili_categoria_d: 1
+                        immobili:
+                          - immobile_erp_id: "162502"
+                            foglio: "9"
+                            particella: "804"
+                            sub: "4"
+                            ubicazione: OSIMO(AN) VIA ACHILLE GRANDI n. 1 Piano T-1
+                            comune: Osimo
+                            categoria: D/8
+                            titolarita: proprietario
+                            rendita_attuale: "29890.00"
+                            rendita_proposta: "36000.00"
+                            imu_attuale: "7600.00"
+                            imu_prevista: "9200.00"
+                            in_studio: true
+                            esito: Non analizzato
+                            documenti:
+                              - tipo: visura_catastale
+                                file_nome: visura_162502.pdf
+                                mime_type: application/pdf
+                                storage_key: erp/SF-47824-2026-001/162502/visura_catastale/abc123-visura_162502.pdf
+                                sha256: a723ce3a0c9d1234567890abcdef1234567890abcdef1234567890abcdef
+                                dimensione_byte: 810240
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: ERP_SYNC_TOKEN
+  schemas:
+    SyncStudiRequest:
+      type: object
+      required:
+        - studi
+      properties:
+        sync_id_erp:
+          type:
+            - string
+            - "null"
+          description: Identificativo opzionale della run di sync generata dall'ERP.
+        studi:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/StudioSyncInput"
+    StudioSyncInput:
+      type: object
+      required:
+        - studio_erp_id
+        - ragione_sociale
+        - partita_iva
+        - immobili
+      properties:
+        studio_erp_id:
+          type: string
+          description: Chiave di upsert dello studio.
+        company_erp_id:
+          type: string
+        ragione_sociale:
+          type: string
+        company_name:
+          type: string
+          deprecated: true
+          description: Alias tollerato per retrocompatibilita.
+        partita_iva:
+          type: string
+        vat:
+          type: string
+          deprecated: true
+          description: Alias tollerato per retrocompatibilita.
+        codice_fiscale:
+          type: string
+        indirizzo_sede:
+          $ref: "#/components/schemas/IndirizzoSede"
+        stato_studio:
+          $ref: "#/components/schemas/StatoStudioInput"
+        data_creazione_studio:
+          type: string
+          format: date-time
+        data_importazione_erp:
+          type: string
+          format: date-time
+        updated_at_erp:
+          type: string
+          format: date-time
+        data_scadenza:
+          type: string
+          oneOf:
+            - format: date
+            - format: date-time
+        data_esito:
+          type:
+            - string
+            - "null"
+          format: date-time
+        data_prossimo_appuntamento:
+          type:
+            - string
+            - "null"
+          format: date-time
+        commerciale_assegnato:
+          oneOf:
+            - type: string
+            - $ref: "#/components/schemas/Owner"
+        responsabile_tecnico:
+          oneOf:
+            - type: string
+            - type: "null"
+            - $ref: "#/components/schemas/Owner"
+          description: Facoltativo. Se assente PQ usa il default backend.
+        note:
+          type: string
+        link_studio_erp:
+          type: string
+          format: uri
+        versione_numero:
+          type: integer
+          minimum: 1
+          default: 1
+        metriche:
+          $ref: "#/components/schemas/MetricheStudioInput"
+        immobili:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ImmobileSyncInput"
+    IndirizzoSede:
+      type: object
+      properties:
+        via:
+          type: string
+        cap:
+          type: string
+        comune:
+          type: string
+        provincia:
+          type: string
+        regione:
+          type: string
+    Owner:
+      type: object
+      properties:
+        erp_user_id:
+          type: string
+        nome:
+          type: string
+        email:
+          type: string
+          format: email
+    StatoStudioInput:
+      type: string
+      enum:
+        - da_iniziare
+        - in_progress
+        - in_lavorazione
+        - in_revisione
+        - concluso
+        - archiviato
+        - annullato
+    MetricheStudioInput:
+      type: object
+      properties:
+        rendita_originale_totale:
+          $ref: "#/components/schemas/DecimalInput"
+        rendita_proposta_totale:
+          $ref: "#/components/schemas/DecimalInput"
+        differenza_rendita:
+          $ref: "#/components/schemas/DecimalInput"
+        imu_attuale_totale:
+          $ref: "#/components/schemas/DecimalInput"
+        imu_prevista_totale:
+          $ref: "#/components/schemas/DecimalInput"
+        differenza_imu:
+          $ref: "#/components/schemas/DecimalInput"
+        rendita_categoria_d:
+          $ref: "#/components/schemas/DecimalInput"
+    ImmobileSyncInput:
+      type: object
+      required:
+        - immobile_erp_id
+      properties:
+        immobile_erp_id:
+          type: string
+          description: Chiave di upsert dell'immobile.
+        erp_id:
+          type: string
+          deprecated: true
+          description: Alias tollerato per retrocompatibilita.
+        foglio:
+          type: string
+        particella:
+          type: string
+        sub:
+          type: string
+        subalterno:
+          type: string
+        ubicazione:
+          type: string
+        indirizzo_normalizzato:
+          type: string
+        comune:
+          type: string
+        provincia:
+          type: string
+        categoria:
+          type: string
+          example: D/8
+        classamento:
+          type: string
+          example: Cat.D/8
+        titolarita:
+          type: string
+          example: proprietario
+        rendita_attuale:
+          $ref: "#/components/schemas/DecimalInput"
+        rendita:
+          $ref: "#/components/schemas/DecimalInput"
+          deprecated: true
+          description: Alias tollerato per retrocompatibilita.
+        rendita_proposta:
+          $ref: "#/components/schemas/DecimalInput"
+        imu_attuale:
+          $ref: "#/components/schemas/DecimalInput"
+        imu_prevista:
+          $ref: "#/components/schemas/DecimalInput"
+        in_studio:
+          type: boolean
+        in_study:
+          type: boolean
+          deprecated: true
+        is_study:
+          type: boolean
+          deprecated: true
+        esito:
+          $ref: "#/components/schemas/EsitoImmobileInput"
+        note_immobile:
+          type: string
+        ordine_visualizzazione:
+          type: integer
+        documenti:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentoSyncInput"
+    DocumentoSyncInput:
+      type: object
+      required:
+        - tipo
+        - file_nome
+      properties:
+        tipo:
+          $ref: "#/components/schemas/TipoDocumentoInput"
+        documento_erp_id:
+          type: string
+        file_nome:
+          type: string
+        mime_type:
+          type: string
+          enum:
+            - application/pdf
+          default: application/pdf
+        file_base64:
+          type: string
+          description: Base64 puro oppure data URL `data:application/pdf;base64,...`.
+        storage_key:
+          type: string
+          description: Accettato per retrocompatibilita/test; in produzione PQ salva il base64 su B2.
+        sha256:
+          type: string
+          description: Se presente, PQ lo verifica sul PDF decodificato.
+        dimensione_byte:
+          type: integer
+    DecimalInput:
+      oneOf:
+        - type: string
+          pattern: "^-?\\d+(,|\\.)?\\d*$"
+        - type: number
+    EsitoImmobileInput:
+      type: string
+      enum:
+        - non_analizzato
+        - positivo
+        - negativo
+        - non_in_studio
+    TipoDocumentoInput:
+      type: string
+      enum:
+        - visura_catastale
+        - visura
+        - planimetria
+        - elaborato_planimetrico
+        - elaborato
+    SyncStudiResponse:
+      type: object
+      required:
+        - sync_id_pq
+        - stato
+        - ricevuti
+        - creati
+        - aggiornati
+        - risultati
+      properties:
+        sync_id_pq:
+          type: string
+        sync_id_erp:
+          type:
+            - string
+            - "null"
+        stato:
+          type: string
+          enum:
+            - completato
+        ricevuti:
+          type: integer
+        creati:
+          type: integer
+        aggiornati:
+          type: integer
+        risultati:
+          type: array
+          items:
+            type: object
+            properties:
+              studio_erp_id:
+                type: string
+              azione:
+                type: string
+                enum:
+                  - created
+                  - updated
+              immobili_upserted:
+                type: integer
+              documenti_salvati:
+                type: integer
+    StudiModificatiResponse:
+      type: object
+      properties:
+        generato_il:
+          type: string
+          format: date-time
+        modificati_dopo:
+          type:
+            - string
+            - "null"
+          format: date-time
+        totale:
+          type: integer
+        studi:
+          type: array
+          items:
+            $ref: "#/components/schemas/StudioModificato"
+    StudioModificato:
+      type: object
+      properties:
+        studio_erp_id:
+          type: string
+        company_erp_id:
+          type:
+            - string
+            - "null"
+        ragione_sociale:
+          type: string
+        partita_iva:
+          type: string
+        stato_studio:
+          type: string
+        data_esito:
+          type:
+            - string
+            - "null"
+          format: date-time
+        data_prossimo_appuntamento:
+          type:
+            - string
+            - "null"
+          format: date-time
+        appuntamento_attivo:
+          type: boolean
+        commerciale_assegnato:
+          type: string
+        responsabile_tecnico:
+          type: string
+        note:
+          type: string
+        link_studio_erp:
+          type:
+            - string
+            - "null"
+        modificato_il:
+          type: string
+          format: date-time
+        metriche:
+          $ref: "#/components/schemas/MetricheStudioOutput"
+        immobili:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImmobileModificato"
+    MetricheStudioOutput:
+      type: object
+      properties:
+        rendita_originale_totale:
+          type: string
+        rendita_proposta_totale:
+          type: string
+        differenza_rendita:
+          type: string
+        imu_attuale_totale:
+          type: string
+        imu_prevista_totale:
+          type: string
+        differenza_imu:
+          type: string
+        rendita_categoria_d:
+          type: string
+        numero_immobili:
+          type: integer
+        numero_immobili_categoria_d:
+          type: integer
+    ImmobileModificato:
+      type: object
+      properties:
+        immobile_erp_id:
+          type: string
+        foglio:
+          type:
+            - string
+            - "null"
+        particella:
+          type:
+            - string
+            - "null"
+        sub:
+          type:
+            - string
+            - "null"
+        ubicazione:
+          type:
+            - string
+            - "null"
+        comune:
+          type: string
+        categoria:
+          type: string
+        titolarita:
+          type:
+            - string
+            - "null"
+        rendita_attuale:
+          type: string
+        rendita_proposta:
+          type: string
+        imu_attuale:
+          type:
+            - string
+            - "null"
+        imu_prevista:
+          type:
+            - string
+            - "null"
+        in_studio:
+          type: boolean
+        esito:
+          type: string
+        documenti:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentoModificato"
+    DocumentoModificato:
+      type: object
+      properties:
+        tipo:
+          type: string
+        file_nome:
+          type: string
+        mime_type:
+          type: string
+        storage_key:
+          type: string
+        sha256:
+          type:
+            - string
+            - "null"
+        dimensione_byte:
+          type:
+            - integer
+            - "null"
+    ErrorResponse:
+      type: object
+      properties:
+        statusCode:
+          type: integer
+        message:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+        error:
+          type: string
+  responses:
+    BadRequest:
+      description: Payload non valido
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            statusCode: 400
+            message: studio_erp_id obbligatorio
+            error: Bad Request
+    Unauthorized:
+      description: Token ERP mancante o errato
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            statusCode: 401
+            message: Token ERP non valido
+            error: Unauthorized
+    PayloadTooLarge:
+      description: Payload troppo grande
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalServerError:
+      description: Errore backend non previsto
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

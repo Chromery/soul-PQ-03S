@@ -22,6 +22,11 @@ Base path:
 /api/integrations/erp/v1
 ```
 
+File importabili:
+
+- OpenAPI/Swagger: `docs/openapi/erp-pq-sync.openapi.yaml`
+- Postman: `docs/postman/erp-pq-sync.postman_collection.json`
+
 Formato:
 
 - JSON `application/json`.

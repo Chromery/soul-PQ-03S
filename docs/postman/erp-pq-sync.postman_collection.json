@@ -1,0 +1,204 @@
+{
+  "info": {
+    "_postman_id": "c7b11993-c22f-49fa-9ba1-d05a42847c3c",
+    "name": "Soul PQ - ERP Sync API v1.1",
+    "description": "Collection per simulare la sincronizzazione ERP -> Soul Prospect Qualifier e il pull delle modifiche PQ -> ERP. Impostare la variabile `erpSyncToken` con il valore locale di ERP_SYNC_TOKEN.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{erpSyncToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.collectionVariables.get('runSuffix')) {",
+          "  pm.collectionVariables.set('runSuffix', Date.now().toString());",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Health API",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{apiBaseUrl}}/health",
+          "host": [
+            "{{apiBaseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        },
+        "description": "Verifica che l'API sia attiva e connessa al database. Non richiede token."
+      },
+      "response": []
+    },
+    {
+      "name": "ERP -> PQ | Sync studi con PDF base64",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('sync completato', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.stato).to.eql('completato');",
+              "  pm.expect(body.ricevuti).to.eql(1);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sync_id_erp\": \"ERP-POSTMAN-{{runSuffix}}\",\n  \"studi\": [\n    {\n      \"studio_erp_id\": \"SF-POSTMAN-{{runSuffix}}\",\n      \"company_erp_id\": \"47824\",\n      \"ragione_sociale\": \"Azienda Postman Srl\",\n      \"partita_iva\": \"IT00124252687\",\n      \"codice_fiscale\": \"00124252687\",\n      \"indirizzo_sede\": {\n        \"via\": \"Via del Lavoro 1\",\n        \"cap\": \"30199\",\n        \"comune\": \"Bolzano\",\n        \"provincia\": \"BZ\",\n        \"regione\": \"Trentino-Alto Adige\"\n      },\n      \"stato_studio\": \"in_progress\",\n      \"data_creazione_studio\": \"2026-06-22T10:15:00+02:00\",\n      \"data_importazione_erp\": \"2026-06-22T10:20:00+02:00\",\n      \"data_scadenza\": \"2026-07-15\",\n      \"data_esito\": null,\n      \"data_prossimo_appuntamento\": \"2026-06-25T15:00:00+02:00\",\n      \"commerciale_assegnato\": {\n        \"erp_user_id\": \"USR-104\",\n        \"nome\": \"Mario Rossi\",\n        \"email\": \"mario.rossi@soul.it\"\n      },\n      \"responsabile_tecnico\": null,\n      \"note\": \"Record creato dalla collection Postman per test ERP/PQ.\",\n      \"link_studio_erp\": \"https://erp.soul.example/studi/SF-POSTMAN-{{runSuffix}}\",\n      \"versione_numero\": 1,\n      \"metriche\": {\n        \"rendita_originale_totale\": \"60634.00\",\n        \"rendita_proposta_totale\": \"74500.00\",\n        \"differenza_rendita\": \"13866.00\",\n        \"imu_attuale_totale\": \"15420.00\",\n        \"imu_prevista_totale\": \"18890.00\",\n        \"differenza_imu\": \"3470.00\",\n        \"rendita_categoria_d\": \"60634.00\"\n      },\n      \"immobili\": [\n        {\n          \"immobile_erp_id\": \"IMM-POSTMAN-{{runSuffix}}\",\n          \"foglio\": \"9\",\n          \"particella\": \"804\",\n          \"sub\": \"4\",\n          \"ubicazione\": \"OSIMO(AN) VIA ACHILLE GRANDI n. 1 Piano T-1\",\n          \"indirizzo_normalizzato\": \"Via Achille Grandi 1, 60027 Osimo AN\",\n          \"comune\": \"Osimo\",\n          \"provincia\": \"AN\",\n          \"categoria\": \"D/8\",\n          \"classamento\": \"Cat.D/8\",\n          \"titolarita\": \"proprietario\",\n          \"rendita_attuale\": \"29890.00\",\n          \"rendita_proposta\": \"36000.00\",\n          \"imu_attuale\": \"7600.00\",\n          \"imu_prevista\": \"9200.00\",\n          \"in_studio\": true,\n          \"esito\": \"non_analizzato\",\n          \"note_immobile\": \"Planimetria disponibile, verificare tettoie.\",\n          \"ordine_visualizzazione\": 1,\n          \"documenti\": [\n            {\n              \"tipo\": \"visura_catastale\",\n              \"documento_erp_id\": \"DOC-POSTMAN-{{runSuffix}}\",\n              \"file_nome\": \"visura_postman.pdf\",\n              \"mime_type\": \"application/pdf\",\n              \"file_base64\": \"JVBERi0xLjQKMSAwIG9iaiA8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4gZW5kb2JqCjIgMCBvYmogPDwgL1R5cGUgL1BhZ2VzIC9Db3VudCAwID4+IGVuZG9iagp0cmFpbGVyIDw8IC9Sb290IDEgMCBSID4+CiUlRU9GCg==\"\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{apiBaseUrl}}/integrations/erp/v1/studi/sync",
+          "host": [
+            "{{apiBaseUrl}}"
+          ],
+          "path": [
+            "integrations",
+            "erp",
+            "v1",
+            "studi",
+            "sync"
+          ]
+        },
+        "description": "Crea o aggiorna uno studio di fattibilita e carica un PDF base64 su Backblaze B2 tramite il backend PQ."
+      },
+      "response": []
+    },
+    {
+      "name": "PQ -> ERP | Lettura modifiche",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('lettura modifiche ok', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body).to.have.property('studi');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{apiBaseUrl}}/integrations/erp/v1/studi/modifiche?modificati_dopo={{modificatiDopo}}",
+          "host": [
+            "{{apiBaseUrl}}"
+          ],
+          "path": [
+            "integrations",
+            "erp",
+            "v1",
+            "studi",
+            "modifiche"
+          ],
+          "query": [
+            {
+              "key": "modificati_dopo",
+              "value": "{{modificatiDopo}}",
+              "description": "Data ISO 8601. Lasciare vuoto o rimuovere per leggere tutti gli studi."
+            }
+          ]
+        },
+        "description": "Restituisce gli studi modificati dopo la data indicata. E' la chiamata che l'ERP usera per sincronizzare le ultime modifiche da PQ."
+      },
+      "response": []
+    },
+    {
+      "name": "Auth | Token errato deve dare 401",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "token-errato",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{apiBaseUrl}}/integrations/erp/v1/studi/modifiche",
+          "host": [
+            "{{apiBaseUrl}}"
+          ],
+          "path": [
+            "integrations",
+            "erp",
+            "v1",
+            "studi",
+            "modifiche"
+          ]
+        },
+        "description": "Test negativo: con ERP_SYNC_TOKEN configurato, un bearer token errato deve produrre 401."
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "apiBaseUrl",
+      "value": "http://localhost:3001/api",
+      "type": "string"
+    },
+    {
+      "key": "erpSyncToken",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "modificatiDopo",
+      "value": "2026-06-22T00:00:00Z",
+      "type": "string"
+    },
+    {
+      "key": "runSuffix",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

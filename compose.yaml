@@ -29,6 +29,7 @@ services:
       DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://soul:soul_dev_password@postgres:5432/soul_pq?schema=public}
       CORS_ORIGIN: http://localhost:${WEB_PORT:-8080},http://localhost:5173
       DEFAULT_TECHNICAL_OWNER: ${DEFAULT_TECHNICAL_OWNER:-Responsabile tecnico Soul}
+      ERP_SYNC_TOKEN: ${ERP_SYNC_TOKEN:-}
       S3_ENDPOINT: ${S3_ENDPOINT:-}
       S3_REGION: ${S3_REGION:-us-west-004}
       S3_BUCKET: ${S3_BUCKET:-}
