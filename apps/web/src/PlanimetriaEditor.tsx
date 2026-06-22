@@ -23,6 +23,7 @@ import {
   PencilLine,
   Redo2,
   Ruler,
+  Sparkles,
   Trash2,
   Undo2,
   Upload,
@@ -48,6 +49,7 @@ type UsageId =
 type EditorTool = "select" | "smart" | "polygon" | "ruler";
 type LegacyEditorTool = EditorTool | "calibrate";
 type SelectionSource = "smart" | "polygon" | "merged" | "copy";
+type ScaleExtractionStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
 
 type CanvasPoint = {
   x: number;
@@ -70,6 +72,29 @@ type EditorProperty = {
     planimetria: string;
     visura: string;
   };
+};
+
+type ScaleExtractionJob = {
+  id: string;
+  propertyId: string;
+  documentId: string | null;
+  status: ScaleExtractionStatus;
+  model: string;
+  sourceFileName: string;
+  sourceSha256: string | null;
+  scale: {
+    denominator: number;
+    label: string;
+    sheetSize: SheetSize | null;
+  } | null;
+  confidence: number | null;
+  evidence: string | null;
+  warnings: string[];
+  errorMessage: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type MaskBounds = {
@@ -535,6 +560,16 @@ function readPanelState(key: string) {
   return window.localStorage.getItem(key) !== "false";
 }
 
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return window.btoa(binary);
+}
+
 export default function PlanimetriaEditor({
   study,
   property,
@@ -610,6 +645,8 @@ export default function PlanimetriaEditor({
   const [pointerPreview, setPointerPreview] = useState<CanvasPoint | null>(null);
   const [rulerDraft, setRulerDraft] = useState<MeasureSegment | null>(null);
   const [clipboardCount, setClipboardCount] = useState(0);
+  const [scaleExtractionJob, setScaleExtractionJob] = useState<ScaleExtractionJob | null>(null);
+  const [scaleExtractionBusy, setScaleExtractionBusy] = useState(false);
   const [revision, setRevision] = useState(0);
 
   const linkedSample = useMemo(() => linkedSampleForProperty(property.id), [property.id]);
@@ -667,6 +704,16 @@ export default function PlanimetriaEditor({
     20000,
     Math.max(20, Math.round(parseNumberInput(scaleInputValue) ?? scaleDenominator)),
   );
+  const scaleExtractionLabel =
+    scaleExtractionJob?.status === "SUCCEEDED" && scaleExtractionJob.scale
+      ? `Scala AI ${scaleExtractionJob.scale.label}`
+      : scaleExtractionJob?.status === "SUCCEEDED"
+        ? "Scala AI non rilevata"
+        : scaleExtractionJob?.status === "FAILED"
+          ? "Scala AI non disponibile"
+          : scaleExtractionBusy || scaleExtractionJob?.status === "PENDING" || scaleExtractionJob?.status === "RUNNING"
+            ? "Analisi scala AI"
+            : null;
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -822,6 +869,8 @@ export default function PlanimetriaEditor({
     setSelectedPolygonVertex(null);
     setHoverPolygonInsert(null);
     setCollapsedAreaIds([]);
+    setScaleExtractionJob(null);
+    setScaleExtractionBusy(false);
     setDirty(false);
     setSavedAt("");
     setRevision((value) => value + 1);
@@ -968,6 +1017,7 @@ export default function PlanimetriaEditor({
         pendingDraftRef.current = null;
         markDirty();
       }
+      if (!draft) void triggerScaleExtraction(data, name);
     } catch (error) {
       console.error(error);
       setStatus("PDF non caricato");
@@ -983,6 +1033,7 @@ export default function PlanimetriaEditor({
       const data = await file.arrayBuffer();
       await loadPdfFromData(data, file.name || "Planimetria importata.pdf");
       setDocumentSource({ kind: "upload", fileName: file.name || "Planimetria importata.pdf" });
+      if (!restoresUpload) void triggerScaleExtraction(data, file.name || "Planimetria importata.pdf");
       if (restoresUpload && draft) {
         await restoreDraftSelections(draft);
         setStatus("Bozza ripristinata");
@@ -996,6 +1047,111 @@ export default function PlanimetriaEditor({
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  }
+
+  async function triggerScaleExtraction(data: ArrayBuffer, name: string) {
+    setScaleExtractionBusy(true);
+    setScaleExtractionJob({
+      id: "pending",
+      propertyId: property.id,
+      documentId: null,
+      status: "PENDING",
+      model: "",
+      sourceFileName: name,
+      sourceSha256: null,
+      scale: null,
+      confidence: null,
+      evidence: null,
+      warnings: [],
+      errorMessage: null,
+      startedAt: null,
+      completedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    setStatus("Analisi AI della scala planimetria");
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/scale-extraction-jobs`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            file_name: name,
+            mime_type: "application/pdf",
+            file_base64: arrayBufferToBase64(data),
+          }),
+        },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const createdJob = (await response.json()) as ScaleExtractionJob;
+      setScaleExtractionJob(createdJob);
+      await pollScaleExtractionJob(createdJob.id);
+    } catch (error) {
+      console.error(error);
+      setScaleExtractionBusy(false);
+      setScaleExtractionJob((job) =>
+        job
+          ? {
+              ...job,
+              status: "FAILED",
+              errorMessage: error instanceof Error ? error.message : "Analisi scala non riuscita",
+              updatedAt: new Date().toISOString(),
+            }
+          : job,
+      );
+      setStatus("Analisi scala non riuscita");
+    }
+  }
+
+  async function pollScaleExtractionJob(jobId: string) {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, attempt < 4 ? 1200 : 2500));
+      const response = await fetch(
+        `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/scale-extraction-jobs/${encodeURIComponent(jobId)}`,
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const job = (await response.json()) as ScaleExtractionJob;
+      setScaleExtractionJob(job);
+      if (job.status === "SUCCEEDED" || job.status === "FAILED") {
+        setScaleExtractionBusy(false);
+        applyScaleExtractionJob(job);
+        return;
+      }
+    }
+    setScaleExtractionBusy(false);
+    setStatus("Analisi scala ancora in corso");
+  }
+
+  function applyScaleExtractionJob(job: ScaleExtractionJob) {
+    if (job.status === "FAILED") {
+      setStatus("Analisi scala non riuscita");
+      return;
+    }
+    if (!job.scale) {
+      setStatus("Scala non rilevata nella planimetria");
+      return;
+    }
+    const confidence = job.confidence ?? 0;
+    if (calibration) {
+      setStatus(`Scala AI rilevata ${job.scale.label}; taratura manuale mantenuta`);
+      return;
+    }
+    if (confidence < 0.5) {
+      setStatus(`Scala AI rilevata ${job.scale.label} con confidenza bassa`);
+      return;
+    }
+
+    recordUndoState();
+    setScaleDenominator(job.scale.denominator);
+    setScaleInputValue(String(job.scale.denominator));
+    if (job.scale.sheetSize === "A3" || job.scale.sheetSize === "A4") {
+      setSheetSize(job.scale.sheetSize);
+      setScaleModalSheetSize(job.scale.sheetSize);
+    }
+    markDirty();
+    setStatus(`Scala AI applicata: ${job.scale.label}`);
   }
 
   async function loadPdfFromData(data: ArrayBuffer, name: string) {
@@ -4175,6 +4331,19 @@ export default function PlanimetriaEditor({
                   ? `Bozza salvata ${new Date(savedAt).toLocaleString("it-IT")}`
                   : "Nessuna bozza salvata"}
             </span>
+            {scaleExtractionLabel && (
+              <span
+                className={`scale-ai-state ${scaleExtractionJob?.status.toLowerCase() ?? "running"}`}
+                title={
+                  scaleExtractionJob?.evidence
+                    ? `${scaleExtractionLabel}: ${scaleExtractionJob.evidence}`
+                    : scaleExtractionLabel
+                }
+              >
+                <Sparkles size={15} />
+                {scaleExtractionLabel}
+              </span>
+            )}
             <button className="button secondary" onClick={() => fileInputRef.current?.click()}>
               <Upload size={17} />
               Carica planimetria
@@ -4275,6 +4444,19 @@ export default function PlanimetriaEditor({
                   <div>
                     <span>PDF aperto</span>
                     <strong>{fileName || "Nessun documento"}</strong>
+                    {scaleExtractionJob && (
+                      <small>
+                        {scaleExtractionJob.status === "SUCCEEDED" && scaleExtractionJob.scale
+                          ? `${scaleExtractionJob.scale.label} rilevata${
+                              scaleExtractionJob.confidence !== null
+                                ? ` - confidenza ${Math.round(scaleExtractionJob.confidence * 100)}%`
+                                : ""
+                            }`
+                          : scaleExtractionJob.status === "FAILED"
+                            ? scaleExtractionJob.errorMessage ?? "Scala AI non disponibile"
+                            : "Analisi scala AI in corso"}
+                      </small>
+                    )}
                   </div>
                 </div>
               </>

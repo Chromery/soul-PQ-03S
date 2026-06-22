@@ -2480,6 +2480,40 @@ a.button {
   background: #e8f8ef;
 }
 
+.scale-ai-state {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 0 10px;
+  border: 1px solid #c7d2fe;
+  border-radius: 7px;
+  color: #3730a3;
+  background: #eef2ff;
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scale-ai-state svg {
+  flex: 0 0 auto;
+}
+
+.scale-ai-state.succeeded {
+  border-color: #b7ead0;
+  color: #047857;
+  background: #ecfdf5;
+}
+
+.scale-ai-state.failed {
+  border-color: #fecaca;
+  color: #991b1b;
+  background: #fef2f2;
+}
+
 .plan-editor-grid {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 300px;
@@ -2892,6 +2926,15 @@ a.button {
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.loaded-doc small {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.25;
 }
 
 .slider-field {

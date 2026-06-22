@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { DocumentType } from "../generated/prisma/enums.js";
 import type { FeasibilityStudy, PlanAnalysisDraft, Property, PropertyDocument, StudyVersion } from "../generated/prisma/client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { ScaleExtractionService } from "../scale-extraction/scale-extraction.service.js";
 import { DocumentStorageService } from "./document-storage.service.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -25,6 +26,7 @@ export class ErpSyncService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: DocumentStorageService,
+    private readonly scaleExtraction: ScaleExtractionService,
     config: ConfigService,
   ) {
     this.defaultTechnicalOwner = config.get<string>("DEFAULT_TECHNICAL_OWNER", "Responsabile tecnico Soul");
@@ -232,7 +234,7 @@ export class ErpSyncService {
         };
 
         if (!stored.storageKey) throw new BadRequestException(`storage_key o file_base64 obbligatorio per ${document.fileName}`);
-        await this.prisma.propertyDocument.upsert({
+        const storedDocument = await this.prisma.propertyDocument.upsert({
           where: { propertyId_type: { propertyId: property.id, type: document.type } },
           create: {
             propertyId: property.id,
@@ -253,6 +255,15 @@ export class ErpSyncService {
             sizeBytes: stored.sizeBytes,
           },
         });
+        if (document.type === DocumentType.PLANIMETRIA && document.fileBase64) {
+          await this.scaleExtraction.enqueueDocumentPdf({
+            propertyId: property.id,
+            documentId: storedDocument.id,
+            fileName: document.fileName,
+            fileBase64: document.fileBase64,
+            sha256: stored.sha256 ?? undefined,
+          });
+        }
         documentsCount++;
       }
     }

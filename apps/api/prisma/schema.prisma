@@ -18,6 +18,13 @@ enum DraftStatus {
   COMPLETATO
 }
 
+enum ScaleExtractionStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
 model FeasibilityStudy {
   id                 String         @id
   companyErpId       String?
@@ -89,6 +96,7 @@ model Property {
   study              FeasibilityStudy    @relation(fields: [studyId], references: [id], onDelete: Cascade)
   documents          PropertyDocument[]
   analysisDraft      PlanAnalysisDraft?
+  scaleExtractionJobs ScaleExtractionJob[]
 }
 
 model PropertyDocument {
@@ -104,6 +112,7 @@ model PropertyDocument {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   property           Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  scaleExtractionJobs ScaleExtractionJob[]
 
   @@unique([propertyId, type])
 }
@@ -124,4 +133,32 @@ model PlanAnalysisDraft {
   updatedAt             DateTime      @updatedAt
   property              Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   studyVersion          StudyVersion? @relation(fields: [studyVersionId], references: [id], onDelete: SetNull)
+}
+
+model ScaleExtractionJob {
+  id                         String                 @id @default(cuid())
+  propertyId                 String
+  documentId                 String?
+  status                     ScaleExtractionStatus  @default(PENDING)
+  model                      String
+  sourceFileName             String
+  sourceSha256               String?
+  detectedScaleDenominator   Int?
+  detectedScaleLabel         String?
+  detectedSheetSize          String?
+  confidence                 Decimal?               @db.Decimal(5, 4)
+  evidence                   String?
+  warnings                   Json?
+  rawResponse                Json?
+  errorMessage               String?
+  startedAt                  DateTime?
+  completedAt                DateTime?
+  createdAt                  DateTime               @default(now())
+  updatedAt                  DateTime               @updatedAt
+  property                   Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  document                   PropertyDocument?      @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId, createdAt])
+  @@index([documentId])
+  @@index([status, createdAt])
 }
