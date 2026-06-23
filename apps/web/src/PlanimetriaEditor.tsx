@@ -11,6 +11,7 @@ import {
   Combine,
   Copy,
   Download,
+  ExternalLink,
   FileText,
   Layers,
   Maximize2,
@@ -4195,6 +4196,10 @@ export default function PlanimetriaEditor({
     setCollapsedAreaIds([]);
   }
 
+  function openPriceList() {
+    setStatus(`Prezzario per ${property.comune} non ancora collegato`);
+  }
+
   function changeActiveUsage(usageId: UsageId) {
     if (usageId === activeUsage) return;
     recordUndoState();
@@ -4768,6 +4773,16 @@ export default function PlanimetriaEditor({
               <PanelRightClose size={18} />
             </button>
           </div>
+          {/* TODO: risolvere property.comune nel territorio corretto e aprire il PDF del prezzario in una nuova scheda. */}
+          <button
+            className="price-list-button"
+            type="button"
+            onClick={openPriceList}
+            title={`Apri il prezzario per ${property.comune} in una nuova scheda`}
+          >
+            <ExternalLink size={17} />
+            Apri il prezzario
+          </button>
           <section className={`area-totals ${collapsedRightSections.totals ? "collapsed" : ""}`}>
             <button className="right-panel-toggle" type="button" onClick={() => toggleRightPanelSection("totals")}>
               <span>Riepilogo superfici</span>

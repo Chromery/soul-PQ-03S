@@ -135,6 +135,52 @@ type PropertySortKey =
   | "titolarita"
   | "outcome";
 
+type PlanAreaUsageId =
+  | "capannone"
+  | "uffici"
+  | "tettoie"
+  | "sistemazione-esterna"
+  | "verde"
+  | "lotto";
+
+type PlanAreaSheetSize = "A3" | "A4";
+
+type PlanAreaDraft = {
+  version: 1;
+  propertyId: string;
+  document: {
+    kind: "sample" | "upload";
+    fileName: string;
+    url?: string;
+  };
+  savedAt: string;
+  sheetSize: PlanAreaSheetSize;
+  scaleDenominator: number;
+  totalArea?: number;
+  totalEstimatedAmount?: number;
+  selections: PlanAreaDraftSelection[];
+};
+
+type PlanAreaDraftSelection = {
+  id: string;
+  page: number;
+  usageId: PlanAreaUsageId;
+  rate?: number;
+  opacity: number;
+  totalPixels: number;
+  source?: "smart" | "polygon" | "merged" | "copy";
+  region: {
+    count: number;
+  };
+};
+
+type PlanAreaDraftState = {
+  draft: PlanAreaDraft | null;
+  loading: boolean;
+  source: "database" | "local" | "none";
+  error: boolean;
+};
+
 type AppRoute =
   | { view: "dashboard" }
   | { view: "studies" }
@@ -1116,12 +1162,45 @@ const editableStatusOptions: StudyStatus[] = [
   "Concluso",
 ];
 
+const planAreaUsages: Array<{
+  id: PlanAreaUsageId;
+  label: string;
+  shortLabel: string;
+  color: string;
+  rate: number;
+}> = [
+  { id: "capannone", label: "Capannone", shortLabel: "Capannone", color: "#0d6efd", rate: 7.2 },
+  { id: "uffici", label: "Uffici", shortLabel: "Uffici", color: "#7c3aed", rate: 12.4 },
+  { id: "tettoie", label: "Tettoie", shortLabel: "Tettoie", color: "#f59e0b", rate: 3.1 },
+  {
+    id: "sistemazione-esterna",
+    label: "Sistemazione esterna",
+    shortLabel: "Esterni",
+    color: "#16a34a",
+    rate: 1.8,
+  },
+  { id: "verde", label: "Verde", shortLabel: "Verde", color: "#0f766e", rate: 0.4 },
+  { id: "lotto", label: "Lotto", shortLabel: "Lotto", color: "#64748b", rate: 0.2 },
+];
+
+const planAreaSheetSizes: Record<PlanAreaSheetSize, { widthMm: number; heightMm: number }> = {
+  A3: { widthMm: 420, heightMm: 297 },
+  A4: { widthMm: 297, heightMm: 210 },
+};
+
+const PLAN_AREA_DRAFT_KEY_PREFIX = "soul-planimetria-draft:";
+
 const euroFormatter = new Intl.NumberFormat("it-IT", {
   style: "currency",
   currency: "EUR",
 });
 
 const numberFormatter = new Intl.NumberFormat("it-IT");
+
+const areaFormatter = new Intl.NumberFormat("it-IT", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 
 const dateFormatter = new Intl.DateTimeFormat("it-IT", {
   day: "2-digit",
@@ -1165,6 +1244,145 @@ function formatPercent(value: number) {
 
 function formatEstimatedValue(value: number | null | undefined) {
   return value === null || value === undefined || value === 0 ? "Da stimare" : formatEuro(value);
+}
+
+function formatM2(value: number) {
+  return `${areaFormatter.format(value)} m2`;
+}
+
+function planAreaDraftKey(propertyId: string) {
+  return `${PLAN_AREA_DRAFT_KEY_PREFIX}${propertyId}`;
+}
+
+function planAreaUsageById(id: string) {
+  return planAreaUsages.find((usage) => usage.id === id) ?? planAreaUsages[0];
+}
+
+function planAreaSourceLabel(source?: PlanAreaDraftSelection["source"]) {
+  if (source === "polygon") return "Poligono";
+  if (source === "merged") return "Unione";
+  if (source === "copy") return "Copia";
+  return "Smart";
+}
+
+function pageRealAreaM2(sheetSize: PlanAreaSheetSize, scaleDenominator: number) {
+  const sheet = planAreaSheetSizes[sheetSize];
+  const width = (sheet.widthMm / 1000) * scaleDenominator;
+  const height = (sheet.heightMm / 1000) * scaleDenominator;
+  return width * height;
+}
+
+function planAreaFromPixels(selection: PlanAreaDraftSelection, draft: PlanAreaDraft) {
+  if (!selection.totalPixels) return 0;
+  return (selection.region.count / selection.totalPixels) * pageRealAreaM2(draft.sheetSize, draft.scaleDenominator);
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isPlanAreaDraft(value: unknown, propertyId: string): value is PlanAreaDraft {
+  if (!isObject(value)) return false;
+  if (value.version !== 1 || value.propertyId !== propertyId) return false;
+  if (value.sheetSize !== "A3" && value.sheetSize !== "A4") return false;
+  if (typeof value.scaleDenominator !== "number" || !Number.isFinite(value.scaleDenominator)) return false;
+  if (typeof value.savedAt !== "string" || Number.isNaN(new Date(value.savedAt).getTime())) return false;
+  if (!isObject(value.document) || typeof value.document.fileName !== "string") return false;
+  if (!Array.isArray(value.selections)) return false;
+
+  return value.selections.every((selection) => {
+    if (!isObject(selection) || !isObject(selection.region)) return false;
+    return (
+      typeof selection.id === "string" &&
+      typeof selection.page === "number" &&
+      typeof selection.usageId === "string" &&
+      typeof selection.opacity === "number" &&
+      typeof selection.totalPixels === "number" &&
+      typeof selection.region.count === "number"
+    );
+  });
+}
+
+function readLocalPlanAreaDraft(propertyId: string) {
+  try {
+    const serialized = window.localStorage.getItem(planAreaDraftKey(propertyId));
+    if (!serialized) return null;
+    const parsed = JSON.parse(serialized) as unknown;
+    return isPlanAreaDraft(parsed, propertyId) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function usePlanAreaDraft(propertyId: string | null): PlanAreaDraftState {
+  const [state, setState] = useState<PlanAreaDraftState>({
+    draft: null,
+    loading: false,
+    source: "none",
+    error: false,
+  });
+
+  useEffect(() => {
+    if (!propertyId) {
+      setState({ draft: null, loading: false, source: "none", error: false });
+      return;
+    }
+
+    const requestedPropertyId = propertyId;
+    let disposed = false;
+    const localDraft = readLocalPlanAreaDraft(requestedPropertyId);
+    setState({
+      draft: localDraft,
+      loading: true,
+      source: localDraft ? "local" : "none",
+      error: false,
+    });
+
+    async function loadDraft() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/properties/${encodeURIComponent(requestedPropertyId)}/analysis-draft`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = (await response.json()) as unknown;
+        const databaseDraft = isPlanAreaDraft(payload, requestedPropertyId) ? payload : null;
+        if (databaseDraft) {
+          try {
+            window.localStorage.setItem(planAreaDraftKey(requestedPropertyId), JSON.stringify(databaseDraft));
+          } catch {
+            // Database remains the source of truth when browser storage is full.
+          }
+        }
+        const resolvedDraft =
+          databaseDraft && localDraft && new Date(localDraft.savedAt) > new Date(databaseDraft.savedAt)
+            ? localDraft
+            : databaseDraft ?? localDraft;
+        if (!disposed) {
+          setState({
+            draft: resolvedDraft,
+            loading: false,
+            source: resolvedDraft ? (resolvedDraft === databaseDraft ? "database" : "local") : "none",
+            error: false,
+          });
+        }
+      } catch {
+        if (!disposed) {
+          setState({
+            draft: localDraft,
+            loading: false,
+            source: localDraft ? "local" : "none",
+            error: true,
+          });
+        }
+      }
+    }
+
+    void loadDraft();
+
+    return () => {
+      disposed = true;
+    };
+  }, [propertyId]);
+
+  return state;
 }
 
 function propertyLocation(property: PropertyItem) {
@@ -2883,11 +3101,13 @@ function StudyDetail({
   const [propertySortDirection, setPropertySortDirection] = useState<"asc" | "desc">("asc");
   const [manualOrder, setManualOrder] = useState<string[]>(() => study.properties.map((property) => property.id));
   const [draggedPropertyId, setDraggedPropertyId] = useState("");
+  const [activePropertyId, setActivePropertyId] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedPropertyIds([]);
     setPropertySortKey("manual");
     setManualOrder(study.properties.map((property) => property.id));
+    setActivePropertyId(null);
   }, [study.id]);
 
   useEffect(() => {
@@ -2931,6 +3151,15 @@ function StudyDetail({
   const allPropertiesSelected =
     orderedProperties.length > 0 &&
     orderedProperties.every((property) => selectedPropertyIds.includes(property.id));
+  const activeProperty =
+    orderedProperties.find((property) => property.id === activePropertyId) ?? null;
+  const activeAreaDraftState = usePlanAreaDraft(activeProperty?.id ?? null);
+
+  useEffect(() => {
+    if (activePropertyId && !study.properties.some((property) => property.id === activePropertyId)) {
+      setActivePropertyId(null);
+    }
+  }, [activePropertyId, study.properties]);
 
   async function handleStatusChange(status: StudyStatus) {
     if (status === study.status) return;
@@ -3112,7 +3341,10 @@ function StudyDetail({
                 return (
                   <tr
                     key={property.id}
-                    className={draggedPropertyId === property.id ? "dragging" : ""}
+                    className={`${draggedPropertyId === property.id ? "dragging" : ""} ${activePropertyId === property.id ? "active-property-detail" : ""}`}
+                    onClick={() => setActivePropertyId(property.id)}
+                    aria-selected={activePropertyId === property.id}
+                    title="Apri dettaglio lista aree"
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => {
                       event.preventDefault();
@@ -3123,6 +3355,7 @@ function StudyDetail({
                       <input
                         type="checkbox"
                         checked={selectedPropertyIds.includes(property.id)}
+                        onClick={(event) => event.stopPropagation()}
                         onChange={() => togglePropertySelection(property.id)}
                         aria-label={`Seleziona ${propertyLocation(property)}`}
                       />
@@ -3132,6 +3365,7 @@ function StudyDetail({
                         className="drag-handle"
                         type="button"
                         draggable
+                        onClick={(event) => event.stopPropagation()}
                         onDragStart={(event) => {
                           event.dataTransfer.effectAllowed = "move";
                           event.dataTransfer.setData("text/plain", property.id);
@@ -3165,19 +3399,42 @@ function StudyDetail({
                     </td>
                     <td>
                       <div className="property-external-actions">
-                        <a href={forMapsUrl()} target="_blank" rel="noreferrer" title="Apri forMaps">
+                        <button
+                          type="button"
+                          className={activePropertyId === property.id ? "active" : ""}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setActivePropertyId(property.id);
+                          }}
+                        >
+                          <FileText size={14} />
+                          Dettaglio
+                        </button>
+                        <a
+                          href={forMapsUrl()}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Apri forMaps"
+                          onClick={(event) => event.stopPropagation()}
+                        >
                           <Building2 size={14} />
                           forMaps
                         </a>
-                        <a href={googleEarthUrl(property)} target="_blank" rel="noreferrer">
+                        <a href={googleEarthUrl(property)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
                           <Globe size={14} />
                           Earth
                         </a>
-                        <a href={googleMapsUrl(property)} target="_blank" rel="noreferrer">
+                        <a href={googleMapsUrl(property)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
                           <MapPin size={14} />
                           Maps
                         </a>
-                        <button type="button" onClick={() => onOpenEditor(property)}>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenEditor(property);
+                          }}
+                        >
                           <File size={14} />
                           Planimetria
                         </button>
@@ -3189,6 +3446,14 @@ function StudyDetail({
             </tbody>
           </table>
         </div>
+        {activeProperty && (
+          <PropertyAreaDetail
+            property={activeProperty}
+            draftState={activeAreaDraftState}
+            onOpenEditor={() => onOpenEditor(activeProperty)}
+            onClose={() => setActivePropertyId(null)}
+          />
+        )}
       </section>
 
       <section className="detail-metrics">
@@ -3263,6 +3528,180 @@ function StudyDetail({
       </section>
 
     </main>
+  );
+}
+
+function PropertyAreaDetail({
+  property,
+  draftState,
+  onOpenEditor,
+  onClose,
+}: {
+  property: PropertyItem;
+  draftState: PlanAreaDraftState;
+  onOpenEditor: () => void;
+  onClose: () => void;
+}) {
+  const draft = draftState.draft;
+  const rows = useMemo(() => {
+    if (!draft) return [];
+    return draft.selections.map((selection, index) => {
+      const usage = planAreaUsageById(selection.usageId);
+      const rate = selection.rate ?? usage.rate;
+      const area = planAreaFromPixels(selection, draft);
+      return {
+        id: selection.id,
+        index: index + 1,
+        page: selection.page,
+        usage,
+        rate,
+        area,
+        amount: area * rate,
+        pixels: selection.region.count,
+        opacity: Math.round(selection.opacity * 100),
+        source: planAreaSourceLabel(selection.source),
+      };
+    });
+  }, [draft]);
+
+  const totals = useMemo(
+    () =>
+      rows.reduce(
+        (acc, row) => {
+          acc.area += row.area;
+          acc.amount += row.amount;
+          return acc;
+        },
+        { area: 0, amount: 0 },
+      ),
+    [rows],
+  );
+
+  const breakdown = useMemo(
+    () =>
+      planAreaUsages
+        .map((usage) => ({
+          usage,
+          area: rows
+            .filter((row) => row.usage.id === usage.id)
+            .reduce((sum, row) => sum + row.area, 0),
+        }))
+        .filter((item) => item.area > 0),
+    [rows],
+  );
+
+  const sourceLabel =
+    draftState.source === "database"
+      ? "Bozza database"
+      : draftState.source === "local"
+        ? "Bozza locale"
+        : "Nessuna bozza";
+
+  return (
+    <section className="property-area-detail" aria-label={`Lista aree ${property.address}`}>
+      <div className="section-title property-area-detail-title">
+        <div>
+          <h2>Lista aree</h2>
+          <span>
+            {propertyLocation(property)} - {property.categoria}
+          </span>
+        </div>
+        <div className="property-area-detail-actions">
+          <span className={`area-draft-source ${draftState.error ? "warning" : ""}`}>
+            {draftState.loading ? "Caricamento bozza..." : sourceLabel}
+          </span>
+          <button className="button secondary compact-button" type="button" onClick={onOpenEditor}>
+            <File size={14} />
+            Apri editor
+          </button>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi dettaglio immobile">
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+
+      {!draft && draftState.loading ? (
+        <div className="property-area-empty">
+          <FileText size={22} />
+          <strong>Caricamento lista aree</strong>
+        </div>
+      ) : !draft ? (
+        <div className="property-area-empty">
+          <FileText size={24} />
+          <strong>Nessuna lista aree salvata</strong>
+          <span>Salva una bozza dall'editor planimetrie per vedere qui superfici, valori e stime.</span>
+          <button className="button primary compact-button" type="button" onClick={onOpenEditor}>
+            <File size={14} />
+            Apri editor planimetria
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="property-area-summary">
+            <SummaryStat label="Aree tracciate" value={rows.length.toString()} />
+            <SummaryStat label="Area totale" value={formatM2(totals.area)} />
+            <SummaryStat label="Stima prototipo" value={formatEuro(totals.amount)} />
+            <SummaryStat label="Scala e foglio" value={`${draft.sheetSize} 1:${draft.scaleDenominator}`} />
+          </div>
+
+          <div className="property-area-meta">
+            <span>Documento: {draft.document.fileName}</span>
+            <span>Bozza salvata: {formatDateTime(draft.savedAt)}</span>
+            {draftState.error && <span>Database non raggiungibile, visualizzo la bozza locale.</span>}
+          </div>
+
+          {breakdown.length > 0 && (
+            <div className="property-area-breakdown" aria-label="Ripartizione aree">
+              {breakdown.map(({ usage, area }) => (
+                <span key={usage.id}>
+                  <i style={{ background: usage.color }} />
+                  <strong>{usage.shortLabel}</strong>
+                  {formatM2(area)}
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="compact-table-wrap">
+            <table className="compact-table property-area-table">
+              <thead>
+                <tr>
+                  <th>Area</th>
+                  <th>Pagina</th>
+                  <th>Tipologia</th>
+                  <th>Superficie</th>
+                  <th>Valore</th>
+                  <th>Stima</th>
+                  <th>Pixel</th>
+                  <th>Opacita</th>
+                  <th>Origine</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.id}>
+                    <td>Area {row.index}</td>
+                    <td>{row.page}</td>
+                    <td>
+                      <span className="area-usage-cell">
+                        <i style={{ background: row.usage.color }} />
+                        {row.usage.label}
+                      </span>
+                    </td>
+                    <td>{formatM2(row.area)}</td>
+                    <td>{areaFormatter.format(row.rate)} Euro/m2</td>
+                    <td>{formatEuro(row.amount)}</td>
+                    <td>{row.pixels.toLocaleString("it-IT")}</td>
+                    <td>{row.opacity}%</td>
+                    <td>{row.source}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
