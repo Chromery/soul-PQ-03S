@@ -48,6 +48,7 @@ import {
 } from "lucide-react";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.42";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -2451,6 +2452,9 @@ function Shell({
         {children}
       </div>
 
+      <div className="deploy-version-badge" aria-label={`Versione deploy ${APP_DEPLOY_VERSION}`}>
+        v{APP_DEPLOY_VERSION}
+      </div>
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
