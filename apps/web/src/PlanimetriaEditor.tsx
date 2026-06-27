@@ -23,6 +23,8 @@ import {
   PanelRightOpen,
   PencilLine,
   Redo2,
+  RotateCcw,
+  RotateCw,
   Ruler,
   Sparkles,
   Trash2,
@@ -35,6 +37,11 @@ import {
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
+const ZOOM_MIN = 25;
+const ZOOM_MAX = 400;
+const ZOOM_BUTTON_STEP = 10;
+const ZOOM_KEYBOARD_STEP = 10;
+const ZOOM_SLIDER_STEP = 5;
 
 type PdfDocument = Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>;
 type PdfPage = Awaited<ReturnType<PdfDocument["getPage"]>>;
@@ -52,6 +59,7 @@ type LegacyEditorTool = EditorTool | "calibrate";
 type SelectionSource = "smart" | "polygon" | "merged" | "copy";
 type ScaleExtractionStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
 type ScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
+type PageRotation = 0 | 90 | 180 | 270;
 
 type CanvasPoint = {
   x: number;
@@ -200,6 +208,7 @@ type SavedDraft = {
   aiSheetSize?: SheetSize | null;
   aiScaleConfidence?: number | null;
   aiScaleDetectedAt?: string | null;
+  pageRotations?: Record<string, PageRotation>;
   activeUsage: UsageId;
   opacityPercent: number;
   threshold: number;
@@ -280,6 +289,7 @@ type Runtime = {
   pageCount: number;
   renderScale: number;
   zoom: number;
+  pageRotations: Map<number, PageRotation>;
   selectionsByPage: Map<number, AreaSelection[]>;
   history: string[];
   undoStack: EditorSnapshot[];
@@ -305,6 +315,7 @@ type EditorSnapshot = {
   sheetSize: SheetSize;
   scaleSource: ScaleSource;
   aiScale: AiScaleState;
+  pageRotations: Map<number, PageRotation>;
   activeUsage: UsageId;
   opacityPercent: number;
   threshold: number;
@@ -437,6 +448,10 @@ const SHORTCUTS = {
   polygon: "P",
   ruler: "R",
   focus: "F",
+  zoomIn: "Maiusc+Freccia su",
+  zoomOut: "Maiusc+Freccia giu",
+  rotateLeft: "Maiusc+Freccia sinistra",
+  rotateRight: "Maiusc+Freccia destra",
 };
 
 function withShortcut(label: string, shortcut?: string) {
@@ -467,6 +482,7 @@ function createRuntime(): Runtime {
     pageCount: 0,
     renderScale: 2,
     zoom: 1,
+    pageRotations: new Map(),
     selectionsByPage: new Map(),
     history: [],
     undoStack: [],
@@ -627,6 +643,37 @@ function normalizeScaleSource(value: unknown, fallback: ScaleSource): ScaleSourc
     : fallback;
 }
 
+function normalizePageRotation(value: number): PageRotation {
+  const normalized = ((value % 360) + 360) % 360;
+  if (normalized === 90 || normalized === 180 || normalized === 270) return normalized;
+  return 0;
+}
+
+function pageRotationFromValue(value: unknown): PageRotation {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return normalizePageRotation(value);
+}
+
+function parsePageRotations(value: unknown) {
+  const rotations = new Map<number, PageRotation>();
+  if (!value || typeof value !== "object" || Array.isArray(value)) return rotations;
+  Object.entries(value as Record<string, unknown>).forEach(([page, rotation]) => {
+    const pageNumber = Number(page);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) return;
+    const normalized = pageRotationFromValue(rotation);
+    if (normalized !== 0) rotations.set(pageNumber, normalized);
+  });
+  return rotations;
+}
+
+function serializePageRotations(rotations: Map<number, PageRotation>) {
+  const serialized: Record<string, PageRotation> = {};
+  rotations.forEach((rotation, page) => {
+    if (rotation !== 0) serialized[String(page)] = rotation;
+  });
+  return Object.keys(serialized).length > 0 ? serialized : undefined;
+}
+
 function isUserScaleSource(value: ScaleSource) {
   return value === "USER" || value === "CALIBRATION";
 }
@@ -765,6 +812,7 @@ export default function PlanimetriaEditor({
   const canRedo = runtimeRef.current.redoStack.length > 0;
   const canDeleteSelectedObject = selectedSelectionIds.length > 0 || rulerSegmentSelected || Boolean(selectedPolygonVertex);
   const hasCurrentPageAreas = selections.length > 0;
+  const currentPageRotation = currentPage ? runtimeRef.current.pageRotations.get(currentPage) ?? 0 : 0;
 
   const selectedAreas = useMemo(
     () =>
@@ -882,6 +930,29 @@ export default function PlanimetriaEditor({
 
       if (isEditable) return;
 
+      if (event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          updateZoom(zoomPercent + ZOOM_KEYBOARD_STEP);
+          return;
+        }
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          updateZoom(zoomPercent - ZOOM_KEYBOARD_STEP);
+          return;
+        }
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          void rotateCurrentPage(-90);
+          return;
+        }
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          void rotateCurrentPage(90);
+          return;
+        }
+      }
+
       if (event.key === "Backspace" || event.key === "Delete") {
         event.preventDefault();
         if (selectedPolygonVertex) deleteSelectedPolygonVertex();
@@ -929,7 +1000,7 @@ export default function PlanimetriaEditor({
     window.addEventListener("keydown", handleKeyboard);
     return () => window.removeEventListener("keydown", handleKeyboard);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSelectionIds, selectedPolygonVertex, clipboardCount, currentPage, hasPdf, revision, focusMode, activeTool, activeUsage]);
+  }, [selectedSelectionIds, selectedPolygonVertex, clipboardCount, currentPage, hasPdf, revision, focusMode, activeTool, activeUsage, zoomPercent, busy]);
 
   useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
@@ -1351,6 +1422,7 @@ export default function PlanimetriaEditor({
       runtime.fileName = name;
       runtime.currentPage = 1;
       runtime.pageCount = pdfDoc.numPages;
+      runtime.pageRotations = parsePageRotations(pendingDraftRef.current?.pageRotations);
       runtimeRef.current = runtime;
       setZoomPercent(100);
       setFileName(name);
@@ -1461,6 +1533,7 @@ export default function PlanimetriaEditor({
       aiSheetSize: aiScale.sheetSize,
       aiScaleConfidence: aiScale.confidence,
       aiScaleDetectedAt: aiScale.detectedAt,
+      pageRotations: serializePageRotations(runtimeRef.current.pageRotations),
       activeUsage,
       opacityPercent,
       threshold,
@@ -1539,7 +1612,7 @@ export default function PlanimetriaEditor({
     const availableWidth = Math.max(280, shell.clientWidth - 56);
     const availableHeight = Math.max(320, Math.min(shell.clientHeight - 56, visibleHeight));
     const fit = Math.min(1.15, availableWidth / pageWidth, availableHeight / pageHeight);
-    return Math.max(35, Math.min(140, Math.floor(fit * 100)));
+    return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.floor(fit * 100)));
   }
 
   function fitPageToViewport() {
@@ -1661,13 +1734,15 @@ export default function PlanimetriaEditor({
     setStatus("Rendering pagina");
     try {
       const page = await runtime.pdfDoc.getPage(pageNumber);
-      const baseViewport = page.getViewport({ scale: 1 });
-      const maxEdge = 2900;
+      const pageBaseRotation = pageRotationFromValue((page as { rotate?: number }).rotate);
+      const pageRotation = normalizePageRotation(pageBaseRotation + (runtime.pageRotations.get(pageNumber) ?? 0));
+      const baseViewport = page.getViewport({ scale: 1, rotation: pageRotation });
+      const maxEdge = 3800;
       runtime.renderScale = Math.max(
         1.4,
-        Math.min(2.45, maxEdge / Math.max(baseViewport.width, baseViewport.height)),
+        Math.min(3.2, maxEdge / Math.max(baseViewport.width, baseViewport.height)),
       );
-      const viewport = page.getViewport({ scale: runtime.renderScale });
+      const viewport = page.getViewport({ scale: runtime.renderScale, rotation: pageRotation });
       const width = Math.round(viewport.width);
       const height = Math.round(viewport.height);
       const { pdfCanvas, maskCanvas, waveCanvas, pdf } = getCanvases();
@@ -2530,6 +2605,96 @@ export default function PlanimetriaEditor({
     };
   }
 
+  function rotateCanvasPoint(
+    point: CanvasPoint,
+    oldWidth: number,
+    oldHeight: number,
+    newWidth: number,
+    newHeight: number,
+    delta: PageRotation,
+  ): CanvasPoint {
+    let next = { ...point };
+    if (delta === 90) next = { x: oldHeight - 1 - point.y, y: point.x };
+    else if (delta === 180) next = { x: oldWidth - 1 - point.x, y: oldHeight - 1 - point.y };
+    else if (delta === 270) next = { x: point.y, y: oldWidth - 1 - point.x };
+    return {
+      x: Math.max(0, Math.min(newWidth - 1, Math.round(next.x))),
+      y: Math.max(0, Math.min(newHeight - 1, Math.round(next.y))),
+    };
+  }
+
+  function rotateFullCanvas(source: HTMLCanvasElement, width: number, height: number, delta: PageRotation) {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Contesto rotazione non disponibile");
+    context.imageSmoothingEnabled = false;
+    if (delta === 90) {
+      context.translate(width, 0);
+      context.rotate(Math.PI / 2);
+    } else if (delta === 180) {
+      context.translate(width, height);
+      context.rotate(Math.PI);
+    } else if (delta === 270) {
+      context.translate(0, height);
+      context.rotate(-Math.PI / 2);
+    }
+    context.drawImage(source, 0, 0);
+    return canvas;
+  }
+
+  function regionFromAlphaPageCanvas(canvas: HTMLCanvasElement, seed: CanvasPoint): Region | null {
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return null;
+    const { width, height } = canvas;
+    const data = context.getImageData(0, 0, width, height).data;
+    const mask = new Uint8Array(width * height);
+    let count = 0;
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+
+    for (let y = 0; y < height; y++) {
+      const row = y * width;
+      for (let x = 0; x < width; x++) {
+        const alpha = data[(row + x) * 4 + 3];
+        if (alpha <= 8) continue;
+        mask[row + x] = 1;
+        count++;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+
+    if (count === 0) return null;
+    return buildRegionFromMask(mask, { minX, minY, maxX, maxY, count }, seed, width);
+  }
+
+  function rotateRegion(
+    region: Region,
+    oldWidth: number,
+    oldHeight: number,
+    newWidth: number,
+    newHeight: number,
+    delta: PageRotation,
+  ) {
+    if (delta === 0) return region;
+    const fullCanvas = document.createElement("canvas");
+    fullCanvas.width = oldWidth;
+    fullCanvas.height = oldHeight;
+    const fullContext = fullCanvas.getContext("2d");
+    if (!fullContext) return region;
+    fullContext.imageSmoothingEnabled = false;
+    fullContext.drawImage(region.alphaCanvas, region.bounds.minX, region.bounds.minY);
+    const rotatedCanvas = rotateFullCanvas(fullCanvas, newWidth, newHeight, delta);
+    const seed = rotateCanvasPoint(region.seed, oldWidth, oldHeight, newWidth, newHeight, delta);
+    return regionFromAlphaPageCanvas(rotatedCanvas, seed) ?? region;
+  }
+
   function makeRegion(
     mask: Uint8Array,
     bounds: MaskBounds,
@@ -2657,6 +2822,7 @@ export default function PlanimetriaEditor({
       sheetSize,
       scaleSource,
       aiScale: { ...aiScale },
+      pageRotations: new Map(runtimeRef.current.pageRotations),
       activeUsage,
       opacityPercent,
       threshold,
@@ -2714,6 +2880,9 @@ export default function PlanimetriaEditor({
     setSheetSize(snapshot.sheetSize);
     setScaleSource(snapshot.scaleSource);
     setAiScale({ ...snapshot.aiScale });
+    const currentRotation = runtimeRef.current.pageRotations.get(runtimeRef.current.currentPage) ?? 0;
+    const restoredRotation = snapshot.pageRotations.get(runtimeRef.current.currentPage) ?? 0;
+    runtimeRef.current.pageRotations = new Map(snapshot.pageRotations);
     setActiveUsage(snapshot.activeUsage);
     setOpacityPercent(snapshot.opacityPercent);
     setThreshold(snapshot.threshold);
@@ -2723,7 +2892,11 @@ export default function PlanimetriaEditor({
     setKnownSegmentMeters(snapshot.knownSegmentMeters);
     runtimeRef.current.wallMap = null;
     runtimeRef.current.wallKey = "";
-    redrawMasks();
+    if (currentRotation !== restoredRotation && runtimeRef.current.pdfDoc && runtimeRef.current.currentPage) {
+      void renderPage(runtimeRef.current.currentPage);
+    } else {
+      redrawMasks();
+    }
     markDirty();
     bumpRevision();
   }
@@ -4368,9 +4541,119 @@ export default function PlanimetriaEditor({
 
   function updateZoom(nextZoom: number) {
     const runtime = runtimeRef.current;
-    runtime.zoom = nextZoom / 100;
-    setZoomPercent(nextZoom);
+    const clampedZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(nextZoom)));
+    runtime.zoom = clampedZoom / 100;
+    setZoomPercent(clampedZoom);
     if (runtime.pdfDoc) applyStageSize();
+  }
+
+  function rotateSegment(
+    segment: MeasureSegment,
+    pageNumber: number,
+    oldWidth: number,
+    oldHeight: number,
+    newWidth: number,
+    newHeight: number,
+    delta: PageRotation,
+  ): MeasureSegment {
+    if (segment.page !== pageNumber || delta === 0) return segment;
+    return {
+      ...segment,
+      start: rotateCanvasPoint(segment.start, oldWidth, oldHeight, newWidth, newHeight, delta),
+      end: rotateCanvasPoint(segment.end, oldWidth, oldHeight, newWidth, newHeight, delta),
+    };
+  }
+
+  function rotateCalibration(
+    value: SavedCalibration,
+    pageNumber: number,
+    oldWidth: number,
+    oldHeight: number,
+    newWidth: number,
+    newHeight: number,
+    delta: PageRotation,
+  ): SavedCalibration {
+    if (value.page !== pageNumber || delta === 0) return value;
+    return {
+      ...value,
+      start: rotateCanvasPoint(value.start, oldWidth, oldHeight, newWidth, newHeight, delta),
+      end: rotateCanvasPoint(value.end, oldWidth, oldHeight, newWidth, newHeight, delta),
+    };
+  }
+
+  function rotateCurrentPageGeometry(
+    pageNumber: number,
+    oldWidth: number,
+    oldHeight: number,
+    newWidth: number,
+    newHeight: number,
+    delta: PageRotation,
+  ) {
+    if (delta === 0 || oldWidth <= 0 || oldHeight <= 0 || newWidth <= 0 || newHeight <= 0) return;
+    const pageSelections = runtimeRef.current.selectionsByPage.get(pageNumber) ?? [];
+    pageSelections.forEach((selection) => {
+      const region = rotateRegion(selection.region, oldWidth, oldHeight, newWidth, newHeight, delta);
+      selection.region = region;
+      selection.totalPixels = newWidth * newHeight;
+      selection.bitmap = createTintedCanvas(region, selection.color, selection.opacity);
+      selection.polygon = selection.polygon?.map((point) =>
+        rotateCanvasPoint(point, oldWidth, oldHeight, newWidth, newHeight, delta),
+      );
+    });
+
+    setRulerSegment((segment) =>
+      segment ? rotateSegment(segment, pageNumber, oldWidth, oldHeight, newWidth, newHeight, delta) : segment,
+    );
+    setRulerDraft((segment) =>
+      segment ? rotateSegment(segment, pageNumber, oldWidth, oldHeight, newWidth, newHeight, delta) : segment,
+    );
+    setCalibration((value) =>
+      value ? rotateCalibration(value, pageNumber, oldWidth, oldHeight, newWidth, newHeight, delta) : value,
+    );
+    setPolygonDraft((points) =>
+      points.map((point) => rotateCanvasPoint(point, oldWidth, oldHeight, newWidth, newHeight, delta)),
+    );
+    setPointerPreview((point) =>
+      point ? rotateCanvasPoint(point, oldWidth, oldHeight, newWidth, newHeight, delta) : point,
+    );
+    setMarqueeDraft(null);
+    setHoverPolygonInsert(null);
+    dragStateRef.current = null;
+    marqueeDragRef.current = null;
+    segmentDragRef.current = null;
+    polygonEditDragRef.current = null;
+    outlinePathCacheRef.current = new WeakMap();
+  }
+
+  async function rotateCurrentPage(delta: -90 | 90) {
+    const runtime = runtimeRef.current;
+    if (!runtime.pdfDoc || !currentPage || busy) return;
+    const pdfCanvas = pdfCanvasRef.current;
+    const oldWidth = pdfCanvas?.width ?? 0;
+    const oldHeight = pdfCanvas?.height ?? 0;
+    const previousRotation = runtime.pageRotations.get(currentPage) ?? 0;
+    const nextRotation = normalizePageRotation(previousRotation + delta);
+    const deltaRotation = normalizePageRotation(nextRotation - previousRotation);
+
+    recordUndoState();
+    runtime.pageRotations.set(currentPage, nextRotation);
+    if (nextRotation === 0) runtime.pageRotations.delete(currentPage);
+
+    const rendered = await renderPage(currentPage);
+    if (!rendered) {
+      if (previousRotation === 0) runtime.pageRotations.delete(currentPage);
+      else runtime.pageRotations.set(currentPage, previousRotation);
+      setStatus("Rotazione non riuscita");
+      return;
+    }
+
+    const newWidth = pdfCanvasRef.current?.width ?? 0;
+    const newHeight = pdfCanvasRef.current?.height ?? 0;
+    rotateCurrentPageGeometry(currentPage, oldWidth, oldHeight, newWidth, newHeight, deltaRotation);
+    redrawMasks();
+    markDirty();
+    setStatus(delta > 0 ? "Pagina ruotata a destra" : "Pagina ruotata a sinistra");
+    bumpRevision();
   }
 
   function toggleToolSection(section: ToolSectionId) {
@@ -4917,9 +5200,9 @@ export default function PlanimetriaEditor({
             <div className="canvas-zoom-row">
               <button
                 className="icon-button"
-                title="Riduci zoom"
-                disabled={!hasPdf || zoomPercent <= 35}
-                onClick={() => updateZoom(Math.max(35, zoomPercent - 10))}
+                title={withShortcut("Riduci zoom", SHORTCUTS.zoomOut)}
+                disabled={!hasPdf || zoomPercent <= ZOOM_MIN}
+                onClick={() => updateZoom(zoomPercent - ZOOM_BUTTON_STEP)}
               >
                 <ZoomOut size={17} />
               </button>
@@ -4927,22 +5210,39 @@ export default function PlanimetriaEditor({
                 <span>{zoomPercent}%</span>
                 <input
                   type="range"
-                  min={35}
-                  max={165}
+                  min={ZOOM_MIN}
+                  max={ZOOM_MAX}
+                  step={ZOOM_SLIDER_STEP}
                   value={zoomPercent}
                   onChange={(event) => updateZoom(Number(event.target.value))}
                 />
               </label>
               <button
                 className="icon-button"
-                title="Aumenta zoom"
-                disabled={!hasPdf || zoomPercent >= 165}
-                onClick={() => updateZoom(Math.min(165, zoomPercent + 10))}
+                title={withShortcut("Aumenta zoom", SHORTCUTS.zoomIn)}
+                disabled={!hasPdf || zoomPercent >= ZOOM_MAX}
+                onClick={() => updateZoom(zoomPercent + ZOOM_BUTTON_STEP)}
               >
                 <ZoomIn size={17} />
               </button>
               <button className="icon-button" title="Adatta alla vista" disabled={!hasPdf} onClick={fitPageToViewport}>
                 <Maximize2 size={17} />
+              </button>
+              <button
+                className="icon-button"
+                title={withShortcut(`Ruota a sinistra (${currentPageRotation} gradi)`, SHORTCUTS.rotateLeft)}
+                disabled={!hasPdf || busy}
+                onClick={() => void rotateCurrentPage(-90)}
+              >
+                <RotateCcw size={17} />
+              </button>
+              <button
+                className="icon-button"
+                title={withShortcut(`Ruota a destra (${currentPageRotation} gradi)`, SHORTCUTS.rotateRight)}
+                disabled={!hasPdf || busy}
+                onClick={() => void rotateCurrentPage(90)}
+              >
+                <RotateCw size={17} />
               </button>
               <button
                 className={`icon-button canvas-dock-toggle ${opacityDockOpen ? "active" : ""}`}

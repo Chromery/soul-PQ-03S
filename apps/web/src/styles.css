@@ -3492,7 +3492,7 @@ a.button {
   right: 14px;
   bottom: 14px;
   z-index: 5;
-  width: min(372px, calc(100% - 28px));
+  width: min(560px, calc(100% - 28px));
   display: grid;
   gap: 6px;
   padding: 7px;
@@ -3504,7 +3504,7 @@ a.button {
 }
 
 .canvas-zoom-dock:not(.opacity-open) {
-  width: min(336px, calc(100% - 28px));
+  width: min(524px, calc(100% - 28px));
 }
 
 .measure-inline-card.selected {
@@ -3516,7 +3516,7 @@ a.button {
 
 .canvas-zoom-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 36px 36px 36px;
+  grid-template-columns: 36px minmax(180px, 1fr) 36px 36px 36px 36px 36px;
   align-items: center;
   gap: 6px;
 }
@@ -3524,7 +3524,7 @@ a.button {
 .canvas-zoom-row label,
 .canvas-opacity-row {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 56px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   color: #173154;
@@ -4338,6 +4338,14 @@ a.button {
 
   .deploy-version-badge {
     right: 12px;
+  }
+
+  .canvas-zoom-row {
+    grid-template-columns: 36px minmax(0, 1fr) 36px 36px;
+  }
+
+  .canvas-zoom-row .icon-button:nth-of-type(n + 4) {
+    grid-row: 2;
   }
 
   .page-heading h1,
