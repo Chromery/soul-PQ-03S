@@ -4550,12 +4550,35 @@ export default function PlanimetriaEditor({
     }
   }
 
-  function updateZoom(nextZoom: number) {
+  function updateZoom(nextZoom: number, anchor?: { clientX: number; clientY: number }) {
     const runtime = runtimeRef.current;
     const clampedZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(nextZoom)));
+    const shell = canvasShellRef.current;
+    const stage = stageRef.current;
+    const anchorState =
+      anchor && shell && stage
+        ? (() => {
+            const rect = stage.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) return null;
+            return {
+              clientX: anchor.clientX,
+              clientY: anchor.clientY,
+              x: Math.max(0, Math.min(1, (anchor.clientX - rect.left) / rect.width)),
+              y: Math.max(0, Math.min(1, (anchor.clientY - rect.top) / rect.height)),
+            };
+          })()
+        : null;
+
     runtime.zoom = clampedZoom / 100;
     setZoomPercent(clampedZoom);
-    if (runtime.pdfDoc) applyStageSize();
+    if (runtime.pdfDoc) {
+      applyStageSize();
+      if (anchorState && shell && stage) {
+        const rect = stage.getBoundingClientRect();
+        shell.scrollLeft += rect.left + rect.width * anchorState.x - anchorState.clientX;
+        shell.scrollTop += rect.top + rect.height * anchorState.y - anchorState.clientY;
+      }
+    }
   }
 
   function handleCanvasWheel(event: globalThis.WheelEvent) {
@@ -4572,7 +4595,10 @@ export default function PlanimetriaEditor({
     if (Math.abs(wheelZoomRemainderRef.current) < 1) return;
     const zoomDelta = Math.trunc(wheelZoomRemainderRef.current);
     wheelZoomRemainderRef.current -= zoomDelta;
-    updateZoom(runtimeRef.current.zoom * 100 + zoomDelta);
+    updateZoom(runtimeRef.current.zoom * 100 + zoomDelta, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
   }
 
   function rotateSegment(
