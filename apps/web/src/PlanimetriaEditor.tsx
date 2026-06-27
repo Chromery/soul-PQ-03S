@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, PointerEvent, ReactNode, WheelEvent } from "react";
+import type { CSSProperties, PointerEvent, ReactNode } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.js?url";
 import {
@@ -1004,6 +1004,13 @@ export default function PlanimetriaEditor({
     return () => window.removeEventListener("keydown", handleKeyboard);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSelectionIds, selectedPolygonVertex, clipboardCount, currentPage, hasPdf, revision, focusMode, activeTool, activeUsage, zoomPercent, busy]);
+
+  useEffect(() => {
+    const shell = canvasShellRef.current;
+    if (!shell) return;
+    shell.addEventListener("wheel", handleCanvasWheel, { passive: false });
+    return () => shell.removeEventListener("wheel", handleCanvasWheel);
+  });
 
   useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
@@ -4551,9 +4558,10 @@ export default function PlanimetriaEditor({
     if (runtime.pdfDoc) applyStageSize();
   }
 
-  function handleCanvasWheel(event: WheelEvent<HTMLDivElement>) {
+  function handleCanvasWheel(event: globalThis.WheelEvent) {
     if (!hasPdf || !event.altKey || event.ctrlKey || event.metaKey) return;
     event.preventDefault();
+    event.stopPropagation();
     const normalizedDelta =
       event.deltaMode === 1
         ? event.deltaY * 16
@@ -5195,7 +5203,7 @@ export default function PlanimetriaEditor({
               </button>
             </div>
           </div>
-          <div ref={canvasShellRef} className="plan-canvas-shell" onWheel={handleCanvasWheel}>
+          <div ref={canvasShellRef} className="plan-canvas-shell">
             {!hasPdf && (
               <div className="plan-empty-state">
                 <FileText size={30} />
