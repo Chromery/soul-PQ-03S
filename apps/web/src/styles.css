@@ -1840,6 +1840,16 @@ a.button {
   gap: 9px;
 }
 
+.scale-modal .modal-actions {
+  flex-wrap: wrap;
+}
+
+.scale-modal .scale-auto-button {
+  width: 100%;
+  min-width: 0;
+  white-space: normal;
+}
+
 .button.danger-button,
 .danger-button {
   color: #fff;

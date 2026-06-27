@@ -5094,7 +5094,7 @@ export default function PlanimetriaEditor({
 
       {scaleModalOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setScaleModalOpen(false)}>
-          <div className="editor-modal" role="dialog" aria-modal="true" aria-labelledby="scale-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="editor-modal scale-modal" role="dialog" aria-modal="true" aria-labelledby="scale-modal-title" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <h2 id="scale-modal-title">Scala planimetria</h2>
               <button className="icon-button" type="button" onClick={() => setScaleModalOpen(false)} aria-label="Chiudi">
@@ -5148,7 +5148,7 @@ export default function PlanimetriaEditor({
             <p className="modal-note">La scala aggiorna subito il calcolo delle superfici gia tracciate.</p>
             <div className="modal-actions">
               <button
-                className="button secondary"
+                className="button secondary scale-auto-button"
                 type="button"
                 disabled={!hasPdf || scaleExtractionBusy}
                 onClick={() => void triggerCurrentPdfScaleExtraction()}
