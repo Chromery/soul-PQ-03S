@@ -13,6 +13,7 @@ type CreateScaleExtractionInput = {
   mime_type?: string;
   document_id?: string;
   sha256?: string;
+  apply_active_scale?: boolean;
 };
 
 type EnqueueDocumentPdfInput = {
@@ -133,11 +134,15 @@ export class ScaleExtractionService {
       },
     });
 
-    const process = this.runJob(job.id, {
-      fileName: input.file_name,
-      fileData: dataUrl,
-      sizeBytes: buffer.byteLength,
-    });
+    const process = this.runJob(
+      job.id,
+      {
+        fileName: input.file_name,
+        fileData: dataUrl,
+        sizeBytes: buffer.byteLength,
+      },
+      { forceActiveScale: input.apply_active_scale === true },
+    );
     if (wait) await process;
     else void process.catch((error) => console.error("Scale extraction job failed", error));
 
@@ -170,7 +175,11 @@ export class ScaleExtractionService {
     return this.toApiJob(job);
   }
 
-  private async runJob(jobId: string, source: { fileName: string; fileData: string; sizeBytes: number }) {
+  private async runJob(
+    jobId: string,
+    source: { fileName: string; fileData: string; sizeBytes: number },
+    options: { forceActiveScale?: boolean } = {},
+  ) {
     const startedAt = new Date();
     await this.prisma.scaleExtractionJob.update({
       where: { id: jobId },
@@ -199,7 +208,7 @@ export class ScaleExtractionService {
         },
       });
       if (result.found && result.scale_denominator) {
-        await this.persistDetectedScale(updatedJob.propertyId, result, completedAt);
+        await this.persistDetectedScale(updatedJob.propertyId, result, completedAt, options);
       }
     } catch (error) {
       const completedAt = new Date();
@@ -327,7 +336,12 @@ export class ScaleExtractionService {
     return property;
   }
 
-  private async persistDetectedScale(propertyId: string, result: ScaleExtractionResult, detectedAt: Date) {
+  private async persistDetectedScale(
+    propertyId: string,
+    result: ScaleExtractionResult,
+    detectedAt: Date,
+    options: { forceActiveScale?: boolean } = {},
+  ) {
     const denominator = result.scale_denominator;
     if (!denominator) return;
     await this.prisma.$transaction(async (tx) => {
@@ -338,11 +352,15 @@ export class ScaleExtractionService {
           sheetSize: true,
           scaleDenominator: true,
           scaleSource: true,
+          aiScaleDenominator: true,
         },
       });
       if (!property) return;
 
-      const shouldSeedActiveScale = !isUserScaleSource(property.scaleSource);
+      const effectivePropertyScaleSource =
+        property.scaleSource === "USER" && !property.aiScaleDenominator ? "DEFAULT" : property.scaleSource;
+      const shouldSeedActiveScale =
+        options.forceActiveScale === true || !isUserScaleSource(effectivePropertyScaleSource);
       await tx.property.update({
         where: { id: propertyId },
         data: {
@@ -366,12 +384,26 @@ export class ScaleExtractionService {
         select: {
           sheetSize: true,
           scaleSource: true,
+          aiScaleDenominator: true,
           payload: true,
         },
       });
       if (!draft) return;
 
-      const shouldSeedDraftScale = !isUserScaleSource(draft.scaleSource);
+      const draftPayload =
+        draft.payload && typeof draft.payload === "object" && !Array.isArray(draft.payload)
+          ? (draft.payload as Record<string, unknown>)
+          : {};
+      const payloadHasScaleSource = typeof draftPayload.scaleSource === "string";
+      const draftScaleSource = payloadHasScaleSource
+        ? draft.scaleSource
+        : draft.scaleSource === "USER"
+          ? "DEFAULT"
+          : draft.scaleSource;
+      const effectiveDraftScaleSource =
+        draftScaleSource === "USER" && !draft.aiScaleDenominator ? "DEFAULT" : draftScaleSource;
+      const shouldSeedDraftScale =
+        options.forceActiveScale === true || !isUserScaleSource(effectiveDraftScaleSource);
       await tx.planAnalysisDraft.update({
         where: { propertyId },
         data: {
@@ -405,6 +437,7 @@ export class ScaleExtractionService {
       mime_type: mimeType,
       document_id: optionalString(input.document_id),
       sha256: optionalString(input.sha256),
+      apply_active_scale: optionalBoolean(input.apply_active_scale),
     };
   }
 
@@ -642,6 +675,14 @@ function optionalString(value: unknown) {
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (typeof value !== "string") return undefined;
   return value.trim() || undefined;
+}
+
+function optionalBoolean(value: unknown) {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value === "boolean") return value;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return undefined;
 }
 
 function requiredString(value: unknown, path: string) {

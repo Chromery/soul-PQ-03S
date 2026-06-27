@@ -1072,7 +1072,7 @@ export default function PlanimetriaEditor({
 
       setSheetSize(draft.sheetSize);
       setScaleDenominator(draft.scaleDenominator);
-      setScaleSource(normalizeScaleSource(draft.scaleSource, "USER"));
+      setScaleSource(normalizeScaleSource(draft.scaleSource, "DEFAULT"));
       const draftAiScale = aiScaleFromDraft(draft);
       setAiScale(draftAiScale.denominator ? draftAiScale : aiScaleFromProperty(property));
       setActiveUsage(draft.activeUsage);
@@ -1320,6 +1320,7 @@ export default function PlanimetriaEditor({
             file_name: name,
             mime_type: "application/pdf",
             file_base64: arrayBufferToBase64(data),
+            apply_active_scale: true,
           }),
         },
       );
@@ -1364,7 +1365,7 @@ export default function PlanimetriaEditor({
       setScaleExtractionJob(job);
       if (job.status === "SUCCEEDED" || job.status === "FAILED") {
         setScaleExtractionBusy(false);
-        applyScaleExtractionJob(job);
+        applyScaleExtractionJob(job, { forceActiveScale: true });
         return;
       }
     }
@@ -1372,7 +1373,7 @@ export default function PlanimetriaEditor({
     setStatus("Analisi scala ancora in corso");
   }
 
-  function applyScaleExtractionJob(job: ScaleExtractionJob) {
+  function applyScaleExtractionJob(job: ScaleExtractionJob, options: { forceActiveScale?: boolean } = {}) {
     if (job.status === "FAILED") {
       setStatus("Analisi scala non riuscita");
       return;
@@ -1389,7 +1390,7 @@ export default function PlanimetriaEditor({
       detectedAt: job.completedAt ?? job.updatedAt,
     });
     const confidence = job.confidence ?? 0;
-    if (calibration || isUserScaleSource(scaleSource)) {
+    if (!options.forceActiveScale && (calibration || isUserScaleSource(scaleSource))) {
       markDirty();
       setStatus(`Scala AI rilevata ${job.scale.label}; scala impostata manualmente mantenuta`);
       return;

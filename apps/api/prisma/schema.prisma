@@ -134,7 +134,7 @@ model PlanAnalysisDraft {
   payload               Json
   sheetSize             String
   scaleDenominator      Int
-  scaleSource           String            @default("USER")
+  scaleSource           String            @default("DEFAULT")
   aiScaleDenominator    Int?
   aiScaleLabel          String?
   aiSheetSize           String?

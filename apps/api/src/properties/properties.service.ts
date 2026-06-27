@@ -44,9 +44,16 @@ export class PropertiesService {
     await this.requireProperty(propertyId);
     const draft = await this.prisma.planAnalysisDraft.findUnique({ where: { propertyId } });
     if (!draft) return null;
+    const payload =
+      typeof draft.payload === "object" && draft.payload !== null && !Array.isArray(draft.payload)
+        ? (draft.payload as Record<string, unknown>)
+        : {};
+    const payloadHasScaleSource = typeof payload.scaleSource === "string";
     return {
-      ...(typeof draft.payload === "object" && draft.payload !== null && !Array.isArray(draft.payload) ? draft.payload : {}),
-      scaleSource: normalizeScaleSource(draft.scaleSource),
+      ...payload,
+      scaleSource: payloadHasScaleSource
+        ? normalizeScaleSource(payload.scaleSource)
+        : normalizeScaleSource(draft.scaleSource === "USER" ? "DEFAULT" : draft.scaleSource),
       aiScaleDenominator: draft.aiScaleDenominator,
       aiScaleLabel: draft.aiScaleLabel,
       aiSheetSize: draft.aiSheetSize,
@@ -178,7 +185,7 @@ function mapDocumentType(value: string) {
 
 function normalizeScaleSource(value: unknown): ScaleSource {
   if (value === "AI" || value === "USER" || value === "CALIBRATION" || value === "DEFAULT") return value;
-  return "USER";
+  return "DEFAULT";
 }
 
 function validateOptionalScaleDenominator(value: unknown, field: string) {
