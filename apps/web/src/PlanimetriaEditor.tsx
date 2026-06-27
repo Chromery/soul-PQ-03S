@@ -51,6 +51,7 @@ type EditorTool = "select" | "smart" | "polygon" | "ruler";
 type LegacyEditorTool = EditorTool | "calibrate";
 type SelectionSource = "smart" | "polygon" | "merged" | "copy";
 type ScaleExtractionStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
+type ScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
 
 type CanvasPoint = {
   x: number;
@@ -69,6 +70,14 @@ type EditorProperty = {
   categoria: string;
   currentRendita: number;
   estimatedRendita: number;
+  sheetSize?: SheetSize | null;
+  scaleDenominator?: number | null;
+  scaleSource?: ScaleSource | null;
+  aiScaleDenominator?: number | null;
+  aiScaleLabel?: string | null;
+  aiSheetSize?: SheetSize | null;
+  aiScaleConfidence?: number | null;
+  aiScaleDetectedAt?: string | null;
   documents: {
     planimetria: string;
     visura: string;
@@ -164,6 +173,14 @@ type SavedCalibration = {
   end: CanvasPoint;
 };
 
+type AiScaleState = {
+  denominator: number | null;
+  label: string | null;
+  sheetSize: SheetSize | null;
+  confidence: number | null;
+  detectedAt: string | null;
+};
+
 type MeasureSegment = {
   page: number;
   start: CanvasPoint;
@@ -177,6 +194,12 @@ type SavedDraft = {
   savedAt: string;
   sheetSize: SheetSize;
   scaleDenominator: number;
+  scaleSource?: ScaleSource;
+  aiScaleDenominator?: number | null;
+  aiScaleLabel?: string | null;
+  aiSheetSize?: SheetSize | null;
+  aiScaleConfidence?: number | null;
+  aiScaleDetectedAt?: string | null;
   activeUsage: UsageId;
   opacityPercent: number;
   threshold: number;
@@ -280,6 +303,8 @@ type EditorSnapshot = {
   rulerSegment: MeasureSegment | null;
   scaleDenominator: number;
   sheetSize: SheetSize;
+  scaleSource: ScaleSource;
+  aiScale: AiScaleState;
   activeUsage: UsageId;
   opacityPercent: number;
   threshold: number;
@@ -578,6 +603,60 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
   return window.btoa(binary);
 }
 
+function emptyAiScale(): AiScaleState {
+  return {
+    denominator: null,
+    label: null,
+    sheetSize: null,
+    confidence: null,
+    detectedAt: null,
+  };
+}
+
+function isValidScaleDenominator(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 20 && value <= 20000;
+}
+
+function normalizeSheetSize(value: unknown): SheetSize | null {
+  return value === "A3" || value === "A4" ? value : null;
+}
+
+function normalizeScaleSource(value: unknown, fallback: ScaleSource): ScaleSource {
+  return value === "DEFAULT" || value === "AI" || value === "USER" || value === "CALIBRATION"
+    ? value
+    : fallback;
+}
+
+function isUserScaleSource(value: ScaleSource) {
+  return value === "USER" || value === "CALIBRATION";
+}
+
+function aiScaleFromDraft(draft: SavedDraft): AiScaleState {
+  return {
+    denominator: isValidScaleDenominator(draft.aiScaleDenominator) ? draft.aiScaleDenominator : null,
+    label: typeof draft.aiScaleLabel === "string" ? draft.aiScaleLabel : null,
+    sheetSize: normalizeSheetSize(draft.aiSheetSize),
+    confidence:
+      typeof draft.aiScaleConfidence === "number" && Number.isFinite(draft.aiScaleConfidence)
+        ? draft.aiScaleConfidence
+        : null,
+    detectedAt: typeof draft.aiScaleDetectedAt === "string" ? draft.aiScaleDetectedAt : null,
+  };
+}
+
+function aiScaleFromProperty(property: EditorProperty): AiScaleState {
+  return {
+    denominator: isValidScaleDenominator(property.aiScaleDenominator) ? property.aiScaleDenominator : null,
+    label: typeof property.aiScaleLabel === "string" ? property.aiScaleLabel : null,
+    sheetSize: normalizeSheetSize(property.aiSheetSize),
+    confidence:
+      typeof property.aiScaleConfidence === "number" && Number.isFinite(property.aiScaleConfidence)
+        ? property.aiScaleConfidence
+        : null,
+    detectedAt: typeof property.aiScaleDetectedAt === "string" ? property.aiScaleDetectedAt : null,
+  };
+}
+
 export default function PlanimetriaEditor({
   study,
   property,
@@ -610,6 +689,8 @@ export default function PlanimetriaEditor({
   const [activeUsage, setActiveUsage] = useState<UsageId>("capannone");
   const [scaleDenominator, setScaleDenominator] = useState(500);
   const [sheetSize, setSheetSize] = useState<SheetSize>("A3");
+  const [scaleSource, setScaleSource] = useState<ScaleSource>("DEFAULT");
+  const [aiScale, setAiScale] = useState<AiScaleState>(() => emptyAiScale());
   const [activeTool, setActiveTool] = useState<EditorTool>("smart");
   const [scaleInputValue, setScaleInputValue] = useState("500");
   const [knownSegmentMeters, setKnownSegmentMeters] = useState(50);
@@ -871,6 +952,10 @@ export default function PlanimetriaEditor({
     setCanvasPixels("0 x 0");
     setDocumentSource(null);
     setActiveTool("smart");
+    setScaleDenominator(500);
+    setSheetSize("A3");
+    setScaleSource("DEFAULT");
+    setAiScale(emptyAiScale());
     setCalibration(null);
     setRulerSegment(null);
     setRulerSegmentSelected(false);
@@ -900,6 +985,7 @@ export default function PlanimetriaEditor({
       setSavedAt(draft?.savedAt ?? "");
 
       if (!draft) {
+        applyPropertyScaleFallback();
         if (linkedRemotePlan) {
           void loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName, undefined, true);
         } else if (linkedSample) {
@@ -912,6 +998,9 @@ export default function PlanimetriaEditor({
 
       setSheetSize(draft.sheetSize);
       setScaleDenominator(draft.scaleDenominator);
+      setScaleSource(normalizeScaleSource(draft.scaleSource, "USER"));
+      const draftAiScale = aiScaleFromDraft(draft);
+      setAiScale(draftAiScale.denominator ? draftAiScale : aiScaleFromProperty(property));
       setActiveUsage(draft.activeUsage);
       setOpacityPercent(draft.opacityPercent);
       setThreshold(draft.threshold);
@@ -1017,6 +1106,32 @@ export default function PlanimetriaEditor({
 
   function bumpRevision() {
     setRevision((value) => value + 1);
+  }
+
+  function applyPropertyScaleFallback() {
+    const propertyAiScale = aiScaleFromProperty(property);
+    setAiScale(propertyAiScale);
+
+    const propertyScale = isValidScaleDenominator(property.scaleDenominator)
+      ? property.scaleDenominator
+      : propertyAiScale.denominator;
+    const propertySheetSize = normalizeSheetSize(property.sheetSize) ?? propertyAiScale.sheetSize ?? "A3";
+
+    if (propertyScale) {
+      setScaleDenominator(propertyScale);
+      setScaleInputValue(String(propertyScale));
+      setScaleSource(
+        isValidScaleDenominator(property.scaleDenominator)
+          ? normalizeScaleSource(property.scaleSource, propertyAiScale.denominator ? "AI" : "DEFAULT")
+          : "AI",
+      );
+    } else {
+      setScaleDenominator(500);
+      setScaleInputValue("500");
+      setScaleSource("DEFAULT");
+    }
+    setSheetSize(propertySheetSize);
+    setScaleModalSheetSize(propertySheetSize);
   }
 
   async function loadSample(
@@ -1192,18 +1307,28 @@ export default function PlanimetriaEditor({
       setStatus("Scala non rilevata nella planimetria");
       return;
     }
+    setAiScale({
+      denominator: job.scale.denominator,
+      label: job.scale.label,
+      sheetSize: job.scale.sheetSize,
+      confidence: job.confidence,
+      detectedAt: job.completedAt ?? job.updatedAt,
+    });
     const confidence = job.confidence ?? 0;
-    if (calibration) {
-      setStatus(`Scala AI rilevata ${job.scale.label}; taratura manuale mantenuta`);
+    if (calibration || isUserScaleSource(scaleSource)) {
+      markDirty();
+      setStatus(`Scala AI rilevata ${job.scale.label}; scala impostata manualmente mantenuta`);
       return;
     }
     if (confidence < 0.5) {
+      markDirty();
       setStatus(`Scala AI rilevata ${job.scale.label} con confidenza bassa`);
       return;
     }
 
     recordUndoState();
     setScaleDenominator(job.scale.denominator);
+    setScaleSource("AI");
     setScaleInputValue(String(job.scale.denominator));
     if (job.scale.sheetSize === "A3" || job.scale.sheetSize === "A4") {
       setSheetSize(job.scale.sheetSize);
@@ -1330,6 +1455,12 @@ export default function PlanimetriaEditor({
       savedAt: savedTime,
       sheetSize,
       scaleDenominator,
+      scaleSource,
+      aiScaleDenominator: aiScale.denominator,
+      aiScaleLabel: aiScale.label,
+      aiSheetSize: aiScale.sheetSize,
+      aiScaleConfidence: aiScale.confidence,
+      aiScaleDetectedAt: aiScale.detectedAt,
       activeUsage,
       opacityPercent,
       threshold,
@@ -2524,6 +2655,8 @@ export default function PlanimetriaEditor({
         : null,
       scaleDenominator,
       sheetSize,
+      scaleSource,
+      aiScale: { ...aiScale },
       activeUsage,
       opacityPercent,
       threshold,
@@ -2579,6 +2712,8 @@ export default function PlanimetriaEditor({
     setHoverPolygonInsert(null);
     setScaleDenominator(snapshot.scaleDenominator);
     setSheetSize(snapshot.sheetSize);
+    setScaleSource(snapshot.scaleSource);
+    setAiScale({ ...snapshot.aiScale });
     setActiveUsage(snapshot.activeUsage);
     setOpacityPercent(snapshot.opacityPercent);
     setThreshold(snapshot.threshold);
@@ -3639,7 +3774,10 @@ export default function PlanimetriaEditor({
         end: clamped.end,
         scaleDenominator: nextScale ?? calibration.scaleDenominator,
       });
-      if (nextScale) setScaleDenominator(nextScale);
+      if (nextScale) {
+        setScaleDenominator(nextScale);
+        setScaleSource("CALIBRATION");
+      }
     }
     setRulerSegmentSelected(true);
     redrawMasks();
@@ -3842,6 +3980,7 @@ export default function PlanimetriaEditor({
       end: rulerSegment.end,
     };
     setScaleDenominator(clampedScale);
+    setScaleSource("CALIBRATION");
     setCalibration(nextCalibration);
     setRulerSegment(rulerSegment);
     setStatus(`Scala tarata a 1:${clampedScale}`);
@@ -4311,6 +4450,7 @@ export default function PlanimetriaEditor({
     if (changed) recordUndoState();
     setScaleDenominator(nextScale);
     setSheetSize(scaleModalSheetSize);
+    if (changed) setScaleSource("USER");
     setScaleInputValue(String(nextScale));
     if (changed) markDirty();
     return nextScale;

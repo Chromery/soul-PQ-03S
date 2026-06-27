@@ -91,6 +91,14 @@ model Property {
   displayOrder       Int                 @default(0)
   outcome            String
   hasStudy           Boolean             @default(false)
+  sheetSize          String?
+  scaleDenominator   Int?
+  scaleSource        String?
+  aiScaleDenominator Int?
+  aiScaleLabel       String?
+  aiSheetSize        String?
+  aiScaleConfidence  Decimal?            @db.Decimal(5, 4)
+  aiScaleDetectedAt  DateTime?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   study              FeasibilityStudy    @relation(fields: [studyId], references: [id], onDelete: Cascade)
@@ -126,6 +134,12 @@ model PlanAnalysisDraft {
   payload               Json
   sheetSize             String
   scaleDenominator      Int
+  scaleSource           String            @default("USER")
+  aiScaleDenominator    Int?
+  aiScaleLabel          String?
+  aiSheetSize           String?
+  aiScaleConfidence     Decimal?          @db.Decimal(5, 4)
+  aiScaleDetectedAt     DateTime?
   totalArea             Decimal?      @db.Decimal(16, 2)
   totalEstimatedValue   Decimal?      @db.Decimal(16, 2)
   savedAt               DateTime

@@ -11,10 +11,27 @@ type DraftPayload = {
   savedAt: string;
   sheetSize: string;
   scaleDenominator: number;
+  scaleSource?: string;
+  aiScaleDenominator?: number | null;
+  aiScaleLabel?: string | null;
+  aiSheetSize?: string | null;
+  aiScaleConfidence?: number | null;
+  aiScaleDetectedAt?: string | null;
   totalArea?: number;
   totalEstimatedAmount?: number;
   selections: unknown[];
 };
+
+type NormalizedDraftPayload = DraftPayload & {
+  scaleSource: ScaleSource;
+  aiScaleDenominator: number | null;
+  aiScaleLabel: string | null;
+  aiSheetSize: string | null;
+  aiScaleConfidence: number | null;
+  aiScaleDetectedAt: string | null;
+};
+
+type ScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
 
 @Injectable()
 export class PropertiesService {
@@ -26,7 +43,16 @@ export class PropertiesService {
   async getDraft(propertyId: string) {
     await this.requireProperty(propertyId);
     const draft = await this.prisma.planAnalysisDraft.findUnique({ where: { propertyId } });
-    return draft?.payload ?? null;
+    if (!draft) return null;
+    return {
+      ...(typeof draft.payload === "object" && draft.payload !== null && !Array.isArray(draft.payload) ? draft.payload : {}),
+      scaleSource: normalizeScaleSource(draft.scaleSource),
+      aiScaleDenominator: draft.aiScaleDenominator,
+      aiScaleLabel: draft.aiScaleLabel,
+      aiSheetSize: draft.aiSheetSize,
+      aiScaleConfidence: draft.aiScaleConfidence === null ? null : Number(draft.aiScaleConfidence),
+      aiScaleDetectedAt: draft.aiScaleDetectedAt?.toISOString() ?? null,
+    };
   }
 
   async saveDraft(propertyId: string, body: unknown) {
@@ -37,21 +63,44 @@ export class PropertiesService {
       orderBy: { versionNumber: "desc" },
     });
     const savedAt = new Date(payload.savedAt);
+    const aiScaleDetectedAt = payload.aiScaleDetectedAt ? new Date(payload.aiScaleDetectedAt) : null;
     const data = {
       documentSource: payload.document as Prisma.InputJsonValue,
       payload: payload as unknown as Prisma.InputJsonValue,
       sheetSize: payload.sheetSize,
       scaleDenominator: payload.scaleDenominator,
+      scaleSource: payload.scaleSource,
+      aiScaleDenominator: payload.aiScaleDenominator,
+      aiScaleLabel: payload.aiScaleLabel,
+      aiSheetSize: payload.aiSheetSize,
+      aiScaleConfidence: payload.aiScaleConfidence,
+      aiScaleDetectedAt,
       totalArea: payload.totalArea,
       totalEstimatedValue: payload.totalEstimatedAmount,
       savedAt,
       studyVersionId: latestVersion?.id,
     };
 
-    const draft = await this.prisma.planAnalysisDraft.upsert({
-      where: { propertyId },
-      create: { propertyId, ...data },
-      update: data,
+    const draft = await this.prisma.$transaction(async (tx) => {
+      const savedDraft = await tx.planAnalysisDraft.upsert({
+        where: { propertyId },
+        create: { propertyId, ...data },
+        update: data,
+      });
+      await tx.property.update({
+        where: { id: propertyId },
+        data: {
+          sheetSize: payload.sheetSize,
+          scaleDenominator: payload.scaleDenominator,
+          scaleSource: payload.scaleSource,
+          aiScaleDenominator: payload.aiScaleDenominator,
+          aiScaleLabel: payload.aiScaleLabel,
+          aiSheetSize: payload.aiSheetSize,
+          aiScaleConfidence: payload.aiScaleConfidence,
+          aiScaleDetectedAt,
+        },
+      });
+      return savedDraft;
     });
     return draft.payload;
   }
@@ -82,10 +131,15 @@ export class PropertiesService {
     return property;
   }
 
-  private validatePayload(propertyId: string, body: unknown): DraftPayload {
+  private validatePayload(propertyId: string, body: unknown): NormalizedDraftPayload {
     if (!body || typeof body !== "object") throw new BadRequestException("Bozza non valida");
     const payload = body as Partial<DraftPayload>;
     const savedAt = typeof payload.savedAt === "string" ? new Date(payload.savedAt) : null;
+    const scaleSource = normalizeScaleSource(payload.scaleSource);
+    const aiScaleDenominator = validateOptionalScaleDenominator(payload.aiScaleDenominator, "aiScaleDenominator");
+    const aiSheetSize = validateOptionalSheetSize(payload.aiSheetSize, "aiSheetSize");
+    const aiScaleConfidence = validateOptionalConfidence(payload.aiScaleConfidence, "aiScaleConfidence");
+    const aiScaleDetectedAt = validateOptionalDate(payload.aiScaleDetectedAt, "aiScaleDetectedAt");
     if (
       payload.version !== 1 ||
       payload.propertyId !== propertyId ||
@@ -100,7 +154,15 @@ export class PropertiesService {
     ) {
       throw new BadRequestException("Contenuto bozza non valido");
     }
-    return payload as DraftPayload;
+    return {
+      ...(payload as DraftPayload),
+      scaleSource,
+      aiScaleDenominator,
+      aiScaleLabel: validateOptionalString(payload.aiScaleLabel, "aiScaleLabel"),
+      aiSheetSize,
+      aiScaleConfidence,
+      aiScaleDetectedAt,
+    };
   }
 }
 
@@ -112,4 +174,45 @@ function mapDocumentType(value: string) {
     return DocumentType.ELABORATO_PLANIMETRICO;
   }
   throw new BadRequestException(`tipo documento non supportato: ${value}`);
+}
+
+function normalizeScaleSource(value: unknown): ScaleSource {
+  if (value === "AI" || value === "USER" || value === "CALIBRATION" || value === "DEFAULT") return value;
+  return "USER";
+}
+
+function validateOptionalScaleDenominator(value: unknown, field: string) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 20 || value > 20000) {
+    throw new BadRequestException(`${field} non valido`);
+  }
+  return value;
+}
+
+function validateOptionalSheetSize(value: unknown, field: string) {
+  if (value === undefined || value === null || value === "") return null;
+  if (value !== "A3" && value !== "A4") throw new BadRequestException(`${field} non valido`);
+  return value;
+}
+
+function validateOptionalConfidence(value: unknown, field: string) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new BadRequestException(`${field} non valido`);
+  }
+  return value;
+}
+
+function validateOptionalDate(value: unknown, field: string) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") throw new BadRequestException(`${field} non valido`);
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new BadRequestException(`${field} non valido`);
+  return date.toISOString();
+}
+
+function validateOptionalString(value: unknown, field: string) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") throw new BadRequestException(`${field} non valido`);
+  return value;
 }

@@ -184,7 +184,7 @@ export class ScaleExtractionService {
     try {
       const result = await this.extractScale(source);
       const completedAt = new Date();
-      await this.prisma.scaleExtractionJob.update({
+      const updatedJob = await this.prisma.scaleExtractionJob.update({
         where: { id: jobId },
         data: {
           status: ScaleExtractionStatus.SUCCEEDED,
@@ -198,6 +198,9 @@ export class ScaleExtractionService {
           completedAt,
         },
       });
+      if (result.found && result.scale_denominator) {
+        await this.persistDetectedScale(updatedJob.propertyId, result, completedAt);
+      }
     } catch (error) {
       const completedAt = new Date();
       await this.prisma.scaleExtractionJob.update({
@@ -322,6 +325,72 @@ export class ScaleExtractionService {
     const property = await this.prisma.property.findUnique({ where: { id: propertyId }, select: { id: true } });
     if (!property) throw new NotFoundException("Immobile non trovato");
     return property;
+  }
+
+  private async persistDetectedScale(propertyId: string, result: ScaleExtractionResult, detectedAt: Date) {
+    const denominator = result.scale_denominator;
+    if (!denominator) return;
+    await this.prisma.$transaction(async (tx) => {
+      const property = await tx.property.findUnique({
+        where: { id: propertyId },
+        select: {
+          id: true,
+          sheetSize: true,
+          scaleDenominator: true,
+          scaleSource: true,
+        },
+      });
+      if (!property) return;
+
+      const shouldSeedActiveScale = !isUserScaleSource(property.scaleSource);
+      await tx.property.update({
+        where: { id: propertyId },
+        data: {
+          ...(shouldSeedActiveScale
+            ? {
+                sheetSize: result.sheet_size ?? property.sheetSize,
+                scaleDenominator: denominator,
+                scaleSource: "AI",
+              }
+            : {}),
+          aiScaleDenominator: denominator,
+          aiScaleLabel: result.scale_label,
+          aiSheetSize: result.sheet_size,
+          aiScaleConfidence: result.confidence,
+          aiScaleDetectedAt: detectedAt,
+        },
+      });
+
+      const draft = await tx.planAnalysisDraft.findUnique({
+        where: { propertyId },
+        select: {
+          sheetSize: true,
+          scaleSource: true,
+          payload: true,
+        },
+      });
+      if (!draft) return;
+
+      const shouldSeedDraftScale = !isUserScaleSource(draft.scaleSource);
+      await tx.planAnalysisDraft.update({
+        where: { propertyId },
+        data: {
+          ...(shouldSeedDraftScale
+            ? {
+                sheetSize: result.sheet_size ?? draft.sheetSize,
+                scaleDenominator: denominator,
+                scaleSource: "AI",
+              }
+            : {}),
+          aiScaleDenominator: denominator,
+          aiScaleLabel: result.scale_label,
+          aiSheetSize: result.sheet_size,
+          aiScaleConfidence: result.confidence,
+          aiScaleDetectedAt: detectedAt,
+          payload: buildDraftPayloadWithDetectedScale(draft.payload, result, detectedAt, shouldSeedDraftScale),
+        },
+      });
+    });
   }
 
   private validateCreateInput(body: unknown): CreateScaleExtractionInput {
@@ -455,6 +524,37 @@ function validateExtractionResult(value: Partial<ScaleExtractionResult>, sourceT
       ? warnings.filter((warning) => !/fattore di scala non utilizzabile/i.test(warning))
       : warnings,
   };
+}
+
+function isUserScaleSource(value: string | null | undefined) {
+  return value === "USER" || value === "CALIBRATION";
+}
+
+function buildDraftPayloadWithDetectedScale(
+  payload: unknown,
+  result: ScaleExtractionResult,
+  detectedAt: Date,
+  seedActiveScale: boolean,
+) {
+  const base: Record<string, unknown> =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? { ...(payload as Record<string, unknown>) }
+      : {};
+  return {
+    ...base,
+    ...(seedActiveScale
+      ? {
+          sheetSize: result.sheet_size ?? (typeof base.sheetSize === "string" ? base.sheetSize : "A3"),
+          scaleDenominator: result.scale_denominator,
+          scaleSource: "AI",
+        }
+      : {}),
+    aiScaleDenominator: result.scale_denominator,
+    aiScaleLabel: result.scale_label,
+    aiSheetSize: result.sheet_size,
+    aiScaleConfidence: result.confidence,
+    aiScaleDetectedAt: detectedAt.toISOString(),
+  } as Prisma.InputJsonValue;
 }
 
 function extractScaleDenominator(text: string) {

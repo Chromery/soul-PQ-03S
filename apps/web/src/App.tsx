@@ -48,7 +48,7 @@ import {
 } from "lucide-react";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.1";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.2";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -73,6 +73,14 @@ type PropertyItem = {
   displayOrder?: number;
   outcome: PropertyOutcome;
   hasStudy: boolean;
+  sheetSize?: PlanAreaSheetSize | null;
+  scaleDenominator?: number | null;
+  scaleSource?: PlanScaleSource | null;
+  aiScaleDenominator?: number | null;
+  aiScaleLabel?: string | null;
+  aiSheetSize?: PlanAreaSheetSize | null;
+  aiScaleConfidence?: number | null;
+  aiScaleDetectedAt?: string | null;
   documents: {
     planimetria: string;
     visura: string;
@@ -149,6 +157,7 @@ type PlanAreaUsageId =
   | "lotto";
 
 type PlanAreaSheetSize = "A3" | "A4";
+type PlanScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
 
 type PlanAreaDraft = {
   version: 1;
@@ -161,6 +170,12 @@ type PlanAreaDraft = {
   savedAt: string;
   sheetSize: PlanAreaSheetSize;
   scaleDenominator: number;
+  scaleSource?: PlanScaleSource;
+  aiScaleDenominator?: number | null;
+  aiScaleLabel?: string | null;
+  aiSheetSize?: PlanAreaSheetSize | null;
+  aiScaleConfidence?: number | null;
+  aiScaleDetectedAt?: string | null;
   totalArea?: number;
   totalEstimatedAmount?: number;
   selections: PlanAreaDraftSelection[];
@@ -1293,6 +1308,13 @@ function planAreaSourceLabel(source?: PlanAreaDraftSelection["source"]) {
   return "Smart";
 }
 
+function planScaleSourceLabel(source?: PlanScaleSource) {
+  if (source === "AI") return "AI";
+  if (source === "CALIBRATION") return "Righello";
+  if (source === "USER") return "Manuale";
+  return "Default";
+}
+
 function pageRealAreaM2(sheetSize: PlanAreaSheetSize, scaleDenominator: number) {
   const sheet = planAreaSheetSizes[sheetSize];
   const width = (sheet.widthMm / 1000) * scaleDenominator;
@@ -1314,6 +1336,24 @@ function isPlanAreaDraft(value: unknown, propertyId: string): value is PlanAreaD
   if (value.version !== 1 || value.propertyId !== propertyId) return false;
   if (value.sheetSize !== "A3" && value.sheetSize !== "A4") return false;
   if (typeof value.scaleDenominator !== "number" || !Number.isFinite(value.scaleDenominator)) return false;
+  if (
+    value.scaleSource !== undefined &&
+    value.scaleSource !== "DEFAULT" &&
+    value.scaleSource !== "AI" &&
+    value.scaleSource !== "USER" &&
+    value.scaleSource !== "CALIBRATION"
+  ) {
+    return false;
+  }
+  if (value.aiScaleDenominator !== undefined && value.aiScaleDenominator !== null) {
+    if (typeof value.aiScaleDenominator !== "number" || !Number.isFinite(value.aiScaleDenominator)) return false;
+  }
+  if (value.aiSheetSize !== undefined && value.aiSheetSize !== null && value.aiSheetSize !== "A3" && value.aiSheetSize !== "A4") {
+    return false;
+  }
+  if (value.aiScaleConfidence !== undefined && value.aiScaleConfidence !== null) {
+    if (typeof value.aiScaleConfidence !== "number" || !Number.isFinite(value.aiScaleConfidence)) return false;
+  }
   if (typeof value.savedAt !== "string" || Number.isNaN(new Date(value.savedAt).getTime())) return false;
   if (!isObject(value.document) || typeof value.document.fileName !== "string") return false;
   if (!Array.isArray(value.selections)) return false;
@@ -3777,6 +3817,11 @@ function PropertyAreaDetail({
             <SummaryStat label="Area totale" value={formatM2(totals.area)} />
             <SummaryStat label="Stima prototipo" value={formatEuro(totals.amount)} />
             <SummaryStat label="Scala e foglio" value={`${draft.sheetSize} 1:${draft.scaleDenominator}`} />
+            <SummaryStat label="Origine scala" value={planScaleSourceLabel(draft.scaleSource)} />
+            <SummaryStat
+              label="Scala AI"
+              value={draft.aiScaleDenominator ? `${draft.aiSheetSize ?? draft.sheetSize} 1:${draft.aiScaleDenominator}` : "Non rilevata"}
+            />
           </div>
 
           <div className="property-area-meta">
