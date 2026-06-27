@@ -73,6 +73,10 @@ type EditorProperty = {
     planimetria: string;
     visura: string;
   };
+  documentUrls?: {
+    planimetria?: string | null;
+    visura?: string | null;
+  };
 };
 
 type ScaleExtractionJob = {
@@ -130,6 +134,7 @@ type AreaSelection = {
 
 type DocumentSource =
   | { kind: "sample"; fileName: string; url: string }
+  | { kind: "remote"; fileName: string; url: string }
   | { kind: "upload"; fileName: string };
 
 type SavedSelection = {
@@ -651,6 +656,16 @@ export default function PlanimetriaEditor({
   const [revision, setRevision] = useState(0);
 
   const linkedSample = useMemo(() => linkedSampleForProperty(property.id), [property.id]);
+  const linkedRemotePlan = useMemo(
+    () =>
+      property.documentUrls?.planimetria
+        ? {
+            fileName: property.documents.planimetria || "Planimetria importata.pdf",
+            url: property.documentUrls.planimetria,
+          }
+        : null,
+    [property.documentUrls?.planimetria, property.documents.planimetria],
+  );
   const activeUsageOption = usageById(activeUsage);
   const hasPdf = pageCount > 0;
   const selections = hasPdf ? currentSelections() : [];
@@ -883,7 +898,9 @@ export default function PlanimetriaEditor({
       setSavedAt(draft?.savedAt ?? "");
 
       if (!draft) {
-        if (linkedSample) {
+        if (linkedRemotePlan) {
+          void loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName, undefined, true);
+        } else if (linkedSample) {
           void loadSample(linkedSample.url, linkedSample.fileName, undefined, true);
         } else {
           setStatus("Carica una planimetria o apri un esempio");
@@ -909,6 +926,8 @@ export default function PlanimetriaEditor({
       );
       if (draft.document.kind === "sample") {
         void loadSample(draft.document.url, draft.document.fileName, draft, true);
+      } else if (draft.document.kind === "remote") {
+        void loadRemotePlan(draft.document.url, draft.document.fileName, draft, true);
       } else {
         setStatus(`Bozza salvata: ricarica ${draft.document.fileName}`);
       }
@@ -955,7 +974,7 @@ export default function PlanimetriaEditor({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [property.id]);
+  }, [property.id, linkedRemotePlan?.url, linkedRemotePlan?.fileName, linkedSample?.url, linkedSample?.fileName]);
 
   function markDirty() {
     setDirty(true);
@@ -1022,6 +1041,34 @@ export default function PlanimetriaEditor({
     } catch (error) {
       console.error(error);
       setStatus("PDF non caricato");
+    }
+  }
+
+  async function loadRemotePlan(
+    url: string,
+    name: string,
+    draft?: SavedDraft,
+    initialLoad = false,
+  ) {
+    try {
+      setStatus("Caricamento planimetria ERP");
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.arrayBuffer();
+      await loadPdfFromData(data, name);
+      setDocumentSource({ kind: "remote", fileName: name, url });
+      if (draft) {
+        await restoreDraftSelections(draft);
+        setStatus("Bozza ripristinata");
+      } else if (!initialLoad) {
+        pendingDraftRef.current = null;
+        markDirty();
+      } else {
+        setStatus("Planimetria ERP caricata");
+      }
+    } catch (error) {
+      console.error(error);
+      setStatus("PDF ERP non caricato");
     }
   }
 
@@ -4434,6 +4481,15 @@ export default function PlanimetriaEditor({
             {!collapsedSections.planimetry && (
               <>
                 <div className="sample-buttons">
+                  {linkedRemotePlan && (
+                    <button
+                      key={linkedRemotePlan.url}
+                      className={documentSource?.kind === "remote" ? "active" : ""}
+                      onClick={() => void loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName)}
+                    >
+                      ERP
+                    </button>
+                  )}
                   {SAMPLE_PLANS.map((plan) => (
                     <button
                       key={plan.url}

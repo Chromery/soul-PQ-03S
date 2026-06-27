@@ -48,7 +48,7 @@ import {
 } from "lucide-react";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.42";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.43";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -76,6 +76,10 @@ type PropertyItem = {
   documents: {
     planimetria: string;
     visura: string;
+  };
+  documentUrls?: {
+    planimetria?: string | null;
+    visura?: string | null;
   };
 };
 
@@ -150,7 +154,7 @@ type PlanAreaDraft = {
   version: 1;
   propertyId: string;
   document: {
-    kind: "sample" | "upload";
+    kind: "sample" | "upload" | "remote";
     fileName: string;
     url?: string;
   };
@@ -1245,6 +1249,29 @@ function formatPercent(value: number) {
 
 function formatEstimatedValue(value: number | null | undefined) {
   return value === null || value === undefined || value === 0 ? "Da stimare" : formatEuro(value);
+}
+
+type PropertyDocumentKind = "planimetria" | "visura";
+
+function propertyDocumentUrl(property: PropertyItem, type: PropertyDocumentKind) {
+  return property.documentUrls?.[type] ?? "";
+}
+
+function propertyDocumentLabel(type: PropertyDocumentKind) {
+  return type === "planimetria" ? "Planimetria PDF" : "Visura PDF";
+}
+
+function openPropertyDocument(
+  property: PropertyItem,
+  type: PropertyDocumentKind,
+  onMissing: (message: string) => void,
+) {
+  const url = propertyDocumentUrl(property, type);
+  if (!url) {
+    onMissing(`${propertyDocumentLabel(type)} non disponibile nello storage documentale.`);
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function formatM2(value: number) {
@@ -2672,6 +2699,10 @@ function StudyRows({
     if (saved) setEditingNotes(false);
   }
 
+  function handleOpenDocument(property: PropertyItem, type: PropertyDocumentKind) {
+    openPropertyDocument(property, type, onNotice);
+  }
+
   return (
     <>
       <tr
@@ -2894,13 +2925,28 @@ function StudyRows({
                           </span>
                         </span>
                         <div className="tooltip-documents">
-                          <button type="button" onClick={() => onOpenEditor(property)}>
+                          <button
+                            type="button"
+                            disabled={!propertyDocumentUrl(property, "planimetria")}
+                            title={
+                              propertyDocumentUrl(property, "planimetria")
+                                ? "Apri planimetria PDF"
+                                : "Planimetria PDF non disponibile nello storage documentale"
+                            }
+                            onClick={() => handleOpenDocument(property, "planimetria")}
+                          >
                             <File size={13} />
                             Planimetria PDF
                           </button>
                           <button
                             type="button"
-                            onClick={() => onNotice("La visura sara apribile quando il PDF sara importato nello storage documentale.")}
+                            disabled={!propertyDocumentUrl(property, "visura")}
+                            title={
+                              propertyDocumentUrl(property, "visura")
+                                ? "Apri visura PDF"
+                                : "Visura PDF non disponibile nello storage documentale"
+                            }
+                            onClick={() => handleOpenDocument(property, "visura")}
                           >
                             <FileText size={13} />
                             Visura PDF
@@ -2935,6 +2981,7 @@ function StudyRows({
                               key={property.id}
                               property={property}
                               onOpenEditor={() => onOpenEditor(property)}
+                              onOpenDocument={(type) => handleOpenDocument(property, type)}
                             />
                           ))}
                         </tbody>
@@ -2954,10 +3001,15 @@ function StudyRows({
 function PropertyRow({
   property,
   onOpenEditor,
+  onOpenDocument,
 }: {
   property: PropertyItem;
   onOpenEditor?: () => void;
+  onOpenDocument?: (type: PropertyDocumentKind) => void;
 }) {
+  const planimetriaUrl = propertyDocumentUrl(property, "planimetria");
+  const visuraUrl = propertyDocumentUrl(property, "visura");
+
   return (
     <tr>
       <td>
@@ -2981,7 +3033,19 @@ function PropertyRow({
             <File size={14} />
             Apri editor
           </button>
-          <button disabled title="Documento disponibile dopo integrazione storage">
+          <button
+            disabled={!planimetriaUrl || !onOpenDocument}
+            title={planimetriaUrl ? "Apri planimetria PDF" : "Planimetria PDF non disponibile nello storage documentale"}
+            onClick={() => onOpenDocument?.("planimetria")}
+          >
+            <File size={14} />
+            Planimetria PDF
+          </button>
+          <button
+            disabled={!visuraUrl || !onOpenDocument}
+            title={visuraUrl ? "Apri visura PDF" : "Visura PDF non disponibile nello storage documentale"}
+            onClick={() => onOpenDocument?.("visura")}
+          >
             <FileText size={14} />
             Visura PDF
           </button>
@@ -3207,6 +3271,10 @@ function StudyDetail({
             : forMapsUrl();
       window.open(url, "_blank", "noopener,noreferrer");
     });
+  }
+
+  function handleOpenDocument(property: PropertyItem, type: PropertyDocumentKind) {
+    openPropertyDocument(property, type, onNotice);
   }
 
   function handleDrop(targetPropertyId: string) {
@@ -3440,7 +3508,39 @@ function StudyDetail({
                           }}
                         >
                           <File size={14} />
-                          Planimetria
+                          Editor
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!propertyDocumentUrl(property, "planimetria")}
+                          title={
+                            propertyDocumentUrl(property, "planimetria")
+                              ? "Apri planimetria PDF"
+                              : "Planimetria PDF non disponibile nello storage documentale"
+                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleOpenDocument(property, "planimetria");
+                          }}
+                        >
+                          <File size={14} />
+                          Planimetria PDF
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!propertyDocumentUrl(property, "visura")}
+                          title={
+                            propertyDocumentUrl(property, "visura")
+                              ? "Apri visura PDF"
+                              : "Visura PDF non disponibile nello storage documentale"
+                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleOpenDocument(property, "visura");
+                          }}
+                        >
+                          <FileText size={14} />
+                          Visura PDF
                         </button>
                       </div>
                     </td>
@@ -3455,6 +3555,7 @@ function StudyDetail({
             property={activeProperty}
             draftState={activeAreaDraftState}
             onOpenEditor={() => onOpenEditor(activeProperty)}
+            onOpenDocument={(type) => handleOpenDocument(activeProperty, type)}
             onClose={() => setActivePropertyId(null)}
           />
         )}
@@ -3539,11 +3640,13 @@ function PropertyAreaDetail({
   property,
   draftState,
   onOpenEditor,
+  onOpenDocument,
   onClose,
 }: {
   property: PropertyItem;
   draftState: PlanAreaDraftState;
   onOpenEditor: () => void;
+  onOpenDocument: (type: PropertyDocumentKind) => void;
   onClose: () => void;
 }) {
   const draft = draftState.draft;
@@ -3617,6 +3720,34 @@ function PropertyAreaDetail({
           <button className="button secondary compact-button" type="button" onClick={onOpenEditor}>
             <File size={14} />
             Apri editor
+          </button>
+          <button
+            className="button secondary compact-button"
+            type="button"
+            disabled={!propertyDocumentUrl(property, "planimetria")}
+            title={
+              propertyDocumentUrl(property, "planimetria")
+                ? "Apri planimetria PDF"
+                : "Planimetria PDF non disponibile nello storage documentale"
+            }
+            onClick={() => onOpenDocument("planimetria")}
+          >
+            <File size={14} />
+            Planimetria PDF
+          </button>
+          <button
+            className="button secondary compact-button"
+            type="button"
+            disabled={!propertyDocumentUrl(property, "visura")}
+            title={
+              propertyDocumentUrl(property, "visura")
+                ? "Apri visura PDF"
+                : "Visura PDF non disponibile nello storage documentale"
+            }
+            onClick={() => onOpenDocument("visura")}
+          >
+            <FileText size={14} />
+            Visura PDF
           </button>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi dettaglio immobile">
             <X size={16} />

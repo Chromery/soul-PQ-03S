@@ -112,6 +112,15 @@ export class StudiesService {
         planimetria: planimetria?.fileName ?? "",
         visura: visura?.fileName ?? "",
       },
+      documentUrls: {
+        planimetria: documentDownloadUrl(property.id, "planimetria", planimetria),
+        visura: documentDownloadUrl(property.id, "visura", visura),
+      },
     };
   }
+}
+
+function documentDownloadUrl(propertyId: string, type: "planimetria" | "visura", document?: PropertyDocument) {
+  if (!document || document.storageKey.startsWith("demo/")) return null;
+  return `/api/properties/${encodeURIComponent(propertyId)}/documents/${type}/download`;
 }

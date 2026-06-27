@@ -1,8 +1,10 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from "@nestjs/common";
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import type { GetObjectCommandOutput } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { Readable } from "node:stream";
 
 type StoreDocumentInput = {
   studioErpId: string;
@@ -60,6 +62,28 @@ export class DocumentStorageService {
       sha256,
       sizeBytes: buffer.byteLength,
     };
+  }
+
+  async readPdfObject(storageKey: string) {
+    try {
+      const output = await this.client().send(
+        new GetObjectCommand({
+          Bucket: this.requireBucket(),
+          Key: storageKey,
+        }),
+      );
+      if (!output.Body) throw new NotFoundException("Documento non trovato nello storage S3");
+      return {
+        stream: await toReadable(output.Body),
+        contentType: output.ContentType ?? "application/pdf",
+        contentLength: output.ContentLength,
+      };
+    } catch (error) {
+      if (isMissingObjectError(error)) {
+        throw new NotFoundException("Documento non trovato nello storage S3");
+      }
+      throw error;
+    }
   }
 
   private decodeBase64(value: string, fileName: string) {
@@ -127,4 +151,20 @@ function safePathPart(value: string) {
 function safeFile(value: string) {
   const base = path.basename(value.trim());
   return safePathPart(base || "documento.pdf");
+}
+
+async function toReadable(body: NonNullable<GetObjectCommandOutput["Body"]>) {
+  if (body instanceof Readable) return body;
+  const transformable = body as { transformToByteArray?: () => Promise<Uint8Array> };
+  if (typeof transformable.transformToByteArray === "function") {
+    const bytes = await transformable.transformToByteArray();
+    return Readable.from(Buffer.from(bytes));
+  }
+  throw new InternalServerErrorException("Formato risposta S3 non supportato");
+}
+
+function isMissingObjectError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return candidate.name === "NoSuchKey" || candidate.name === "NotFound" || candidate.$metadata?.httpStatusCode === 404;
 }

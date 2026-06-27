@@ -1316,10 +1316,15 @@ a.button {
   font-weight: 750;
 }
 
-.tooltip-documents button:hover {
+.tooltip-documents button:not(:disabled):hover {
   color: var(--primary);
   border-color: #c9dcf7;
   background: #eef5ff;
+}
+
+.tooltip-documents button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .summary-grid,
@@ -2247,11 +2252,16 @@ a.button {
   text-decoration: none;
 }
 
-.property-external-actions button:hover,
+.property-external-actions button:not(:disabled):hover,
 .property-external-actions a:hover {
   color: var(--primary);
   border-color: #c9dcf7;
   background: #eef5ff;
+}
+
+.property-external-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .property-external-actions button.active {
