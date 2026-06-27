@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, PointerEvent, ReactNode } from "react";
+import type { CSSProperties, PointerEvent, ReactNode, WheelEvent } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.js?url";
 import {
@@ -42,6 +42,7 @@ const ZOOM_MAX = 400;
 const ZOOM_BUTTON_STEP = 10;
 const ZOOM_KEYBOARD_STEP = 10;
 const ZOOM_SLIDER_STEP = 5;
+const ZOOM_WHEEL_STEP = 10;
 
 type PdfDocument = Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>;
 type PdfPage = Awaited<ReturnType<PdfDocument["getPage"]>>;
@@ -450,6 +451,7 @@ const SHORTCUTS = {
   focus: "F",
   zoomIn: "Maiusc+Freccia su",
   zoomOut: "Maiusc+Freccia giu",
+  wheelZoom: "Alt/Option+rotella",
   rotateLeft: "Maiusc+Freccia sinistra",
   rotateRight: "Maiusc+Freccia destra",
 };
@@ -724,6 +726,7 @@ export default function PlanimetriaEditor({
   const segmentDragRef = useRef<SegmentDragState | null>(null);
   const polygonEditDragRef = useRef<PolygonEditDragState | null>(null);
   const rulerDragRef = useRef<CanvasPoint | null>(null);
+  const wheelZoomRemainderRef = useRef(0);
   const clipboardRef = useRef<ClipboardSelection[]>([]);
   const outlinePathCacheRef = useRef<WeakMap<HTMLCanvasElement, CanvasPoint[][]>>(new WeakMap());
 
@@ -4547,6 +4550,22 @@ export default function PlanimetriaEditor({
     if (runtime.pdfDoc) applyStageSize();
   }
 
+  function handleCanvasWheel(event: WheelEvent<HTMLDivElement>) {
+    if (!hasPdf || !event.altKey || event.ctrlKey || event.metaKey) return;
+    event.preventDefault();
+    const normalizedDelta =
+      event.deltaMode === 1
+        ? event.deltaY * 16
+        : event.deltaMode === 2
+          ? event.deltaY * 100
+          : event.deltaY;
+    wheelZoomRemainderRef.current += (-normalizedDelta / 100) * ZOOM_WHEEL_STEP;
+    if (Math.abs(wheelZoomRemainderRef.current) < 1) return;
+    const zoomDelta = Math.trunc(wheelZoomRemainderRef.current);
+    wheelZoomRemainderRef.current -= zoomDelta;
+    updateZoom(runtimeRef.current.zoom * 100 + zoomDelta);
+  }
+
   function rotateSegment(
     segment: MeasureSegment,
     pageNumber: number,
@@ -5175,7 +5194,7 @@ export default function PlanimetriaEditor({
               </button>
             </div>
           </div>
-          <div ref={canvasShellRef} className="plan-canvas-shell">
+          <div ref={canvasShellRef} className="plan-canvas-shell" onWheel={handleCanvasWheel}>
             {!hasPdf && (
               <div className="plan-empty-state">
                 <FileText size={30} />
@@ -5206,7 +5225,7 @@ export default function PlanimetriaEditor({
               >
                 <ZoomOut size={17} />
               </button>
-              <label>
+              <label title={withShortcut("Zoom planimetria", SHORTCUTS.wheelZoom)}>
                 <span>{zoomPercent}%</span>
                 <input
                   type="range"
