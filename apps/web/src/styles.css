@@ -3480,6 +3480,7 @@ a.button {
   height: calc(100vh - 360px);
   min-height: 560px;
   overflow: auto;
+  overflow-anchor: none;
   background:
     linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
     linear-gradient(0deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px),

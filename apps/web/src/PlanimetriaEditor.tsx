@@ -41,8 +41,9 @@ const ZOOM_MIN = 25;
 const ZOOM_MAX = 400;
 const ZOOM_BUTTON_STEP = 10;
 const ZOOM_KEYBOARD_STEP = 10;
-const ZOOM_SLIDER_STEP = 5;
-const ZOOM_WHEEL_STEP = 10;
+const ZOOM_SLIDER_STEP = 1;
+const ZOOM_WHEEL_SENSITIVITY = 0.00045;
+const ZOOM_WHEEL_MAX_DELTA = 240;
 
 type PdfDocument = Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>;
 type PdfPage = Awaited<ReturnType<PdfDocument["getPage"]>>;
@@ -726,7 +727,6 @@ export default function PlanimetriaEditor({
   const segmentDragRef = useRef<SegmentDragState | null>(null);
   const polygonEditDragRef = useRef<PolygonEditDragState | null>(null);
   const rulerDragRef = useRef<CanvasPoint | null>(null);
-  const wheelZoomRemainderRef = useRef(0);
   const clipboardRef = useRef<ClipboardSelection[]>([]);
   const outlinePathCacheRef = useRef<WeakMap<HTMLCanvasElement, CanvasPoint[][]>>(new WeakMap());
 
@@ -936,12 +936,12 @@ export default function PlanimetriaEditor({
       if (event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
         if (event.key === "ArrowUp") {
           event.preventDefault();
-          updateZoom(zoomPercent + ZOOM_KEYBOARD_STEP);
+          updateZoom(zoomPercent + ZOOM_KEYBOARD_STEP, getVisibleStageCenterAnchor());
           return;
         }
         if (event.key === "ArrowDown") {
           event.preventDefault();
-          updateZoom(zoomPercent - ZOOM_KEYBOARD_STEP);
+          updateZoom(zoomPercent - ZOOM_KEYBOARD_STEP, getVisibleStageCenterAnchor());
           return;
         }
         if (event.key === "ArrowLeft") {
@@ -4550,9 +4550,48 @@ export default function PlanimetriaEditor({
     }
   }
 
+  function getVisibleStageCenterAnchor() {
+    const shell = canvasShellRef.current;
+    const stage = stageRef.current;
+    if (!shell || !stage) return undefined;
+
+    const shellRect = shell.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
+    const left = Math.max(shellRect.left, stageRect.left);
+    const right = Math.min(shellRect.right, stageRect.right);
+    const top = Math.max(shellRect.top, stageRect.top);
+    const bottom = Math.min(shellRect.bottom, stageRect.bottom);
+
+    if (right > left && bottom > top) {
+      return {
+        clientX: left + (right - left) / 2,
+        clientY: top + (bottom - top) / 2,
+      };
+    }
+
+    return {
+      clientX: shellRect.left + shellRect.width / 2,
+      clientY: shellRect.top + shellRect.height / 2,
+    };
+  }
+
+  function getWheelZoomAnchor(event: globalThis.WheelEvent) {
+    const stage = stageRef.current;
+    if (!stage) return { clientX: event.clientX, clientY: event.clientY };
+
+    const rect = stage.getBoundingClientRect();
+    const isInsideStage =
+      event.clientX >= rect.left &&
+      event.clientX <= rect.right &&
+      event.clientY >= rect.top &&
+      event.clientY <= rect.bottom;
+    if (isInsideStage) return { clientX: event.clientX, clientY: event.clientY };
+    return getVisibleStageCenterAnchor() ?? { clientX: event.clientX, clientY: event.clientY };
+  }
+
   function updateZoom(nextZoom: number, anchor?: { clientX: number; clientY: number }) {
     const runtime = runtimeRef.current;
-    const clampedZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(nextZoom)));
+    const clampedZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(nextZoom * 10) / 10));
     const shell = canvasShellRef.current;
     const stage = stageRef.current;
     const anchorState =
@@ -4568,6 +4607,8 @@ export default function PlanimetriaEditor({
             };
           })()
         : null;
+
+    if (Math.abs(runtime.zoom * 100 - clampedZoom) < 0.05) return;
 
     runtime.zoom = clampedZoom / 100;
     setZoomPercent(clampedZoom);
@@ -4591,14 +4632,9 @@ export default function PlanimetriaEditor({
         : event.deltaMode === 2
           ? event.deltaY * 100
           : event.deltaY;
-    wheelZoomRemainderRef.current += (-normalizedDelta / 100) * ZOOM_WHEEL_STEP;
-    if (Math.abs(wheelZoomRemainderRef.current) < 1) return;
-    const zoomDelta = Math.trunc(wheelZoomRemainderRef.current);
-    wheelZoomRemainderRef.current -= zoomDelta;
-    updateZoom(runtimeRef.current.zoom * 100 + zoomDelta, {
-      clientX: event.clientX,
-      clientY: event.clientY,
-    });
+    const boundedDelta = Math.max(-ZOOM_WHEEL_MAX_DELTA, Math.min(ZOOM_WHEEL_MAX_DELTA, normalizedDelta));
+    const zoomFactor = Math.exp(-boundedDelta * ZOOM_WHEEL_SENSITIVITY);
+    updateZoom(runtimeRef.current.zoom * 100 * zoomFactor, getWheelZoomAnchor(event));
   }
 
   function rotateSegment(
@@ -5256,7 +5292,7 @@ export default function PlanimetriaEditor({
                 className="icon-button"
                 title={withShortcut("Riduci zoom", SHORTCUTS.zoomOut)}
                 disabled={!hasPdf || zoomPercent <= ZOOM_MIN}
-                onClick={() => updateZoom(zoomPercent - ZOOM_BUTTON_STEP)}
+                onClick={() => updateZoom(zoomPercent - ZOOM_BUTTON_STEP, getVisibleStageCenterAnchor())}
               >
                 <ZoomOut size={17} />
               </button>
@@ -5268,14 +5304,14 @@ export default function PlanimetriaEditor({
                   max={ZOOM_MAX}
                   step={ZOOM_SLIDER_STEP}
                   value={zoomPercent}
-                  onChange={(event) => updateZoom(Number(event.target.value))}
+                  onChange={(event) => updateZoom(Number(event.target.value), getVisibleStageCenterAnchor())}
                 />
               </label>
               <button
                 className="icon-button"
                 title={withShortcut("Aumenta zoom", SHORTCUTS.zoomIn)}
                 disabled={!hasPdf || zoomPercent >= ZOOM_MAX}
-                onClick={() => updateZoom(zoomPercent + ZOOM_BUTTON_STEP)}
+                onClick={() => updateZoom(zoomPercent + ZOOM_BUTTON_STEP, getVisibleStageCenterAnchor())}
               >
                 <ZoomIn size={17} />
               </button>
