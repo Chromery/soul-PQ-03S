@@ -251,6 +251,7 @@ type ClipboardSelection = {
 
 type Runtime = {
   pdfDoc: PdfDocument | null;
+  pdfData: ArrayBuffer | null;
   fileName: string;
   currentPage: number;
   pageCount: number;
@@ -435,6 +436,7 @@ const moneyFormatter = new Intl.NumberFormat("it-IT", {
 function createRuntime(): Runtime {
   return {
     pdfDoc: null,
+    pdfData: null,
     fileName: "",
     currentPage: 0,
     pageCount: 0,
@@ -1153,6 +1155,15 @@ export default function PlanimetriaEditor({
     }
   }
 
+  async function triggerCurrentPdfScaleExtraction() {
+    const data = runtimeRef.current.pdfData;
+    if (!data || !fileName) {
+      setStatus("Carica una planimetria prima dell'estrazione automatica");
+      return;
+    }
+    await triggerScaleExtraction(data.slice(0), fileName);
+  }
+
   async function pollScaleExtractionJob(jobId: string) {
     for (let attempt = 0; attempt < 40; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, attempt < 4 ? 1200 : 2500));
@@ -1203,13 +1214,15 @@ export default function PlanimetriaEditor({
   }
 
   async function loadPdfFromData(data: ArrayBuffer, name: string) {
-    const loadingTask = pdfjsLib.getDocument({ data, isEvalSupported: false });
+    const retainedData = data.slice(0);
+    const loadingTask = pdfjsLib.getDocument({ data: data.slice(0), isEvalSupported: false });
     setEditorBusy(true);
     setStatus("Analisi PDF");
     try {
       const pdfDoc = await loadingTask.promise;
       const runtime = createRuntime();
       runtime.pdfDoc = pdfDoc;
+      runtime.pdfData = retainedData;
       runtime.fileName = name;
       runtime.currentPage = 1;
       runtime.pageCount = pdfDoc.numPages;
@@ -5134,6 +5147,15 @@ export default function PlanimetriaEditor({
             )}
             <p className="modal-note">La scala aggiorna subito il calcolo delle superfici gia tracciate.</p>
             <div className="modal-actions">
+              <button
+                className="button secondary"
+                type="button"
+                disabled={!hasPdf || scaleExtractionBusy}
+                onClick={() => void triggerCurrentPdfScaleExtraction()}
+              >
+                <Sparkles size={16} />
+                {scaleExtractionBusy ? "Analisi in corso..." : "Rileva automaticamente"}
+              </button>
               <button className="button secondary" type="button" onClick={() => setScaleModalOpen(false)}>
                 Annulla
               </button>

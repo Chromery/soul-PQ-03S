@@ -213,9 +213,91 @@ export class ScaleExtractionService {
   }
 
   private async extractScale(source: { fileName: string; fileData: string; sizeBytes: number }) {
+    const primary = parseOpenRouterExtraction(await this.callOpenRouterScaleExtraction(source, false));
+    if (!primary.found && primary.confidence === 0 && !primary.evidence) {
+      try {
+        const retry = parseOpenRouterExtraction(await this.callOpenRouterScaleExtraction(source, true));
+        if (retry.found || retry.evidence || retry.confidence > primary.confidence) return retry;
+      } catch (error) {
+        return {
+          ...primary,
+          warnings: [
+            ...primary.warnings,
+            error instanceof Error ? `Secondo tentativo non riuscito: ${error.message}` : "Secondo tentativo non riuscito",
+          ],
+        };
+      }
+    }
+    return primary;
+  }
+
+  private async callOpenRouterScaleExtraction(
+    source: { fileName: string; fileData: string; sizeBytes: number },
+    retry: boolean,
+  ) {
     const apiKey = optionalConfig(this.config.get<string>("OPENROUTER_API_KEY"));
     if (!apiKey || apiKey.includes("REPLACE_")) {
       throw new InternalServerErrorException("OPENROUTER_API_KEY non configurata per estrazione scala");
+    }
+
+    const payload: JsonRecord = {
+      model: this.model,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Sei un tecnico catastale. Estrai solo scale esplicite da planimetrie PDF o elaborati planimetrici catastali. Se leggi una dicitura come 'Scala 1:500' o 'Scala 1 : 500' devi impostare found=true e scale_denominator=500. Rispondi esclusivamente JSON valido conforme allo schema.",
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                "Analizza il PDF della planimetria catastale e trova il rapporto di scala, per esempio 'Scala 1:500', 'Scala 1 : 500', '1/200' o simili. Non inferire la scala dal formato foglio A3/A4. La dicitura 'Fattore di scala non utilizzabile' riguarda il fattore di stampa/acquisizione: non usarla come scala e non scartare un'altra dicitura esplicita come 'Scala 1:500'. Se non trovi una scala esplicita, usa found=false e valori null. Riporta in evidence il testo o la zona che giustifica la risposta." +
+                (retry
+                  ? " Questo e un secondo tentativo: controlla con attenzione il testo OCR e, se trovi una riga con 'Scala 1 : N', restituisci quella scala."
+                  : ""),
+            },
+            {
+              type: "file",
+              file: {
+                filename: source.fileName,
+                file_data: source.fileData,
+              },
+            },
+          ],
+        },
+      ],
+      temperature: 0,
+      seed: retry ? 43 : 42,
+      max_tokens: 1500,
+      include_reasoning: false,
+      reasoning: {
+        exclude: true,
+      },
+      plugins: [
+        {
+          id: "file-parser",
+          pdf: {
+            engine: this.pdfEngine,
+          },
+        },
+      ],
+    };
+
+    if (!retry) {
+      payload.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: "planimetria_scale_extraction",
+          strict: true,
+          schema: SCALE_EXTRACTION_SCHEMA,
+        },
+      };
+      payload.provider = {
+        require_parameters: true,
+      };
     }
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -226,72 +308,14 @@ export class ScaleExtractionService {
         "HTTP-Referer": this.siteUrl,
         "X-Title": this.appTitle,
       },
-      body: JSON.stringify({
-        model: this.model,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Sei un tecnico catastale. Estrai solo scale esplicite da planimetrie PDF. Se leggi una dicitura come 'Scala 1:500' devi impostare found=true e scale_denominator=500. Rispondi esclusivamente JSON valido conforme allo schema.",
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text:
-                  "Analizza il PDF della planimetria catastale e trova il rapporto di scala, per esempio 'Scala 1:500', '1/200' o simili. Non inferire la scala dal formato foglio A3/A4. La dicitura 'Fattore di scala non utilizzabile' significa che non c'e una scala affidabile. Se non trovi una scala esplicita, usa found=false e valori null. Riporta in evidence il testo o la zona che giustifica la risposta.",
-              },
-              {
-                type: "file",
-                file: {
-                  filename: source.fileName,
-                  file_data: source.fileData,
-                },
-              },
-            ],
-          },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "planimetria_scale_extraction",
-            strict: true,
-            schema: SCALE_EXTRACTION_SCHEMA,
-          },
-        },
-        temperature: 0,
-        seed: 42,
-        max_tokens: 1500,
-        include_reasoning: false,
-        reasoning: {
-          exclude: true,
-        },
-        provider: {
-          require_parameters: true,
-        },
-        plugins: [
-          {
-            id: "file-parser",
-            pdf: {
-              engine: this.pdfEngine,
-            },
-          },
-        ],
-      }),
+      body: JSON.stringify(payload),
     });
 
     const rawBody = await response.text();
     if (!response.ok) {
       throw new Error(`OpenRouter HTTP ${response.status}: ${rawBody.slice(0, 500)}`);
     }
-
-    const data = parseJsonRecord(rawBody, "risposta OpenRouter");
-    const choice = asArray(data.choices, "choices")[0];
-    const message = asRecord(asRecord(choice, "choices[0]").message, "choices[0].message");
-    const content = messageContentToText(message.content ?? message.reasoning);
-    const parsed = parseJsonRecord(content, "contenuto OpenRouter") as Partial<ScaleExtractionResult>;
-    return validateExtractionResult(parsed);
+    return rawBody;
   }
 
   private async requireProperty(propertyId: string) {
@@ -377,7 +401,29 @@ function decodePdfBase64(value: string, fileName: string) {
   };
 }
 
-function validateExtractionResult(value: Partial<ScaleExtractionResult>): ScaleExtractionResult {
+function parseOpenRouterExtraction(rawBody: string) {
+  const data = parseJsonRecord(rawBody, "risposta OpenRouter");
+  if (!Array.isArray(data.choices)) {
+    const message = openRouterErrorMessage(data);
+    throw new Error(message ? `OpenRouter: ${message}` : "OpenRouter non ha restituito choices");
+  }
+  const choices = asArray(data.choices, "choices");
+  const choice = choices[0];
+  const message = asRecord(asRecord(choice, "choices[0]").message, "choices[0].message");
+  const content = messageContentToText(message.content ?? message.reasoning);
+  const annotationText = messageAnnotationsToText(message.annotations);
+  let parsed: Partial<ScaleExtractionResult> = {};
+  if (content) {
+    try {
+      parsed = parseJsonRecord(content, "contenuto OpenRouter") as Partial<ScaleExtractionResult>;
+    } catch (error) {
+      if (!annotationText) throw error;
+    }
+  }
+  return validateExtractionResult(parsed, annotationText);
+}
+
+function validateExtractionResult(value: Partial<ScaleExtractionResult>, sourceText = ""): ScaleExtractionResult {
   const found = typeof value.found === "boolean" ? value.found : false;
   const denominator = value.scale_denominator;
   const scaleDenominator =
@@ -394,17 +440,20 @@ function validateExtractionResult(value: Partial<ScaleExtractionResult>): ScaleE
     : [];
   const evidence = typeof value.evidence === "string" ? value.evidence : null;
   const label = typeof value.scale_label === "string" ? value.scale_label : null;
-  const explicitDenominator = extractScaleDenominator([label, evidence, ...warnings].join(" "));
+  const explicitDenominator = extractScaleDenominator([label, evidence, sourceText, ...warnings].join(" "));
   const inferredDenominator = scaleDenominator ?? explicitDenominator;
   const resultFound = Boolean((found && scaleDenominator !== null) || inferredDenominator);
+  const inferredSheetSize = extractSheetSize(sourceText) ?? sheetSize;
   return {
     found: resultFound,
     scale_denominator: resultFound ? inferredDenominator : null,
     scale_label: label ?? (inferredDenominator ? `1:${inferredDenominator}` : null),
-    sheet_size: sheetSize,
+    sheet_size: inferredSheetSize,
     confidence: explicitDenominator ? Math.max(confidence, 0.9) : confidence,
-    evidence,
-    warnings,
+    evidence: evidence ?? (explicitDenominator ? `Scala esplicita rilevata dal testo OCR: 1:${explicitDenominator}` : null),
+    warnings: explicitDenominator
+      ? warnings.filter((warning) => !/fattore di scala non utilizzabile/i.test(warning))
+      : warnings,
   };
 }
 
@@ -414,6 +463,16 @@ function extractScaleDenominator(text: string) {
   const denominator = Number(match[1]);
   if (!Number.isInteger(denominator) || denominator < 20 || denominator > 20000) return null;
   return denominator;
+}
+
+function extractSheetSize(text: string): "A3" | "A4" | null {
+  const requested = text.match(/Formato stampa richiesto:\s*(A[34])\s*\(/i)?.[1]?.toUpperCase();
+  if (requested === "A3" || requested === "A4") return requested;
+  const acquired = text.match(/Formato di acquisizione:\s*(A[34])\s*\(/i)?.[1]?.toUpperCase();
+  if (acquired === "A3" || acquired === "A4") return acquired;
+  const generic = text.match(/\b(A[34])\s*\(\s*\d+\s*x\s*\d+\s*\)/i)?.[1]?.toUpperCase();
+  if (generic === "A3" || generic === "A4") return generic;
+  return null;
 }
 
 function messageContentToText(content: unknown) {
@@ -428,7 +487,7 @@ function messageContentToText(content: unknown) {
       .join("\n")
       .trim();
   }
-  throw new Error("Risposta OpenRouter senza contenuto testuale");
+  return "";
 }
 
 function parseJsonRecord(value: string, label: string): JsonRecord {
@@ -449,8 +508,33 @@ function asRecord(value: unknown, path: string): JsonRecord {
 }
 
 function asArray(value: unknown, path: string): unknown[] {
-  if (!Array.isArray(value)) throw new Error(`${path} deve essere una lista`);
+  if (!Array.isArray(value)) {
+    const message = openRouterErrorMessage(value);
+    throw new Error(message ? `OpenRouter: ${message}` : `${path} deve essere una lista`);
+  }
   return value;
+}
+
+function messageAnnotationsToText(annotations: unknown) {
+  return collectTextParts(annotations).join("\n").trim();
+}
+
+function collectTextParts(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (!value || typeof value !== "object") return [];
+  if (Array.isArray(value)) return value.flatMap(collectTextParts);
+  const record = value as JsonRecord;
+  const current = record.type === "text" && typeof record.text === "string" ? [record.text] : [];
+  return current.concat(...["content", "file", "message"].map((key) => collectTextParts(record[key])));
+}
+
+function openRouterErrorMessage(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const record = value as JsonRecord;
+  const error = record.error;
+  if (!error || typeof error !== "object") return null;
+  const errorRecord = error as JsonRecord;
+  return optionalString(errorRecord.message) ?? optionalString(errorRecord.detail) ?? optionalString(errorRecord.code);
 }
 
 function optionalString(value: unknown) {
