@@ -13,6 +13,13 @@ The application is an npm workspaces monorepo:
 - `apps/web`: React and Vite frontend.
 - `apps/api`: NestJS API.
 - `postgres`: PostgreSQL container managed in `compose.yaml`.
+- `postgres-backup`: daily PostgreSQL dump writer managed in `compose.yaml`.
+
+Configuration lives in the root `.env` only. Start from:
+
+```sh
+cp .env.example .env
+```
 
 Run the deployed-style local stack with:
 
@@ -27,8 +34,10 @@ Services:
 | Web | `http://localhost:8080` | Nginx-served frontend and `/api` proxy |
 | API | `http://localhost:3000/api` | NestJS API |
 | PostgreSQL | `localhost:5432` | Prisma-managed database, configurable with `DB_PORT` |
+| PostgreSQL backups | `backups/postgres/*.dump` | Daily custom-format `pg_dump` files |
 
 The API container runs `prisma migrate deploy` and the idempotent Prisma seed before starting NestJS.
+The backup container creates one dump on startup and then every `BACKUP_INTERVAL_SECONDS` seconds, with retention controlled by `BACKUP_RETENTION_DAYS`.
 
 ## Database Model
 
@@ -56,12 +65,6 @@ The editor draft endpoint accepts large JSON bodies because selected area masks 
 
 ## Prisma Development
 
-Create a local API environment file before running Prisma commands:
-
-```sh
-cp apps/api/.env.example apps/api/.env
-```
-
 With PostgreSQL running, use:
 
 ```sh
@@ -71,7 +74,23 @@ npm run db:seed
 npm run db:studio
 ```
 
-Prisma Studio connects to `postgresql://soul:soul_dev_password@localhost:5432/soul_pq` with the development defaults.
+Prisma reads the root `.env`. If `DATABASE_URL` is omitted, local scripts derive it from `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, and `DB_PORT`.
+
+## Backups
+
+Backups are stored outside Git in `backups/postgres`.
+
+List available dumps:
+
+```sh
+ls -lh backups/postgres
+```
+
+Restore a dump manually:
+
+```sh
+docker compose exec -T postgres pg_restore -U soul -d soul_pq --clean --if-exists < backups/postgres/soul_pq-YYYYMMDDTHHMMSSZ.dump
+```
 
 ## Integration Boundary
 

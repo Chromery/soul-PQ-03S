@@ -177,6 +177,12 @@ Install dependencies:
 npm install
 ```
 
+Create the single root environment file:
+
+```sh
+cp .env.example .env
+```
+
 Run the complete stack:
 
 ```sh
@@ -195,7 +201,6 @@ The API container applies migrations and seeds demonstration ERP studies on star
 Open Prisma Studio against the Compose database from another terminal:
 
 ```sh
-cp apps/api/.env.example apps/api/.env
 npm run db:studio
 ```
 
@@ -203,7 +208,6 @@ For local frontend/API development, start only PostgreSQL through Compose and pr
 
 ```sh
 docker compose up -d postgres
-cp apps/api/.env.example apps/api/.env
 npm run db:migrate
 npm run db:seed
 ```
@@ -229,7 +233,6 @@ http://localhost:5173/studi/S-2026-0187/immobili/AU-01/planimetria
 Generate the Prisma client and build:
 
 ```sh
-cp apps/api/.env.example apps/api/.env
 npm run build
 ```
 
@@ -237,6 +240,24 @@ Preview production build:
 
 ```sh
 npm run preview
+```
+
+## Environment And Backups
+
+The root `.env` is the only environment file used by Docker Compose, the API, Prisma, seeds, and import scripts. `apps/api/.env` is obsolete and ignored if it still exists locally.
+
+Compose also starts `postgres-backup`, which creates a PostgreSQL custom-format dump in `backups/postgres` on startup and then every `BACKUP_INTERVAL_SECONDS` seconds. The default is daily with `BACKUP_RETENTION_DAYS=14`.
+
+List available backups:
+
+```sh
+ls -lh backups/postgres
+```
+
+Restore a dump manually:
+
+```sh
+docker compose exec -T postgres pg_restore -U soul -d soul_pq --clean --if-exists < backups/postgres/soul_pq-YYYYMMDDTHHMMSSZ.dump
 ```
 
 ## Notes

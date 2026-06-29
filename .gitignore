@@ -10,4 +10,5 @@ secrets/
 mock-documents/
 00_prezzari2026.zip
 00_prezzari2026/
+backups/
 apps/api/src/generated/prisma
