@@ -1,10 +1,20 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { DocumentType } from "../generated/prisma/enums.js";
-import type { FeasibilityStudy, Property, PropertyDocument, StudyVersion } from "../generated/prisma/client.js";
+import type {
+  FeasibilityStudy,
+  PriceList,
+  Property,
+  PropertyDocument,
+  PropertyPriceList,
+  StudyVersion,
+} from "../generated/prisma/client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import type { UpdateStudyDto } from "./dto/update-study.dto.js";
 
-type PropertyWithDocuments = Property & { documents: PropertyDocument[] };
+type PropertyWithDocuments = Property & {
+  documents: PropertyDocument[];
+  priceLists: Array<PropertyPriceList & { priceList: PriceList }>;
+};
 type StudyWithRelations = FeasibilityStudy & {
   properties: PropertyWithDocuments[];
   versions: StudyVersion[];
@@ -17,7 +27,7 @@ export class StudiesService {
   async list() {
     const studies = await this.prisma.feasibilityStudy.findMany({
       include: {
-        properties: { include: { documents: true }, orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
+        properties: { include: propertyInclude(), orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
         versions: { orderBy: { versionNumber: "desc" } },
       },
       orderBy: { createdAt: "desc" },
@@ -29,7 +39,7 @@ export class StudiesService {
     const study = await this.prisma.feasibilityStudy.findUnique({
       where: { id },
       include: {
-        properties: { include: { documents: true }, orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
+        properties: { include: propertyInclude(), orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
         versions: { orderBy: { versionNumber: "desc" } },
       },
     });
@@ -44,7 +54,7 @@ export class StudiesService {
       where: { id },
       data: input,
       include: {
-        properties: { include: { documents: true }, orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
+        properties: { include: propertyInclude(), orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
         versions: { orderBy: { versionNumber: "desc" } },
       },
     });
@@ -124,8 +134,36 @@ export class StudiesService {
         planimetria: documentDownloadUrl(property.id, "planimetria", planimetria),
         visura: documentDownloadUrl(property.id, "visura", visura),
       },
+      priceLists: property.priceLists
+        .sort((a, b) => a.rank - b.rank)
+        .map((match) => ({
+          id: match.priceList.id,
+          title: match.priceList.title,
+          fileName: match.priceList.fileName,
+          territoryName: match.priceList.territoryName,
+          territoryScope: match.priceList.territoryScope,
+          comune: match.priceList.comune,
+          provincia: match.priceList.provincia,
+          region: match.priceList.region,
+          year: match.priceList.year,
+          rank: match.rank,
+          score: match.score,
+          reason: match.reason,
+          distanceKm: match.distanceKm,
+          downloadUrl: `/api/price-lists/${encodeURIComponent(match.priceList.id)}/download`,
+        })),
     };
   }
+}
+
+function propertyInclude() {
+  return {
+    documents: true,
+    priceLists: {
+      include: { priceList: true },
+      orderBy: { rank: "asc" as const },
+    },
+  };
 }
 
 function documentDownloadUrl(propertyId: string, type: "planimetria" | "visura", document?: PropertyDocument) {

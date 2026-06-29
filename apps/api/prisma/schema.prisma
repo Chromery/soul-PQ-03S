@@ -105,6 +105,7 @@ model Property {
   documents          PropertyDocument[]
   analysisDraft      PlanAnalysisDraft?
   scaleExtractionJobs ScaleExtractionJob[]
+  priceLists         PropertyPriceList[]
 }
 
 model PropertyDocument {
@@ -175,4 +176,49 @@ model ScaleExtractionJob {
   @@index([propertyId, createdAt])
   @@index([documentId])
   @@index([status, createdAt])
+}
+
+model PriceList {
+  id             String              @id @default(cuid())
+  title          String
+  fileName       String
+  storageKey     String              @unique
+  mimeType       String
+  sha256         String
+  sizeBytes      Int
+  sourcePath     String?             @unique
+  territoryName  String
+  territoryScope String
+  comune         String?
+  provincia      String?
+  region         String?
+  year           Int?
+  latitude       Float?
+  longitude      Float?
+  priority       Int                 @default(0)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  properties     PropertyPriceList[]
+
+  @@index([territoryScope, comune])
+  @@index([region])
+  @@index([provincia])
+}
+
+model PropertyPriceList {
+  id          String    @id @default(cuid())
+  propertyId  String
+  priceListId String
+  rank        Int
+  score       Float
+  reason      String
+  distanceKm  Float?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  property    Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  priceList   PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, priceListId])
+  @@index([propertyId, rank])
+  @@index([priceListId])
 }

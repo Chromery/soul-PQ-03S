@@ -16,6 +16,7 @@
     "build:web": "npm run build --workspace @soul/web",
     "build:api": "npm run build --workspace @soul/api",
     "preview": "npm run preview --workspace @soul/web",
+    "prezzari:import": "node apps/api/scripts/import-price-lists.mjs",
     "db:generate": "npm run prisma:generate --workspace @soul/api",
     "db:migrate": "npm run db:migrate:dev --workspace @soul/api",
     "db:seed": "npm run db:seed --workspace @soul/api",

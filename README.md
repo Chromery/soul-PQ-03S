@@ -81,15 +81,11 @@ ERP send/sync, ERP links, presentation generation, and protected document downlo
 
 ## Planimetria Editor
 
-The planimetria editor opens from a selected real estate object. The first three demo immobili (`AU-01`, `AU-02`, and `AU-03`) are explicitly linked to the three sample PDFs in:
-
-```text
-apps/web/public/planimetrie/
-```
+The planimetria editor opens from a selected real estate object. When an imported ERP/S3 planimetria is available for the property, the editor can open it directly from protected document storage.
 
 The editor supports:
 
-- Opening one of the sample planimetrie.
+- Opening the ERP/S3 planimetria associated with the selected property.
 - Uploading a PDF planimetria.
 - Smart area selection by clicking inside bounded areas.
 - Destination usage selection:
@@ -156,7 +152,6 @@ Planned integrations:
 │   │   └── src/
 │   └── web/
 │       ├── public/
-│       │   ├── planimetrie/
 │       │   └── soul_logo_blu.png
 │       └── src/
 │           ├── App.tsx

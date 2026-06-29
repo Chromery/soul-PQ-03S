@@ -48,11 +48,28 @@ import {
 } from "lucide-react";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.8";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.9";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
 type PropertyOutcome = "Positivo" | "Negativo" | "Non analizzato";
+
+type PriceListItem = {
+  id: string;
+  title: string;
+  fileName: string;
+  territoryName: string;
+  territoryScope: string;
+  comune?: string | null;
+  provincia?: string | null;
+  region?: string | null;
+  year?: number | null;
+  rank: number;
+  score: number;
+  reason: string;
+  distanceKm?: number | null;
+  downloadUrl: string;
+};
 
 type PropertyItem = {
   id: string;
@@ -89,6 +106,7 @@ type PropertyItem = {
     planimetria?: string | null;
     visura?: string | null;
   };
+  priceLists?: PriceListItem[];
 };
 
 type FeasibilityStudy = {
@@ -1287,6 +1305,14 @@ function openPropertyDocument(
     return;
   }
   window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function openPriceListDocument(priceList: PriceListItem | undefined, onMissing: (message: string) => void) {
+  if (!priceList?.downloadUrl) {
+    onMissing("Nessun prezzario territoriale disponibile per questo immobile.");
+    return;
+  }
+  window.open(priceList.downloadUrl, "_blank", "noopener,noreferrer");
 }
 
 function formatM2(value: number) {
@@ -3743,6 +3769,7 @@ function PropertyAreaDetail({
       : draftState.source === "local"
         ? "Bozza locale"
         : "Nessuna bozza";
+  const primaryPriceList = property.priceLists?.[0];
 
   return (
     <section className="property-area-detail" aria-label={`Lista aree ${property.address}`}>
@@ -3789,11 +3816,43 @@ function PropertyAreaDetail({
             <FileText size={14} />
             Visura PDF
           </button>
+          <button
+            className="button secondary compact-button"
+            type="button"
+            disabled={!primaryPriceList}
+            title={
+              primaryPriceList
+                ? `Apri ${primaryPriceList.title}`
+                : "Nessun prezzario territoriale disponibile"
+            }
+            onClick={() => {
+              if (primaryPriceList) window.open(primaryPriceList.downloadUrl, "_blank", "noopener,noreferrer");
+            }}
+          >
+            <ExternalLink size={14} />
+            Prezzario
+          </button>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi dettaglio immobile">
             <X size={16} />
           </button>
         </div>
       </div>
+      {property.priceLists && property.priceLists.length > 0 && (
+        <div className="property-price-list-strip" aria-label="Prezzari associati">
+          {property.priceLists.slice(0, 3).map((priceList) => (
+            <button
+              key={priceList.id}
+              type="button"
+              title={`${priceList.reason}${priceList.distanceKm ? ` - ${Math.round(priceList.distanceKm)} km` : ""}`}
+              onClick={() => window.open(priceList.downloadUrl, "_blank", "noopener,noreferrer")}
+            >
+              <ExternalLink size={14} />
+              <span>{priceList.territoryName}</span>
+              {priceList.year && <small>{priceList.year}</small>}
+            </button>
+          ))}
+        </div>
+      )}
 
       {!draft && draftState.loading ? (
         <div className="property-area-empty">

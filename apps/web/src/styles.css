@@ -1544,6 +1544,38 @@ a.button {
   opacity: 0.55;
 }
 
+.property-price-list-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -8px 0 14px;
+}
+
+.property-price-list-strip button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid #d8e6f7;
+  border-radius: 7px;
+  color: #173154;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.property-price-list-strip button:hover {
+  color: var(--primary);
+  border-color: #b8d7ff;
+  background: #eef5ff;
+}
+
+.property-price-list-strip small {
+  color: var(--secondary);
+  font-weight: 800;
+}
+
 .empty-state {
   min-height: 220px;
   display: grid;
@@ -3028,7 +3060,7 @@ a.button {
 }
 
 .sheet-toggle,
-.sample-buttons,
+.document-source-buttons,
 .page-controls {
   display: grid;
   gap: 8px;
@@ -3039,8 +3071,8 @@ a.button {
   margin-top: 10px;
 }
 
-.sample-buttons {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.document-source-buttons {
+  grid-template-columns: 1fr;
 }
 
 .page-controls {
@@ -3048,7 +3080,7 @@ a.button {
 }
 
 .sheet-toggle button,
-.sample-buttons button {
+.document-source-buttons button {
   min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -3058,7 +3090,7 @@ a.button {
 }
 
 .sheet-toggle button.active,
-.sample-buttons button.active {
+.document-source-buttons button.active {
   color: var(--primary);
   border-color: #b8d7ff;
   background: #eef5ff;
@@ -3696,6 +3728,11 @@ a.button {
   color: var(--primary);
   border-color: #b8d7ff;
   background: #eef5ff;
+}
+
+.price-list-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .right-panel-toggle {
@@ -4386,7 +4423,7 @@ a.button {
     font-size: 24px;
   }
 
-  .sample-buttons {
+  .document-source-buttons {
     grid-template-columns: 1fr;
   }
 

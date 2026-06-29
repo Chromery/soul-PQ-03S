@@ -96,6 +96,16 @@ type EditorProperty = {
     planimetria?: string | null;
     visura?: string | null;
   };
+  priceLists?: Array<{
+    id: string;
+    title: string;
+    territoryName: string;
+    territoryScope: string;
+    year?: number | null;
+    reason: string;
+    distanceKm?: number | null;
+    downloadUrl: string;
+  }>;
 };
 
 type ScaleExtractionJob = {
@@ -367,30 +377,6 @@ const USAGES: Array<{
   { id: "lotto", label: "Lotto", shortLabel: "Lotto", color: "#64748b", rate: 0.2 },
 ];
 
-const SAMPLE_PLANS = [
-  {
-    label: "Esempio 1",
-    fileName: "floor-plant-example.pdf",
-    url: "/planimetrie/floor-plant-example.pdf",
-  },
-  {
-    label: "Esempio 2",
-    fileName: "floor-plant-example-2.pdf",
-    url: "/planimetrie/floor-plant-example-2.pdf",
-  },
-  {
-    label: "Esempio 3",
-    fileName: "floor-plant-example-3.pdf",
-    url: "/planimetrie/floor-plant-example-3.pdf",
-  },
-];
-
-const SAMPLE_PLANS_BY_PROPERTY: Record<string, (typeof SAMPLE_PLANS)[number]> = {
-  "AU-01": SAMPLE_PLANS[0],
-  "AU-02": SAMPLE_PLANS[1],
-  "AU-03": SAMPLE_PLANS[2],
-};
-
 const DRAFT_KEY_PREFIX = "soul-planimetria-draft:";
 const PANEL_STORAGE_KEYS = {
   left: "soul-editor-left-panel-open",
@@ -574,10 +560,6 @@ function areaFromPixels(
 ) {
   if (!totalPixels) return 0;
   return (pixelCount / totalPixels) * pageRealAreaM2(sheetSize, scaleDenominator);
-}
-
-function linkedSampleForProperty(propertyId: string) {
-  return SAMPLE_PLANS_BY_PROPERTY[propertyId] ?? null;
 }
 
 function downloadCanvas(canvas: HTMLCanvasElement, filename: string) {
@@ -788,7 +770,6 @@ export default function PlanimetriaEditor({
   const [scaleExtractionBusy, setScaleExtractionBusy] = useState(false);
   const [revision, setRevision] = useState(0);
 
-  const linkedSample = useMemo(() => linkedSampleForProperty(property.id), [property.id]);
   const linkedRemotePlan = useMemo(
     () =>
       property.documentUrls?.planimetria
@@ -1069,10 +1050,8 @@ export default function PlanimetriaEditor({
         applyPropertyScaleFallback();
         if (linkedRemotePlan) {
           void loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName, undefined, true);
-        } else if (linkedSample) {
-          void loadSample(linkedSample.url, linkedSample.fileName, undefined, true);
         } else {
-          setStatus("Carica una planimetria o apri un esempio");
+          setStatus("Carica una planimetria o apri il documento ERP");
         }
         return;
       }
@@ -1097,7 +1076,12 @@ export default function PlanimetriaEditor({
           : null,
       );
       if (draft.document.kind === "sample") {
-        void loadSample(draft.document.url, draft.document.fileName, draft, true);
+        if (linkedRemotePlan) {
+          void loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName, draft, true);
+        } else {
+          setDocumentSource(null);
+          setStatus("Bozza salvata con documento mock rimosso: carica la planimetria ERP");
+        }
       } else if (draft.document.kind === "remote") {
         void loadRemotePlan(draft.document.url, draft.document.fileName, draft, true);
       } else {
@@ -1146,7 +1130,7 @@ export default function PlanimetriaEditor({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [property.id, linkedRemotePlan?.url, linkedRemotePlan?.fileName, linkedSample?.url, linkedSample?.fileName]);
+  }, [property.id, linkedRemotePlan?.url, linkedRemotePlan?.fileName]);
 
   function markDirty() {
     setDirty(true);
@@ -1213,33 +1197,6 @@ export default function PlanimetriaEditor({
     }
     setSheetSize(propertySheetSize);
     setScaleModalSheetSize(propertySheetSize);
-  }
-
-  async function loadSample(
-    url: string,
-    name: string,
-    draft?: SavedDraft,
-    initialLoad = false,
-  ) {
-    try {
-      setStatus("Caricamento PDF");
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.arrayBuffer();
-      await loadPdfFromData(data, name);
-      setDocumentSource({ kind: "sample", fileName: name, url });
-      if (draft) {
-        await restoreDraftSelections(draft);
-        setStatus("Bozza ripristinata");
-      } else if (!initialLoad) {
-        pendingDraftRef.current = null;
-        markDirty();
-      }
-      if (!draft) void triggerScaleExtraction(data, name);
-    } catch (error) {
-      console.error(error);
-      setStatus("PDF non caricato");
-    }
   }
 
   async function loadRemotePlan(
@@ -4769,7 +4726,13 @@ export default function PlanimetriaEditor({
   }
 
   function openPriceList() {
-    setStatus(`Prezzario per ${property.comune} non ancora collegato`);
+    const priceList = property.priceLists?.[0];
+    if (!priceList?.downloadUrl) {
+      setStatus(`Prezzario per ${property.comune} non ancora collegato`);
+      return;
+    }
+    window.open(priceList.downloadUrl, "_blank", "noopener,noreferrer");
+    setStatus(`Prezzario aperto: ${priceList.territoryName}`);
   }
 
   function changeActiveUsage(usageId: UsageId) {
@@ -5006,8 +4969,8 @@ export default function PlanimetriaEditor({
             </button>
             {!collapsedSections.planimetry && (
               <>
-                <div className="sample-buttons">
-                  {linkedRemotePlan && (
+                {linkedRemotePlan && (
+                  <div className="document-source-buttons">
                     <button
                       key={linkedRemotePlan.url}
                       className={documentSource?.kind === "remote" ? "active" : ""}
@@ -5015,17 +4978,8 @@ export default function PlanimetriaEditor({
                     >
                       ERP
                     </button>
-                  )}
-                  {SAMPLE_PLANS.map((plan) => (
-                    <button
-                      key={plan.url}
-                      className={fileName === plan.fileName ? "active" : ""}
-                      onClick={() => void loadSample(plan.url, plan.fileName)}
-                    >
-                      {plan.label}
-                    </button>
-                  ))}
-                </div>
+                  </div>
+                )}
                 <div className="loaded-doc">
                   <FileText size={18} />
                   <div>
@@ -5372,15 +5326,19 @@ export default function PlanimetriaEditor({
               <PanelRightClose size={18} />
             </button>
           </div>
-          {/* TODO: risolvere property.comune nel territorio corretto e aprire il PDF del prezzario in una nuova scheda. */}
           <button
             className="price-list-button"
             type="button"
+            disabled={!property.priceLists?.[0]}
             onClick={openPriceList}
-            title={`Apri il prezzario per ${property.comune} in una nuova scheda`}
+            title={
+              property.priceLists?.[0]
+                ? `Apri ${property.priceLists[0].title} in una nuova scheda`
+                : `Nessun prezzario collegato per ${property.comune}`
+            }
           >
             <ExternalLink size={17} />
-            Apri il prezzario
+            {property.priceLists?.[0] ? `Apri prezzario ${property.priceLists[0].territoryName}` : "Apri il prezzario"}
           </button>
           <section className={`area-totals ${collapsedRightSections.totals ? "collapsed" : ""}`}>
             <button className="right-panel-toggle" type="button" onClick={() => toggleRightPanelSection("totals")}>

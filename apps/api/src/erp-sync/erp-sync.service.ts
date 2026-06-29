@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import { DocumentType } from "../generated/prisma/enums.js";
 import type { FeasibilityStudy, PlanAnalysisDraft, Property, PropertyDocument, StudyVersion } from "../generated/prisma/client.js";
+import { PriceListsService } from "../price-lists/price-lists.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { ScaleExtractionService } from "../scale-extraction/scale-extraction.service.js";
 import { DocumentStorageService } from "./document-storage.service.js";
@@ -27,6 +28,7 @@ export class ErpSyncService {
     private readonly prisma: PrismaService,
     private readonly storage: DocumentStorageService,
     private readonly scaleExtraction: ScaleExtractionService,
+    private readonly priceLists: PriceListsService,
     config: ConfigService,
   ) {
     this.defaultTechnicalOwner = config.get<string>("DEFAULT_TECHNICAL_OWNER", "Responsabile tecnico Soul");
@@ -267,6 +269,8 @@ export class ErpSyncService {
         documentsCount++;
       }
     }
+
+    await this.priceLists.assignForStudy(studioErpId);
 
     return {
       studio_erp_id: studioErpId,

@@ -8,4 +8,6 @@ dist
 credentials/
 secrets/
 mock-documents/
+00_prezzari2026.zip
+00_prezzari2026/
 apps/api/src/generated/prisma

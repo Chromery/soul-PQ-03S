@@ -24,6 +24,13 @@ type SeedProperty = {
   hasStudy: boolean;
   planimetria: string;
   visura: string;
+  documentStorage?: Partial<Record<"planimetria" | "visura", SeedDocumentStorage>>;
+};
+
+type SeedDocumentStorage = {
+  storageKey: string;
+  sha256: string;
+  sizeBytes: number;
 };
 
 type SeedStudy = {
@@ -89,8 +96,20 @@ const demoStudies: SeedStudy[] = [
         imuDiff: 1320,
         outcome: "Positivo",
         hasStudy: true,
-        planimetria: "floor-plant-example.pdf",
+        planimetria: "planimetria-au-01.pdf",
         visura: "visura-au-01.pdf",
+        documentStorage: {
+          planimetria: {
+            storageKey: "erp/S-2026-0187/AU-01/planimetria/1c1122b6470b-planimetria-au-01.pdf",
+            sha256: "1c1122b6470b135f7394eb6b115e45b5be73b913d61c7b01c1b8a167223f1a07",
+            sizeBytes: 12947,
+          },
+          visura: {
+            storageKey: "erp/S-2026-0187/AU-01/visura_catastale/18f3fd34995d-visura-au-01.pdf",
+            sha256: "18f3fd34995d316660772f0aed0b36ad4252420d866d561cace1ff8e560a9f5f",
+            sizeBytes: 133,
+          },
+        },
       },
       {
         id: "AU-02",
@@ -110,8 +129,20 @@ const demoStudies: SeedStudy[] = [
         imuDiff: 1085,
         outcome: "Positivo",
         hasStudy: true,
-        planimetria: "floor-plant-example-2.pdf",
+        planimetria: "planimetria-au-02.pdf",
         visura: "visura-au-02.pdf",
+        documentStorage: {
+          planimetria: {
+            storageKey: "erp/S-2026-0187/AU-02/planimetria/89e7849dd002-planimetria-au-02.pdf",
+            sha256: "89e7849dd0027c1f896c7626ae6e3c890eded9f7aacd6289aa2e69d4af926100",
+            sizeBytes: 17840,
+          },
+          visura: {
+            storageKey: "erp/S-2026-0187/AU-02/visura_catastale/18f3fd34995d-visura-au-02.pdf",
+            sha256: "18f3fd34995d316660772f0aed0b36ad4252420d866d561cace1ff8e560a9f5f",
+            sizeBytes: 133,
+          },
+        },
       },
       {
         id: "AU-03",
@@ -131,8 +162,20 @@ const demoStudies: SeedStudy[] = [
         imuDiff: 1198,
         outcome: "Positivo",
         hasStudy: true,
-        planimetria: "floor-plant-example-3.pdf",
+        planimetria: "planimetria-au-03.pdf",
         visura: "visura-au-03.pdf",
+        documentStorage: {
+          planimetria: {
+            storageKey: "erp/S-2026-0187/AU-03/planimetria/a29f5f5a87c0-planimetria-au-03.pdf",
+            sha256: "a29f5f5a87c0dca79f018f8f91749124584775dcc5015af9b3093d68ceb058bf",
+            sizeBytes: 35868,
+          },
+          visura: {
+            storageKey: "erp/S-2026-0187/AU-03/visura_catastale/18f3fd34995d-visura-au-03.pdf",
+            sha256: "18f3fd34995d316660772f0aed0b36ad4252420d866d561cace1ff8e560a9f5f",
+            sizeBytes: 133,
+          },
+        },
       },
       {
         id: "AU-04",
@@ -154,6 +197,13 @@ const demoStudies: SeedStudy[] = [
         hasStudy: true,
         planimetria: "planimetria-au-04.pdf",
         visura: "visura-au-04.pdf",
+        documentStorage: {
+          visura: {
+            storageKey: "erp/S-2026-0187/AU-04/visura_catastale/18f3fd34995d-visura-au-04.pdf",
+            sha256: "18f3fd34995d316660772f0aed0b36ad4252420d866d561cace1ff8e560a9f5f",
+            sizeBytes: 133,
+          },
+        },
       },
     ],
   },
@@ -340,9 +390,11 @@ async function seed() {
         update: baseProperty,
       });
       for (const document of [
-        { type: DocumentType.PLANIMETRIA, fileName: property.planimetria },
-        { type: DocumentType.VISURA, fileName: property.visura },
+        { type: DocumentType.PLANIMETRIA, kind: "planimetria" as const, fileName: property.planimetria },
+        { type: DocumentType.VISURA, kind: "visura" as const, fileName: property.visura },
       ]) {
+        const storage = property.documentStorage?.[document.kind];
+        const storageKey = storage?.storageKey ?? `demo/${property.id.toLowerCase()}/${document.fileName}`;
         await prisma.propertyDocument.upsert({
           where: {
             propertyId_type: { propertyId: property.id, type: document.type },
@@ -351,11 +403,15 @@ async function seed() {
             propertyId: property.id,
             type: document.type,
             fileName: document.fileName,
-            storageKey: `demo/${property.id.toLowerCase()}/${document.fileName}`,
+            storageKey,
+            sha256: storage?.sha256,
+            sizeBytes: storage?.sizeBytes,
           },
           update: {
             fileName: document.fileName,
-            storageKey: `demo/${property.id.toLowerCase()}/${document.fileName}`,
+            storageKey,
+            sha256: storage?.sha256,
+            sizeBytes: storage?.sizeBytes,
           },
         });
       }

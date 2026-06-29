@@ -65,6 +65,10 @@ export class DocumentStorageService {
   }
 
   async readPdfObject(storageKey: string) {
+    return this.readObject(storageKey, "application/pdf");
+  }
+
+  async readObject(storageKey: string, fallbackContentType = "application/octet-stream") {
     try {
       const output = await this.client().send(
         new GetObjectCommand({
@@ -75,7 +79,7 @@ export class DocumentStorageService {
       if (!output.Body) throw new NotFoundException("Documento non trovato nello storage S3");
       return {
         stream: await toReadable(output.Body),
-        contentType: output.ContentType ?? "application/pdf",
+        contentType: output.ContentType ?? fallbackContentType,
         contentLength: output.ContentLength,
       };
     } catch (error) {

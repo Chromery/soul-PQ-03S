@@ -570,18 +570,6 @@
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
         <span>Import</span>
       </button>
-      <button id="sampleBtn" class="button" type="button" title="Load sample PDF">
-        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>
-        <span>Example 1</span>
-      </button>
-      <button id="sample2Btn" class="button" type="button" title="Load example 2 PDF">
-        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 12h7"></path><path d="M8 16h8"></path></svg>
-        <span>Example 2</span>
-      </button>
-      <button id="sample3Btn" class="button" type="button" title="Load example 3 PDF">
-        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 11h8"></path><path d="M8 15h7"></path></svg>
-        <span>Example 3</span>
-      </button>
       <button id="undoBtn" class="icon-button" type="button" title="Undo last room" aria-label="Undo last room" disabled>
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"></path><path d="M4 9h10a6 6 0 1 1 0 12h-1"></path></svg>
       </button>
@@ -693,18 +681,6 @@
                 <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
                 <span>Import</span>
               </button>
-              <button id="emptySampleBtn" class="button" type="button">
-                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>
-                <span>Example 1</span>
-              </button>
-              <button id="emptySample2Btn" class="button" type="button">
-                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 12h7"></path><path d="M8 16h8"></path></svg>
-                <span>Example 2</span>
-              </button>
-              <button id="emptySample3Btn" class="button" type="button">
-                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 11h8"></path><path d="M8 15h7"></path></svg>
-                <span>Example 3</span>
-              </button>
             </div>
           </div>
         </div>
@@ -729,13 +705,7 @@
     const els = {
       docName: document.getElementById("docName"),
       importBtn: document.getElementById("importBtn"),
-      sampleBtn: document.getElementById("sampleBtn"),
-      sample2Btn: document.getElementById("sample2Btn"),
-      sample3Btn: document.getElementById("sample3Btn"),
       emptyImportBtn: document.getElementById("emptyImportBtn"),
-      emptySampleBtn: document.getElementById("emptySampleBtn"),
-      emptySample2Btn: document.getElementById("emptySample2Btn"),
-      emptySample3Btn: document.getElementById("emptySample3Btn"),
       fileInput: document.getElementById("fileInput"),
       undoBtn: document.getElementById("undoBtn"),
       clearBtn: document.getElementById("clearBtn"),
@@ -966,31 +936,6 @@
       } finally {
         els.fileInput.value = "";
       }
-    }
-
-    async function loadBundledPdf(filename) {
-      try {
-        setStatus("Loading PDF...");
-        const response = await fetch(encodeURI(filename));
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.arrayBuffer();
-        await loadPdfFromData(data, filename);
-      } catch (error) {
-        console.error(error);
-        setStatus("Use Import to choose this PDF");
-      }
-    }
-
-    function loadSamplePdf() {
-      return loadBundledPdf("floor plant example.pdf");
-    }
-
-    function loadSample2Pdf() {
-      return loadBundledPdf("floor plant example 2.pdf");
-    }
-
-    function loadSample3Pdf() {
-      return loadBundledPdf("floor plant example 3.pdf");
     }
 
     function drawConstructedPath(targetCtx, args) {
@@ -2065,12 +2010,6 @@
     els.importBtn.addEventListener("click", () => els.fileInput.click());
     els.emptyImportBtn.addEventListener("click", () => els.fileInput.click());
     els.fileInput.addEventListener("change", () => loadPdfFile(els.fileInput.files[0]));
-    els.sampleBtn.addEventListener("click", loadSamplePdf);
-    els.sample2Btn.addEventListener("click", loadSample2Pdf);
-    els.sample3Btn.addEventListener("click", loadSample3Pdf);
-    els.emptySampleBtn.addEventListener("click", loadSamplePdf);
-    els.emptySample2Btn.addEventListener("click", loadSample2Pdf);
-    els.emptySample3Btn.addEventListener("click", loadSample3Pdf);
     els.undoBtn.addEventListener("click", undoLastRoom);
     els.clearBtn.addEventListener("click", clearCurrentPage);
     els.exportBtn.addEventListener("click", exportComposite);
@@ -2086,9 +2025,7 @@
     els.dashRange.addEventListener("input", invalidateWallMap);
 
     updateControls();
-    if (location.protocol !== "file:" && window.pdfjsLib) {
-      loadSamplePdf();
-    } else if (!window.pdfjsLib) {
+    if (!window.pdfjsLib) {
       setStatus("PDF renderer failed to load");
     }
   </script>
