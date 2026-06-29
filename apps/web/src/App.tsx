@@ -48,7 +48,7 @@ import {
 } from "lucide-react";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.10";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.11";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -172,7 +172,11 @@ type PlanAreaUsageId =
   | "tettoie"
   | "sistemazione-esterna"
   | "verde"
-  | "lotto";
+  | "lotto"
+  | "interrato"
+  | "parcheggio-interrato"
+  | "parcheggio-esterno"
+  | "custom";
 
 type PlanAreaSheetSize = "A3" | "A4";
 type PlanScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
@@ -194,6 +198,7 @@ type PlanAreaDraft = {
   aiSheetSize?: PlanAreaSheetSize | null;
   aiScaleConfidence?: number | null;
   aiScaleDetectedAt?: string | null;
+  customUsageLabel?: string;
   totalArea?: number;
   totalEstimatedAmount?: number;
   selections: PlanAreaDraftSelection[];
@@ -203,6 +208,8 @@ type PlanAreaDraftSelection = {
   id: string;
   page: number;
   usageId: PlanAreaUsageId;
+  customUsageLabel?: string;
+  color?: string;
   rate?: number;
   opacity: number;
   totalPixels: number;
@@ -1219,7 +1226,25 @@ const planAreaUsages: Array<{
   },
   { id: "verde", label: "Verde", shortLabel: "Verde", color: "#0f766e", rate: 0.4 },
   { id: "lotto", label: "Lotto", shortLabel: "Lotto", color: "#64748b", rate: 0.2 },
+  { id: "interrato", label: "Interrato", shortLabel: "Interrato", color: "#334155", rate: 4.5 },
+  {
+    id: "parcheggio-interrato",
+    label: "Parcheggio interrato",
+    shortLabel: "P. interrato",
+    color: "#475569",
+    rate: 3,
+  },
+  {
+    id: "parcheggio-esterno",
+    label: "Parcheggio esterno",
+    shortLabel: "P. esterno",
+    color: "#0284c7",
+    rate: 1.2,
+  },
+  { id: "custom", label: "Custom", shortLabel: "Custom", color: "#0891b2", rate: 1 },
 ];
+
+const PLAN_AREA_CUSTOM_USAGE_ID: PlanAreaUsageId = "custom";
 
 const planAreaSheetSizes: Record<PlanAreaSheetSize, { widthMm: number; heightMm: number }> = {
   A3: { widthMm: 420, heightMm: 297 },
@@ -1325,6 +1350,20 @@ function planAreaDraftKey(propertyId: string) {
 
 function planAreaUsageById(id: string) {
   return planAreaUsages.find((usage) => usage.id === id) ?? planAreaUsages[0];
+}
+
+function planAreaUsageForSelection(selection: PlanAreaDraftSelection) {
+  const usage = planAreaUsageById(selection.usageId);
+  if (selection.usageId !== PLAN_AREA_CUSTOM_USAGE_ID) {
+    return { ...usage, color: selection.color ?? usage.color };
+  }
+  const label = (selection.customUsageLabel ?? "").replace(/\s+/g, " ").trim() || usage.label;
+  return {
+    ...usage,
+    label,
+    shortLabel: label.length > 18 ? `${label.slice(0, 17)}...` : label,
+    color: selection.color ?? usage.color,
+  };
 }
 
 function planAreaSourceLabel(source?: PlanAreaDraftSelection["source"]) {
@@ -3722,7 +3761,7 @@ function PropertyAreaDetail({
   const rows = useMemo(() => {
     if (!draft) return [];
     return draft.selections.map((selection, index) => {
-      const usage = planAreaUsageById(selection.usageId);
+      const usage = planAreaUsageForSelection(selection);
       const rate = selection.rate ?? usage.rate;
       const area = planAreaFromPixels(selection, draft);
       return {
@@ -3754,15 +3793,16 @@ function PropertyAreaDetail({
   );
 
   const breakdown = useMemo(
-    () =>
-      planAreaUsages
-        .map((usage) => ({
-          usage,
-          area: rows
-            .filter((row) => row.usage.id === usage.id)
-            .reduce((sum, row) => sum + row.area, 0),
-        }))
-        .filter((item) => item.area > 0),
+    () => {
+      const byUsage = new Map<string, { usage: (typeof rows)[number]["usage"]; area: number }>();
+      rows.forEach((row) => {
+        const key = `${row.usage.id}:${row.usage.label}`;
+        const current = byUsage.get(key);
+        if (current) current.area += row.area;
+        else byUsage.set(key, { usage: row.usage, area: row.area });
+      });
+      return Array.from(byUsage.values()).filter((item) => item.area > 0);
+    },
     [rows],
   );
 
@@ -3907,7 +3947,7 @@ function PropertyAreaDetail({
           {breakdown.length > 0 && (
             <div className="property-area-breakdown" aria-label="Ripartizione aree">
               {breakdown.map(({ usage, area }) => (
-                <span key={usage.id}>
+                <span key={`${usage.id}-${usage.label}`}>
                   <i style={{ background: usage.color }} />
                   <strong>{usage.shortLabel}</strong>
                   {formatM2(area)}

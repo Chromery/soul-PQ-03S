@@ -55,7 +55,18 @@ type UsageId =
   | "tettoie"
   | "sistemazione-esterna"
   | "verde"
-  | "lotto";
+  | "lotto"
+  | "interrato"
+  | "parcheggio-interrato"
+  | "parcheggio-esterno"
+  | "custom";
+type UsageDefinition = {
+  id: UsageId;
+  label: string;
+  shortLabel: string;
+  color: string;
+  rate: number;
+};
 type EditorTool = "select" | "smart" | "polygon" | "ruler";
 type LegacyEditorTool = EditorTool | "calibrate";
 type SelectionSource = "smart" | "polygon" | "merged" | "copy";
@@ -154,6 +165,7 @@ type AreaSelection = {
   id: string;
   page: number;
   usageId: UsageId;
+  customUsageLabel?: string;
   color: string;
   opacity: number;
   rate: number;
@@ -173,6 +185,8 @@ type SavedSelection = {
   id: string;
   page: number;
   usageId: UsageId;
+  customUsageLabel?: string;
+  color?: string;
   rate?: number;
   opacity: number;
   totalPixels: number;
@@ -225,6 +239,7 @@ type SavedDraft = {
   aiScaleDetectedAt?: string | null;
   pageRotations?: Record<string, PageRotation>;
   activeUsage: UsageId;
+  customUsageLabel?: string;
   opacityPercent: number;
   threshold: number;
   inflate: number;
@@ -288,6 +303,8 @@ type SelectedPolygonVertex = {
 
 type ClipboardSelection = {
   usageId: UsageId;
+  customUsageLabel?: string;
+  color: string;
   opacity: number;
   rate: number;
   totalPixels: number;
@@ -332,6 +349,7 @@ type EditorSnapshot = {
   aiScale: AiScaleState;
   pageRotations: Map<number, PageRotation>;
   activeUsage: UsageId;
+  customUsageLabel: string;
   opacityPercent: number;
   threshold: number;
   inflate: number;
@@ -359,13 +377,7 @@ type PlanimetriaEditorProps = {
   onDirtyChange?: (dirty: boolean) => void;
 };
 
-const USAGES: Array<{
-  id: UsageId;
-  label: string;
-  shortLabel: string;
-  color: string;
-  rate: number;
-}> = [
+const USAGES: UsageDefinition[] = [
   { id: "capannone", label: "Capannone", shortLabel: "Capannone", color: "#0d6efd", rate: 7.2 },
   { id: "uffici", label: "Uffici", shortLabel: "Uffici", color: "#7c3aed", rate: 12.4 },
   { id: "tettoie", label: "Tettoie", shortLabel: "Tettoie", color: "#f59e0b", rate: 3.1 },
@@ -378,7 +390,25 @@ const USAGES: Array<{
   },
   { id: "verde", label: "Verde", shortLabel: "Verde", color: "#0f766e", rate: 0.4 },
   { id: "lotto", label: "Lotto", shortLabel: "Lotto", color: "#64748b", rate: 0.2 },
+  { id: "interrato", label: "Interrato", shortLabel: "Interrato", color: "#334155", rate: 4.5 },
+  {
+    id: "parcheggio-interrato",
+    label: "Parcheggio interrato",
+    shortLabel: "P. interrato",
+    color: "#475569",
+    rate: 3,
+  },
+  {
+    id: "parcheggio-esterno",
+    label: "Parcheggio esterno",
+    shortLabel: "P. esterno",
+    color: "#0284c7",
+    rate: 1.2,
+  },
+  { id: "custom", label: "Custom", shortLabel: "Custom", color: "#0891b2", rate: 1 },
 ];
+
+const CUSTOM_USAGE_ID: UsageId = "custom";
 
 const DRAFT_KEY_PREFIX = "soul-planimetria-draft:";
 const PANEL_STORAGE_KEYS = {
@@ -493,6 +523,21 @@ function createRuntime(): Runtime {
 
 function usageById(id: UsageId) {
   return USAGES.find((usage) => usage.id === id) ?? USAGES[0];
+}
+
+function usageWithCustomLabel(usageId: UsageId, customUsageLabel?: string): UsageDefinition {
+  const usage = usageById(usageId);
+  if (usageId !== CUSTOM_USAGE_ID) return usage;
+  const label = normalizeCustomUsageLabel(customUsageLabel) || usage.label;
+  return {
+    ...usage,
+    label,
+    shortLabel: label.length > 18 ? `${label.slice(0, 17)}...` : label,
+  };
+}
+
+function normalizeCustomUsageLabel(value?: string) {
+  return (value ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
 }
 
 function rgba(hex: string, alpha: number) {
@@ -722,6 +767,7 @@ export default function PlanimetriaEditor({
   const [pageCount, setPageCount] = useState(0);
   const [canvasPixels, setCanvasPixels] = useState("0 x 0");
   const [activeUsage, setActiveUsage] = useState<UsageId>("capannone");
+  const [customUsageLabel, setCustomUsageLabel] = useState("");
   const [scaleDenominator, setScaleDenominator] = useState(500);
   const [sheetSize, setSheetSize] = useState<SheetSize>("A3");
   const [scaleSource, setScaleSource] = useState<ScaleSource>("DEFAULT");
@@ -784,7 +830,7 @@ export default function PlanimetriaEditor({
         : null,
     [property.documentUrls?.planimetria, property.documents.planimetria],
   );
-  const activeUsageOption = usageById(activeUsage);
+  const activeUsageOption = usageWithCustomLabel(activeUsage, customUsageLabel);
   const hasPdf = pageCount > 0;
   const selections = hasPdf ? currentSelections() : [];
   const allSelections = hasPdf
@@ -805,7 +851,10 @@ export default function PlanimetriaEditor({
   const selectedAreas = useMemo(
     () =>
       allSelections.map((selection, index) => {
-        const usage = usageById(selection.usageId);
+        const usage = {
+          ...usageWithCustomLabel(selection.usageId, selection.customUsageLabel),
+          color: selection.color,
+        };
         const area = areaFromPixels(
           selection.region.count,
           selection.totalPixels,
@@ -832,6 +881,17 @@ export default function PlanimetriaEditor({
       },
       { area: 0, amount: 0 },
     );
+  }, [selectedAreas]);
+
+  const usageBreakdown = useMemo(() => {
+    const byUsage = new Map<string, { usage: UsageDefinition; area: number }>();
+    selectedAreas.forEach((area) => {
+      const key = `${area.usage.id}:${area.selection.customUsageLabel ?? ""}`;
+      const current = byUsage.get(key);
+      if (current) current.area += area.area;
+      else byUsage.set(key, { usage: area.usage, area: area.area });
+    });
+    return Array.from(byUsage.values()).filter((item) => item.area > 0);
   }, [selectedAreas]);
   const rulerDistanceMeters = rulerSegment ? segmentMetersFromScale(rulerSegment) : 0;
   const allAreasCollapsed = selectedAreas.length > 0 && collapsedAreaIds.length === selectedAreas.length;
@@ -953,15 +1013,15 @@ export default function PlanimetriaEditor({
       }
 
       if (!modifier) {
-        const usageShortcutIndex = /^[1-6]$/.test(key) ? Number(key) - 1 : -1;
+        const usageShortcutIndex = /^[1-9]$/.test(key) ? Number(key) - 1 : -1;
         if (
           usageShortcutIndex >= 0 &&
+          usageShortcutIndex < USAGES.length - 1 &&
           (activeTool === "select" || activeTool === "smart" || activeTool === "polygon")
         ) {
           event.preventDefault();
           const usage = USAGES[usageShortcutIndex];
           changeActiveUsage(usage.id);
-          setStatus(`Destinazione d'uso: ${usage.label}`);
           return;
         }
         if (key === "v") selectTool("select");
@@ -992,7 +1052,7 @@ export default function PlanimetriaEditor({
     window.addEventListener("keydown", handleKeyboard);
     return () => window.removeEventListener("keydown", handleKeyboard);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSelectionIds, selectedPolygonVertex, clipboardCount, currentPage, hasPdf, revision, focusMode, activeTool, activeUsage, zoomPercent, busy]);
+  }, [selectedSelectionIds, selectedPolygonVertex, clipboardCount, currentPage, hasPdf, revision, focusMode, activeTool, activeUsage, customUsageLabel, zoomPercent, busy]);
 
   useEffect(() => {
     const shell = canvasShellRef.current;
@@ -1055,6 +1115,7 @@ export default function PlanimetriaEditor({
       setSavedAt(draft?.savedAt ?? "");
 
       if (!draft) {
+        setCustomUsageLabel("");
         applyPropertyScaleFallback();
         if (linkedRemotePlan) {
           void loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName, undefined, true);
@@ -1070,6 +1131,7 @@ export default function PlanimetriaEditor({
       const draftAiScale = aiScaleFromDraft(draft);
       setAiScale(draftAiScale.denominator ? draftAiScale : aiScaleFromProperty(property));
       setActiveUsage(draft.activeUsage);
+      setCustomUsageLabel(draft.customUsageLabel ?? "");
       setOpacityPercent(draft.opacityPercent);
       setThreshold(draft.threshold);
       setInflate(draft.inflate);
@@ -1434,7 +1496,7 @@ export default function PlanimetriaEditor({
   async function restoreDraftSelections(draft: SavedDraft) {
     const restored = new Map<number, AreaSelection[]>();
     for (const saved of draft.selections) {
-      const usage = usageById(saved.usageId);
+      const usage = usageWithCustomLabel(saved.usageId, saved.customUsageLabel);
       const alphaCanvas = await canvasFromDataUrl(
         saved.region.alphaDataUrl,
         saved.region.width,
@@ -1452,12 +1514,13 @@ export default function PlanimetriaEditor({
         id: saved.id,
         page: saved.page,
         usageId: saved.usageId,
-        color: usage.color,
+        customUsageLabel: saved.customUsageLabel,
+        color: saved.color ?? usage.color,
         rate: saved.rate ?? usage.rate,
         opacity: saved.opacity,
         totalPixels: saved.totalPixels,
         region,
-        bitmap: createTintedCanvas(region, usage.color, saved.opacity),
+        bitmap: createTintedCanvas(region, saved.color ?? usage.color, saved.opacity),
         source: saved.source ?? "smart",
         polygon: saved.polygon,
       };
@@ -1481,6 +1544,8 @@ export default function PlanimetriaEditor({
         id: selection.id,
         page: selection.page,
         usageId: selection.usageId,
+        customUsageLabel: selection.customUsageLabel,
+        color: selection.color,
         rate: selection.rate,
         opacity: selection.opacity,
         totalPixels: selection.totalPixels,
@@ -1511,6 +1576,7 @@ export default function PlanimetriaEditor({
       aiScaleDetectedAt: aiScale.detectedAt,
       pageRotations: serializePageRotations(runtimeRef.current.pageRotations),
       activeUsage,
+      customUsageLabel,
       opacityPercent,
       threshold,
       inflate,
@@ -2800,6 +2866,7 @@ export default function PlanimetriaEditor({
       aiScale: { ...aiScale },
       pageRotations: new Map(runtimeRef.current.pageRotations),
       activeUsage,
+      customUsageLabel,
       opacityPercent,
       threshold,
       inflate,
@@ -2860,6 +2927,7 @@ export default function PlanimetriaEditor({
     const restoredRotation = snapshot.pageRotations.get(runtimeRef.current.currentPage) ?? 0;
     runtimeRef.current.pageRotations = new Map(snapshot.pageRotations);
     setActiveUsage(snapshot.activeUsage);
+    setCustomUsageLabel(snapshot.customUsageLabel);
     setOpacityPercent(snapshot.opacityPercent);
     setThreshold(snapshot.threshold);
     setInflate(snapshot.inflate);
@@ -2911,10 +2979,17 @@ export default function PlanimetriaEditor({
     opacity: number,
     source: SelectionSource = "smart",
     polygon?: CanvasPoint[],
-    options: { recordHistory?: boolean; select?: boolean; rate?: number } = {},
+    options: { recordHistory?: boolean; select?: boolean; rate?: number; customUsageLabel?: string; color?: string } = {},
   ) {
-    const usage = usageById(usageId);
+    const customLabel = usageId === CUSTOM_USAGE_ID ? normalizeCustomUsageLabel(options.customUsageLabel ?? customUsageLabel) : undefined;
+    if (usageId === CUSTOM_USAGE_ID && !customLabel) {
+      setStatus("Inserisci il nome della destinazione custom");
+      bumpRevision();
+      return null;
+    }
+    const usage = usageWithCustomLabel(usageId, customLabel);
     const rate = options.rate ?? usage.rate;
+    const color = options.color ?? usage.color;
     const selectionsForPage = currentSelections();
     const duplicateIndex = selectionsForPage.findIndex((selection) => sameRegion(selection.region, region));
     const shouldRecord = options.recordHistory !== false;
@@ -2924,11 +2999,12 @@ export default function PlanimetriaEditor({
       if (shouldRecord) recordUndoState();
       const selection = selectionsForPage[duplicateIndex];
       selection.usageId = usageId;
-      selection.color = usage.color;
+      selection.customUsageLabel = customLabel;
+      selection.color = color;
       selection.rate = rate;
       selection.opacity = opacity;
       selection.region = region;
-      selection.bitmap = createTintedCanvas(region, usage.color, opacity);
+      selection.bitmap = createTintedCanvas(region, color, opacity);
       selection.source = source;
       selection.polygon = polygon;
       redrawMasks();
@@ -2945,12 +3021,13 @@ export default function PlanimetriaEditor({
       id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
       page: runtimeRef.current.currentPage,
       usageId,
-      color: usage.color,
+      customUsageLabel: customLabel,
+      color,
       rate,
       opacity,
       totalPixels: getCanvasTotalPixels(),
       region,
-      bitmap: createTintedCanvas(region, usage.color, opacity),
+      bitmap: createTintedCanvas(region, color, opacity),
       source,
       polygon,
     };
@@ -3318,6 +3395,7 @@ export default function PlanimetriaEditor({
   async function fillAtCanvasPoint(x: number, y: number, appendToSelection = false) {
     const runtime = runtimeRef.current;
     if (!runtime.pdfDoc || runtime.animating) return;
+    if (!canUseActiveUsage()) return;
     setEditorBusy(true);
     setStatus("Tracciamento area");
     await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -3428,12 +3506,19 @@ export default function PlanimetriaEditor({
   }
 
   function changeSelectionUsage(id: string, usageId: UsageId) {
-    const usage = usageById(usageId);
+    const customLabel = usageId === CUSTOM_USAGE_ID ? normalizeCustomUsageLabel(customUsageLabel) : undefined;
+    if (usageId === CUSTOM_USAGE_ID && !customLabel) {
+      setStatus("Inserisci il nome della destinazione custom");
+      bumpRevision();
+      return;
+    }
+    const usage = usageWithCustomLabel(usageId, customLabel);
     for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
       const selection = pageSelections.find((item) => item.id === id);
       if (!selection) continue;
       recordUndoState();
       selection.usageId = usageId;
+      selection.customUsageLabel = customLabel;
       selection.color = usage.color;
       selection.rate = usage.rate;
       selection.bitmap = createTintedCanvas(selection.region, usage.color, selection.opacity);
@@ -3954,6 +4039,8 @@ export default function PlanimetriaEditor({
     if (source.length === 0) return;
     clipboardRef.current = source.map((selection) => ({
       usageId: selection.usageId,
+      customUsageLabel: selection.customUsageLabel,
+      color: selection.color,
       opacity: selection.opacity,
       rate: selection.rate,
       totalPixels: selection.totalPixels,
@@ -3979,19 +4066,21 @@ export default function PlanimetriaEditor({
     const pastedIds: string[] = [];
     const pageSelections = currentSelections();
     clipboardRef.current.forEach((item) => {
-      const usage = usageById(item.usageId);
+      const usage = usageWithCustomLabel(item.usageId, item.customUsageLabel);
+      const color = item.color ?? usage.color;
       const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
       const region = cloneRegion(item.region, dx, dy);
       const selection: AreaSelection = {
         id,
         page: runtimeRef.current.currentPage,
         usageId: item.usageId,
-        color: usage.color,
+        customUsageLabel: item.customUsageLabel,
+        color,
         rate: item.rate,
         opacity: item.opacity,
         totalPixels: getCanvasTotalPixels(),
         region,
-        bitmap: createTintedCanvas(region, usage.color, item.opacity),
+        bitmap: createTintedCanvas(region, color, item.opacity),
         source: "copy",
         polygon: item.polygon?.map((point) => translatePoint(point, dx, dy)),
       };
@@ -4051,6 +4140,7 @@ export default function PlanimetriaEditor({
     removeSelectionsFromCurrentPage(new Set(selected.map((selection) => selection.id)));
     const mergedId = commitSelection(mergedRegion, activeUsage, opacity, "merged", undefined, {
       recordHistory: false,
+      customUsageLabel,
     });
     if (mergedId) setSelectedSelectionIds([mergedId]);
     setStatus(`${selected.length + 1} aree unite con Smart Selection`);
@@ -4078,6 +4168,8 @@ export default function PlanimetriaEditor({
     const mergedId = commitSelection(region, first.usageId, first.opacity, "merged", undefined, {
       recordHistory: false,
       rate: first.rate,
+      customUsageLabel: first.customUsageLabel,
+      color: first.color,
     });
     if (mergedId) setSelectedSelectionIds([mergedId]);
     setStatus(`${selected.length} aree unite`);
@@ -4210,6 +4302,7 @@ export default function PlanimetriaEditor({
     }
 
     if (activeTool === "polygon") {
+      if (!canUseActiveUsage()) return;
       const firstPoint = polygonDraft[0];
       const closeThreshold = Math.max(12, Math.round(12 * runtimeRef.current.renderScale));
       if (firstPoint && polygonDraft.length >= 3 && distance(point, firstPoint) <= closeThreshold) {
@@ -4746,6 +4839,12 @@ export default function PlanimetriaEditor({
     if (usageId === activeUsage) return;
     recordUndoState();
     setActiveUsage(usageId);
+    const usage = usageWithCustomLabel(usageId, customUsageLabel);
+    setStatus(
+      usageId === CUSTOM_USAGE_ID && !normalizeCustomUsageLabel(customUsageLabel)
+        ? "Inserisci il nome della destinazione custom"
+        : `Destinazione d'uso: ${usage.label}`,
+    );
     markDirty();
   }
 
@@ -4834,6 +4933,13 @@ export default function PlanimetriaEditor({
     runtimeRef.current.wallKey = "";
     setStatus(nextStatus);
     bumpRevision();
+  }
+
+  function canUseActiveUsage() {
+    if (activeUsage !== CUSTOM_USAGE_ID || normalizeCustomUsageLabel(customUsageLabel)) return true;
+    setStatus("Inserisci il nome della destinazione custom");
+    bumpRevision();
+    return false;
   }
 
   function selectTool(tool: EditorTool) {
@@ -4953,20 +5059,37 @@ export default function PlanimetriaEditor({
               <ChevronDown className="tool-block-chevron" size={16} />
             </button>
             {!collapsedSections.usage && (
-              <div className="usage-grid">
-                {USAGES.map((usage, index) => (
-                  <button
-                    key={usage.id}
-                    className={`usage-button ${activeUsage === usage.id ? "active" : ""}`}
-                    style={{ "--usage-color": usage.color } as CSSProperties}
-                    title={`${index + 1} - ${usage.label}`}
-                    onClick={() => changeActiveUsage(usage.id)}
-                  >
-                    <span />
-                    {usage.label}
-                  </button>
-                ))}
-              </div>
+              <>
+                <div className="usage-grid">
+                  {USAGES.filter((usage) => usage.id !== CUSTOM_USAGE_ID).map((usage, index) => (
+                    <button
+                      key={usage.id}
+                      className={`usage-button ${activeUsage === usage.id ? "active" : ""}`}
+                      style={{ "--usage-color": usage.color } as CSSProperties}
+                      title={`${index + 1} - ${usage.label}`}
+                      onClick={() => changeActiveUsage(usage.id)}
+                    >
+                      <span />
+                      {usage.label}
+                    </button>
+                  ))}
+                </div>
+                <label className={`custom-usage-field ${activeUsage === CUSTOM_USAGE_ID ? "active" : ""}`}>
+                  <span>Destinazione custom</span>
+                  <input
+                    type="text"
+                    value={customUsageLabel}
+                    placeholder="Es. cabina elettrica"
+                    onChange={(event) => {
+                      const nextLabel = event.target.value;
+                      setCustomUsageLabel(nextLabel);
+                      setActiveUsage(CUSTOM_USAGE_ID);
+                      markDirty();
+                    }}
+                    onFocus={() => setActiveUsage(CUSTOM_USAGE_ID)}
+                  />
+                </label>
+              </>
             )}
           </section>
 
@@ -5519,7 +5642,9 @@ export default function PlanimetriaEditor({
                               >
                                 {USAGES.map((usageOption) => (
                                   <option key={usageOption.id} value={usageOption.id}>
-                                    {usageOption.label}
+                                    {usageOption.id === CUSTOM_USAGE_ID && selection.customUsageLabel
+                                      ? `Custom: ${selection.customUsageLabel}`
+                                      : usageOption.label}
                                   </option>
                                 ))}
                               </select>
@@ -5599,18 +5724,13 @@ export default function PlanimetriaEditor({
               <ChevronDown size={16} />
             </button>
             {!collapsedRightSections.breakdown &&
-              USAGES.map((usage) => {
-                const usageArea = selectedAreas
-                  .filter((area) => area.usage.id === usage.id)
-                  .reduce((sum, area) => sum + area.area, 0);
-                return (
-                  <div key={usage.id} className="usage-breakdown-row">
-                    <span style={{ background: usage.color }} />
-                    <strong>{usage.shortLabel}</strong>
-                    <em>{formatCompactM2(usageArea)}</em>
-                  </div>
-                );
-              })}
+              usageBreakdown.map(({ usage, area }) => (
+                <div key={`${usage.id}-${usage.shortLabel}`} className="usage-breakdown-row">
+                  <span style={{ background: usage.color }} />
+                  <strong>{usage.shortLabel}</strong>
+                  <em>{formatCompactM2(area)}</em>
+                </div>
+              ))}
           </section>
           </aside>
         )}

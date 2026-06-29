@@ -37,7 +37,7 @@ Services:
 | PostgreSQL backups | `backups/postgres/*.dump` | Daily custom-format `pg_dump` files |
 
 The API container runs `prisma migrate deploy` and the idempotent Prisma seed before starting NestJS.
-The backup container creates one dump on startup and then every `BACKUP_INTERVAL_SECONDS` seconds, with retention controlled by `BACKUP_RETENTION_DAYS`.
+The backup container creates a dump every day at `BACKUP_TIME_LOCAL` in `BACKUP_TZ`, with local retention controlled by `BACKUP_RETENTION_DAYS`. Each dump is uploaded to the configured B2/S3 bucket under `BACKUP_REMOTE_PREFIX`.
 
 ## Database Model
 
@@ -79,6 +79,7 @@ Prisma reads the root `.env`. If `DATABASE_URL` is omitted, local scripts derive
 ## Backups
 
 Backups are stored outside Git in `backups/postgres`.
+They are also uploaded daily to B2/S3. The job runs even if no data changes are detected, because the DB is small and predictable daily restore points are safer than change detection.
 
 List available dumps:
 
@@ -90,6 +91,12 @@ Restore a dump manually:
 
 ```sh
 docker compose exec -T postgres pg_restore -U soul -d soul_pq --clean --if-exists < backups/postgres/soul_pq-YYYYMMDDTHHMMSSZ.dump
+```
+
+Run and upload one backup immediately:
+
+```sh
+docker compose run --rm -e BACKUP_ONCE=true postgres-backup
 ```
 
 ## Integration Boundary

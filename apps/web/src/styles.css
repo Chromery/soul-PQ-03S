@@ -3093,6 +3093,41 @@ a.button {
   box-shadow: inset 3px 0 0 var(--usage-color);
 }
 
+.custom-usage-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.custom-usage-field span {
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.custom-usage-field input {
+  min-height: 36px;
+  width: 100%;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: #173154;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.custom-usage-field input:focus {
+  outline: 2px solid rgba(13, 110, 253, 0.16);
+  border-color: #b8d7ff;
+}
+
+.custom-usage-field.active input {
+  border-color: #8ddbe8;
+  box-shadow: inset 3px 0 0 #0891b2;
+}
+
 .scale-field {
   display: grid;
   gap: 8px;

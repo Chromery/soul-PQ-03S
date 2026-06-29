@@ -246,7 +246,9 @@ npm run preview
 
 The root `.env` is the only environment file used by Docker Compose, the API, Prisma, seeds, and import scripts. `apps/api/.env` is obsolete and ignored if it still exists locally.
 
-Compose also starts `postgres-backup`, which creates a PostgreSQL custom-format dump in `backups/postgres` on startup and then every `BACKUP_INTERVAL_SECONDS` seconds. The default is daily with `BACKUP_RETENTION_DAYS=14`.
+Compose also starts `postgres-backup`, which creates a PostgreSQL custom-format dump in `backups/postgres` every day at `BACKUP_TIME_LOCAL` in `BACKUP_TZ`. The default is `03:00` Europe/Rome with `BACKUP_RETENTION_DAYS=14`.
+
+Every dump is also uploaded to the configured B2/S3 bucket under `BACKUP_REMOTE_PREFIX`. The backup runs every day regardless of detected changes: the database is small, the cost is negligible, and this avoids fragile change-detection logic.
 
 List available backups:
 
@@ -258,6 +260,12 @@ Restore a dump manually:
 
 ```sh
 docker compose exec -T postgres pg_restore -U soul -d soul_pq --clean --if-exists < backups/postgres/soul_pq-YYYYMMDDTHHMMSSZ.dump
+```
+
+Run and upload one backup immediately for verification:
+
+```sh
+docker compose run --rm -e BACKUP_ONCE=true postgres-backup
 ```
 
 ## Notes

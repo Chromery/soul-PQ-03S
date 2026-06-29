@@ -19,14 +19,24 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   postgres-backup:
-    image: postgres:17-alpine
+    build:
+      context: .
+      dockerfile: docker/postgres-backup/Dockerfile
     restart: unless-stopped
     environment:
+      TZ: ${BACKUP_TZ:-Europe/Rome}
       POSTGRES_DB: ${POSTGRES_DB:-soul_pq}
       POSTGRES_USER: ${POSTGRES_USER:-soul}
       PGPASSWORD: ${POSTGRES_PASSWORD:-soul_dev_password}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
-      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_TIME_LOCAL: ${BACKUP_TIME_LOCAL:-03:00}
+      BACKUP_REMOTE_PREFIX: ${BACKUP_REMOTE_PREFIX:-backups/postgres}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-us-west-004}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
     volumes:
       - ./backups/postgres:/backups
       - ./scripts/postgres-backup.sh:/usr/local/bin/postgres-backup.sh:ro
