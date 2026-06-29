@@ -3622,6 +3622,7 @@ function StudyDetail({
             draftState={activeAreaDraftState}
             onOpenEditor={() => onOpenEditor(activeProperty)}
             onOpenDocument={(type) => handleOpenDocument(activeProperty, type)}
+            onMissing={onNotice}
             onClose={() => setActivePropertyId(null)}
           />
         )}
@@ -3707,12 +3708,14 @@ function PropertyAreaDetail({
   draftState,
   onOpenEditor,
   onOpenDocument,
+  onMissing,
   onClose,
 }: {
   property: PropertyItem;
   draftState: PlanAreaDraftState;
   onOpenEditor: () => void;
   onOpenDocument: (type: PropertyDocumentKind) => void;
+  onMissing: (message: string) => void;
   onClose: () => void;
 }) {
   const draft = draftState.draft;
@@ -3769,7 +3772,8 @@ function PropertyAreaDetail({
       : draftState.source === "local"
         ? "Bozza locale"
         : "Nessuna bozza";
-  const primaryPriceList = property.priceLists?.[0];
+  const topPriceLists = property.priceLists?.slice(0, 5) ?? [];
+  const primaryPriceList = topPriceLists[0];
 
   return (
     <section className="property-area-detail" aria-label={`Lista aree ${property.address}`}>
@@ -3825,9 +3829,7 @@ function PropertyAreaDetail({
                 ? `Apri ${primaryPriceList.title}`
                 : "Nessun prezzario territoriale disponibile"
             }
-            onClick={() => {
-              if (primaryPriceList) window.open(primaryPriceList.downloadUrl, "_blank", "noopener,noreferrer");
-            }}
+            onClick={() => openPriceListDocument(primaryPriceList, onMissing)}
           >
             <ExternalLink size={14} />
             Prezzario
@@ -3837,21 +3839,34 @@ function PropertyAreaDetail({
           </button>
         </div>
       </div>
-      {property.priceLists && property.priceLists.length > 0 && (
-        <div className="property-price-list-strip" aria-label="Prezzari associati">
-          {property.priceLists.slice(0, 3).map((priceList) => (
-            <button
-              key={priceList.id}
-              type="button"
-              title={`${priceList.reason}${priceList.distanceKm ? ` - ${Math.round(priceList.distanceKm)} km` : ""}`}
-              onClick={() => window.open(priceList.downloadUrl, "_blank", "noopener,noreferrer")}
-            >
-              <ExternalLink size={14} />
-              <span>{priceList.territoryName}</span>
-              {priceList.year && <small>{priceList.year}</small>}
-            </button>
-          ))}
-        </div>
+      {topPriceLists.length > 0 && (
+        <section className="property-price-list-panel" aria-label="Prezzari rilevanti">
+          <div className="property-price-list-header">
+            <strong>Prezzari rilevanti</strong>
+          </div>
+          <div className="property-price-list-list">
+            {topPriceLists.map((priceList, index) => (
+              <button
+                key={priceList.id}
+                className={index === 0 ? "primary" : ""}
+                type="button"
+                title={`${priceList.reason}${priceList.distanceKm ? ` - ${Math.round(priceList.distanceKm)} km` : ""}`}
+                onClick={() => openPriceListDocument(priceList, onMissing)}
+              >
+                <span className="price-list-rank">{priceList.rank}</span>
+                <span className="price-list-copy">
+                  <strong>{priceList.territoryName}</strong>
+                  <small>
+                    {priceList.reason}
+                    {priceList.distanceKm ? ` - ${Math.round(priceList.distanceKm)} km` : ""}
+                  </small>
+                </span>
+                {priceList.year && <span className="price-list-year">{priceList.year}</span>}
+                <ExternalLink size={14} />
+              </button>
+            ))}
+          </div>
+        </section>
       )}
 
       {!draft && draftState.loading ? (

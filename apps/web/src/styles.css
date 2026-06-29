@@ -1544,36 +1544,126 @@ a.button {
   opacity: 0.55;
 }
 
-.property-price-list-strip {
-  display: flex;
-  flex-wrap: wrap;
+.property-price-list-panel {
+  display: grid;
   gap: 8px;
   margin: -8px 0 14px;
+  padding: 10px;
+  border: 1px solid #d8e6f7;
+  border-radius: 8px;
+  background: #f8fbff;
 }
 
-.property-price-list-strip button {
-  min-height: 32px;
-  display: inline-flex;
+.property-price-list-header,
+.editor-price-list-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.property-price-list-header strong,
+.editor-price-list-header strong {
+  color: #173154;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.property-price-list-header span,
+.editor-price-list-header span {
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.property-price-list-list,
+.editor-price-list-list {
+  display: grid;
+  gap: 6px;
+}
+
+.property-price-list-list button,
+.editor-price-list-list button {
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 7px;
-  padding: 0 10px;
+  gap: 8px;
+  padding: 6px 9px;
   border: 1px solid #d8e6f7;
   border-radius: 7px;
   color: #173154;
   background: #fff;
-  font-size: 12px;
-  font-weight: 800;
+  text-align: left;
 }
 
-.property-price-list-strip button:hover {
+.property-price-list-list button.primary,
+.editor-price-list-list button.primary {
+  min-height: 46px;
+  padding: 8px 10px;
+  border-color: #b8d7ff;
+  background: #fff;
+}
+
+.property-price-list-list button.primary .price-list-copy strong,
+.editor-price-list-list button.primary .price-list-copy strong {
+  font-size: 13px;
+}
+
+.property-price-list-list button.primary .price-list-rank,
+.editor-price-list-list button.primary .price-list-rank {
+  width: 26px;
+  height: 26px;
+}
+
+.property-price-list-list button:hover,
+.editor-price-list-list button:hover {
   color: var(--primary);
   border-color: #b8d7ff;
   background: #eef5ff;
 }
 
-.property-price-list-strip small {
+.price-list-rank {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--primary);
+  background: #eef5ff;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.price-list-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.price-list-copy strong,
+.price-list-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.price-list-copy strong {
+  color: #173154;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.price-list-copy small {
   color: var(--secondary);
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.price-list-year {
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: 850;
 }
 
 .empty-state {
@@ -3701,38 +3791,61 @@ a.button {
   overflow: hidden;
 }
 
-.price-list-button {
-  width: 100%;
-  min-height: 42px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.editor-price-list-dropdown {
+  display: grid;
   gap: 8px;
-  padding: 0 12px;
   border: 1px solid #d8e6f7;
   border-radius: 8px;
-  color: #173154;
   background: #fff;
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.editor-price-list-dropdown summary {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px;
+  cursor: pointer;
+  color: #173154;
   font-size: 13px;
   font-weight: 850;
-  text-align: center;
+  list-style: none;
 }
 
-.price-list-button svg {
-  flex: 0 0 auto;
-  color: var(--primary);
+.editor-price-list-dropdown summary::-webkit-details-marker {
+  display: none;
 }
 
-.price-list-button:hover,
-.price-list-button:focus-visible {
-  color: var(--primary);
-  border-color: #b8d7ff;
-  background: #eef5ff;
+.editor-price-list-dropdown .dropdown-chevron {
+  color: var(--secondary);
+  transition: transform 0.15s ease;
 }
 
-.price-list-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+.editor-price-list-dropdown[open] .dropdown-chevron {
+  transform: rotate(180deg);
+}
+
+.editor-price-list-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: #f8fbff;
+  border-top: 1px solid #d8e6f7;
+}
+
+.editor-price-list-list button {
+  grid-template-columns: 22px minmax(0, 1fr) auto auto;
+  padding: 6px 8px;
+}
+
+.editor-price-list-empty {
+  padding: 0 12px 12px;
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .right-panel-toggle {

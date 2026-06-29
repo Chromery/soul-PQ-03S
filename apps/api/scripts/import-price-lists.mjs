@@ -103,6 +103,9 @@ const TERRITORIES = [
 const PROVINCE_REGIONS = Object.fromEntries(
   TERRITORIES.filter((item) => item.provincia).map((item) => [item.provincia, item.region]),
 );
+const CITY_TERRITORIES = Object.fromEntries(
+  TERRITORIES.filter((item) => item.scope === "PROVINCIA").map((item) => [normalize(item.name), item]),
+);
 const CITY_COORDS = Object.fromEntries(
   TERRITORIES.filter((item) => item.scope === "PROVINCIA").map((item) => [normalize(item.name), { lat: item.lat, lon: item.lon }]),
 );
@@ -270,7 +273,7 @@ async function upsertPriceList(pool, priceList) {
 async function assignPriceLists(pool) {
   const { rows: priceLists } = await pool.query(`SELECT * FROM "PriceList"`);
   const { rows: properties } = await pool.query(
-    `SELECT p."id", p."comune", s."provincia", s."region"
+    `SELECT p."id", p."address", p."comune", s."provincia", s."region"
      FROM "Property" p
      JOIN "FeasibilityStudy" s ON s."id" = p."studyId"`,
   );
@@ -289,26 +292,23 @@ async function assignPriceLists(pool) {
 }
 
 function rankForProperty(property, priceLists) {
-  const comune = normalize(property.comune);
-  const provincia = normalize(property.provincia);
-  const region = normalize(property.region);
-  const propertyCoords = CITY_COORDS[comune] ?? REGION_COORDS[region];
+  const target = territoryForProperty(property);
   return priceLists
     .map((priceList) => {
       let score = 0;
       let reason = "";
       let distanceKm = null;
-      if (normalize(priceList.comune) === comune && comune) {
+      if (normalize(priceList.comune) === target.comune && target.comune) {
         score = 10000;
         reason = "Comune corrispondente";
-      } else if (normalize(priceList.provincia) === provincia && provincia) {
+      } else if (normalize(priceList.provincia) === target.provincia && target.provincia) {
         score = 8000;
         reason = "Provincia corrispondente";
-      } else if (normalize(priceList.region) === region && region) {
+      } else if (normalize(priceList.region) === target.region && target.region) {
         score = 6000;
         reason = "Regione corrispondente";
-      } else if (propertyCoords && priceList.latitude !== null && priceList.longitude !== null) {
-        distanceKm = haversineKm(propertyCoords, { lat: Number(priceList.latitude), lon: Number(priceList.longitude) });
+      } else if (target.coords && priceList.latitude !== null && priceList.longitude !== null) {
+        distanceKm = haversineKm(target.coords, { lat: Number(priceList.latitude), lon: Number(priceList.longitude) });
         score = Math.max(0, 3000 - distanceKm * 12);
         reason = "Territorio piu vicino";
       }
@@ -319,6 +319,33 @@ function rankForProperty(property, priceLists) {
     })
     .filter(Boolean)
     .sort((a, b) => b.score - a.score || (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+}
+
+function territoryForProperty(property) {
+  const comune = normalize(property.comune);
+  const cityTerritory = CITY_TERRITORIES[comune];
+  const addressProvince = provinceCodeFromAddress(property.address);
+  const provinceCode = cityTerritory?.provincia || addressProvince || normalizeProvinceCode(property.provincia);
+  const regionName = cityTerritory?.region || PROVINCE_REGIONS[provinceCode] || property.region;
+  const region = normalize(regionName);
+  return {
+    comune,
+    provincia: normalize(provinceCode),
+    region,
+    coords: cityTerritory
+      ? { lat: cityTerritory.lat, lon: cityTerritory.lon }
+      : CITY_COORDS[comune] ?? REGION_COORDS[region],
+  };
+}
+
+function provinceCodeFromAddress(address) {
+  const match = String(address ?? "").trim().match(/(?:^|[\s,(])([A-Z]{2})(?:[\s).,]*)$/);
+  return match ? match[1] : "";
+}
+
+function normalizeProvinceCode(value) {
+  const code = normalize(value).toUpperCase();
+  return /^[A-Z]{2}$/.test(code) ? code : "";
 }
 
 async function writeCatalog(imported) {

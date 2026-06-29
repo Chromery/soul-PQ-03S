@@ -72,10 +72,7 @@ type PriceListMatch = {
 };
 
 function rankPriceLists(property: PropertyWithStudy, priceLists: PriceList[]): PriceListMatch[] {
-  const propertyComune = normalizeTerritory(property.comune);
-  const propertyProvincia = normalizeTerritory(property.study.provincia);
-  const propertyRegion = normalizeTerritory(property.study.region);
-  const propertyCoords = coordinatesFor(property.comune, property.study.region);
+  const target = territoryForProperty(property);
 
   const matches: PriceListMatch[] = [];
   for (const priceList of priceLists) {
@@ -86,21 +83,21 @@ function rankPriceLists(property: PropertyWithStudy, priceLists: PriceList[]): P
     let reason = "";
     let distanceKm: number | undefined;
 
-    if (comune && comune === propertyComune) {
+    if (comune && comune === target.comune) {
       score = 10000;
       reason = "Comune corrispondente";
-    } else if (provincia && provincia === propertyProvincia) {
+    } else if (provincia && provincia === target.provincia) {
       score = 8000;
       reason = "Provincia corrispondente";
-    } else if (region && region === propertyRegion) {
+    } else if (region && region === target.region) {
       score = 6000;
       reason = "Regione corrispondente";
     } else if (
-      propertyCoords &&
+      target.coords &&
       typeof priceList.latitude === "number" &&
       typeof priceList.longitude === "number"
     ) {
-      distanceKm = haversineKm(propertyCoords, {
+      distanceKm = haversineKm(target.coords, {
         lat: priceList.latitude,
         lon: priceList.longitude,
       });
@@ -124,6 +121,22 @@ function rankPriceLists(property: PropertyWithStudy, priceLists: PriceList[]): P
     });
 }
 
+function territoryForProperty(property: PropertyWithStudy) {
+  const comune = normalizeTerritory(property.comune);
+  const cityTerritory = CITY_TERRITORIES[comune];
+  const addressProvince = provinceCodeFromAddress(property.address);
+  const province = cityTerritory?.provincia || addressProvince || normalizeProvinceCode(property.study.provincia);
+  const region = cityTerritory?.region ?? regionForProvince(province) ?? property.study.region;
+  const normalizedRegion = normalizeTerritory(region);
+
+  return {
+    comune,
+    provincia: normalizeTerritory(province),
+    region: normalizedRegion,
+    coords: cityTerritory?.coords ?? coordinatesFor(property.comune, normalizedRegion),
+  };
+}
+
 function normalizeTerritory(value?: string | null) {
   return (value ?? "")
     .normalize("NFD")
@@ -134,9 +147,23 @@ function normalizeTerritory(value?: string | null) {
 }
 
 function coordinatesFor(comune: string, region: string) {
-  const direct = CITY_COORDS[normalizeTerritory(comune)];
+  const direct = CITY_TERRITORIES[normalizeTerritory(comune)]?.coords;
   if (direct) return direct;
   return REGION_COORDS[normalizeTerritory(region)];
+}
+
+function normalizeProvinceCode(value?: string | null) {
+  const code = normalizeTerritory(value).toUpperCase();
+  return /^[A-Z]{2}$/.test(code) ? code : "";
+}
+
+function provinceCodeFromAddress(address?: string | null) {
+  const match = (address ?? "").trim().match(/(?:^|[\s,(])([A-Z]{2})(?:[\s).,]*)$/);
+  return match ? match[1] : "";
+}
+
+function regionForProvince(province?: string | null) {
+  return PROVINCE_REGIONS[normalizeProvinceCode(province)];
 }
 
 function haversineKm(a: Coordinates, b: Coordinates) {
@@ -157,21 +184,92 @@ function toRad(value: number) {
 
 type Coordinates = { lat: number; lon: number };
 
-const CITY_COORDS: Record<string, Coordinates> = {
-  milano: { lat: 45.4642, lon: 9.19 },
-  "sesto san giovanni": { lat: 45.533, lon: 9.2258 },
-  pero: { lat: 45.5105, lon: 9.087 },
-  bergamo: { lat: 45.6983, lon: 9.6773 },
-  torino: { lat: 45.0703, lon: 7.6869 },
-  treviso: { lat: 45.6669, lon: 12.243 },
-  roma: { lat: 41.9028, lon: 12.4964 },
-  napoli: { lat: 40.8518, lon: 14.2681 },
-  bologna: { lat: 44.4949, lon: 11.3426 },
-  genova: { lat: 44.4056, lon: 8.9463 },
-  firenze: { lat: 43.7696, lon: 11.2558 },
-  venezia: { lat: 45.4408, lon: 12.3155 },
-  padova: { lat: 45.4064, lon: 11.8768 },
-  verona: { lat: 45.4384, lon: 10.9916 },
+const CITY_TERRITORIES: Record<string, { provincia: string; region: string; coords: Coordinates }> = {
+  milano: { provincia: "MI", region: "Lombardia", coords: { lat: 45.4642, lon: 9.19 } },
+  "sesto san giovanni": { provincia: "MI", region: "Lombardia", coords: { lat: 45.533, lon: 9.2258 } },
+  pero: { provincia: "MI", region: "Lombardia", coords: { lat: 45.5105, lon: 9.087 } },
+  bergamo: { provincia: "BG", region: "Lombardia", coords: { lat: 45.6983, lon: 9.6773 } },
+  torino: { provincia: "TO", region: "Piemonte", coords: { lat: 45.0703, lon: 7.6869 } },
+  treviso: { provincia: "TV", region: "Veneto", coords: { lat: 45.6669, lon: 12.243 } },
+  roma: { provincia: "RM", region: "Lazio", coords: { lat: 41.9028, lon: 12.4964 } },
+  napoli: { provincia: "NA", region: "Campania", coords: { lat: 40.8518, lon: 14.2681 } },
+  bologna: { provincia: "BO", region: "Emilia-Romagna", coords: { lat: 44.4949, lon: 11.3426 } },
+  genova: { provincia: "GE", region: "Liguria", coords: { lat: 44.4056, lon: 8.9463 } },
+  firenze: { provincia: "FI", region: "Toscana", coords: { lat: 43.7696, lon: 11.2558 } },
+  venezia: { provincia: "VE", region: "Veneto", coords: { lat: 45.4408, lon: 12.3155 } },
+  padova: { provincia: "PD", region: "Veneto", coords: { lat: 45.4064, lon: 11.8768 } },
+  verona: { provincia: "VR", region: "Veneto", coords: { lat: 45.4384, lon: 10.9916 } },
+  bolzano: { provincia: "BZ", region: "Trentino-Alto Adige", coords: { lat: 46.4983, lon: 11.3548 } },
+};
+
+const PROVINCE_REGIONS: Record<string, string> = {
+  MI: "Lombardia",
+  BG: "Lombardia",
+  BS: "Lombardia",
+  CO: "Lombardia",
+  LC: "Lombardia",
+  LO: "Lombardia",
+  MN: "Lombardia",
+  PV: "Lombardia",
+  SO: "Lombardia",
+  VA: "Lombardia",
+  AL: "Piemonte",
+  CN: "Piemonte",
+  NO: "Piemonte",
+  TO: "Piemonte",
+  BL: "Veneto",
+  PD: "Veneto",
+  RO: "Veneto",
+  TV: "Veneto",
+  VE: "Veneto",
+  VR: "Veneto",
+  VI: "Veneto",
+  GO: "Friuli Venezia Giulia",
+  PN: "Friuli Venezia Giulia",
+  TS: "Friuli Venezia Giulia",
+  UD: "Friuli Venezia Giulia",
+  BO: "Emilia-Romagna",
+  FE: "Emilia-Romagna",
+  MO: "Emilia-Romagna",
+  PR: "Emilia-Romagna",
+  RE: "Emilia-Romagna",
+  AR: "Toscana",
+  FI: "Toscana",
+  GR: "Toscana",
+  LI: "Toscana",
+  LU: "Toscana",
+  MS: "Toscana",
+  PI: "Toscana",
+  PT: "Toscana",
+  PO: "Toscana",
+  SI: "Toscana",
+  AN: "Marche",
+  AP: "Marche",
+  MC: "Marche",
+  PU: "Marche",
+  PG: "Umbria",
+  TR: "Umbria",
+  LT: "Lazio",
+  RM: "Lazio",
+  TE: "Abruzzo",
+  CB: "Molise",
+  CE: "Campania",
+  NA: "Campania",
+  BA: "Puglia",
+  MT: "Basilicata",
+  PZ: "Basilicata",
+  RC: "Calabria",
+  AG: "Sicilia",
+  CL: "Sicilia",
+  CT: "Sicilia",
+  ME: "Sicilia",
+  PA: "Sicilia",
+  SR: "Sicilia",
+  CA: "Sardegna",
+  SS: "Sardegna",
+  BZ: "Trentino-Alto Adige",
+  GE: "Liguria",
+  SV: "Liguria",
 };
 
 const REGION_COORDS: Record<string, Coordinates> = {

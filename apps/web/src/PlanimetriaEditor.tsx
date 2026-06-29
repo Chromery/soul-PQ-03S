@@ -73,6 +73,18 @@ type EditorStudy = {
   company: string;
 };
 
+type EditorPriceList = {
+  id: string;
+  title: string;
+  territoryName: string;
+  territoryScope: string;
+  year?: number | null;
+  rank: number;
+  reason: string;
+  distanceKm?: number | null;
+  downloadUrl: string;
+};
+
 type EditorProperty = {
   id: string;
   address: string;
@@ -96,16 +108,7 @@ type EditorProperty = {
     planimetria?: string | null;
     visura?: string | null;
   };
-  priceLists?: Array<{
-    id: string;
-    title: string;
-    territoryName: string;
-    territoryScope: string;
-    year?: number | null;
-    reason: string;
-    distanceKm?: number | null;
-    downloadUrl: string;
-  }>;
+  priceLists?: EditorPriceList[];
 };
 
 type ScaleExtractionJob = {
@@ -741,6 +744,7 @@ export default function PlanimetriaEditor({
   const [savedAt, setSavedAt] = useState("");
   const [leftPanelOpen, setLeftPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.left));
   const [rightPanelOpen, setRightPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.right));
+  const [priceListDropdownOpen, setPriceListDropdownOpen] = useState(true);
   const [scaleModalOpen, setScaleModalOpen] = useState(false);
   const [scaleModalSheetSize, setScaleModalSheetSize] = useState<SheetSize>("A3");
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
@@ -854,6 +858,10 @@ export default function PlanimetriaEditor({
     window.localStorage.setItem(PANEL_STORAGE_KEYS.left, String(leftPanelOpen));
     window.localStorage.setItem(PANEL_STORAGE_KEYS.right, String(rightPanelOpen));
   }, [leftPanelOpen, rightPanelOpen]);
+
+  useEffect(() => {
+    setPriceListDropdownOpen(true);
+  }, [property.id]);
 
   useEffect(() => {
     setScaleInputValue(String(scaleDenominator));
@@ -4725,8 +4733,7 @@ export default function PlanimetriaEditor({
     setCollapsedAreaIds([]);
   }
 
-  function openPriceList() {
-    const priceList = property.priceLists?.[0];
+  function openPriceList(priceList: EditorPriceList | undefined = property.priceLists?.[0]) {
     if (!priceList?.downloadUrl) {
       setStatus(`Prezzario per ${property.comune} non ancora collegato`);
       return;
@@ -4848,6 +4855,8 @@ export default function PlanimetriaEditor({
     if (tool === "polygon") setStatus("Disegna i vertici del poligono");
     if (tool === "ruler") setStatus("Traccia una distanza tra due punti");
   }
+
+  const topPriceLists = property.priceLists?.slice(0, 5) ?? [];
 
   return (
     <main ref={editorRootRef} className={`plan-editor ${focusMode ? "focus-mode" : ""}`}>
@@ -5326,20 +5335,47 @@ export default function PlanimetriaEditor({
               <PanelRightClose size={18} />
             </button>
           </div>
-          <button
-            className="price-list-button"
-            type="button"
-            disabled={!property.priceLists?.[0]}
-            onClick={openPriceList}
-            title={
-              property.priceLists?.[0]
-                ? `Apri ${property.priceLists[0].title} in una nuova scheda`
-                : `Nessun prezzario collegato per ${property.comune}`
-            }
+          <details
+            className="editor-price-list-dropdown"
+            open={priceListDropdownOpen}
+            onToggle={(event) => setPriceListDropdownOpen(event.currentTarget.open)}
           >
-            <ExternalLink size={17} />
-            {property.priceLists?.[0] ? `Apri prezzario ${property.priceLists[0].territoryName}` : "Apri il prezzario"}
-          </button>
+            <summary>
+              <span>Prezzario</span>
+              <ChevronDown className="dropdown-chevron" size={16} />
+            </summary>
+            {topPriceLists.length > 0 ? (
+              <section className="editor-price-list-panel" aria-label="Prezzari rilevanti">
+                <div className="editor-price-list-header">
+                  <strong>Prezzari rilevanti</strong>
+                </div>
+                <div className="editor-price-list-list">
+                  {topPriceLists.map((priceList, index) => (
+                    <button
+                      key={priceList.id}
+                      className={index === 0 ? "primary" : ""}
+                      type="button"
+                      title={`${priceList.reason}${priceList.distanceKm ? ` - ${Math.round(priceList.distanceKm)} km` : ""}`}
+                      onClick={() => openPriceList(priceList)}
+                    >
+                      <span className="price-list-rank">{priceList.rank}</span>
+                      <span className="price-list-copy">
+                        <strong>{priceList.territoryName}</strong>
+                        <small>
+                          {priceList.reason}
+                          {priceList.distanceKm ? ` - ${Math.round(priceList.distanceKm)} km` : ""}
+                        </small>
+                      </span>
+                      {priceList.year && <span className="price-list-year">{priceList.year}</span>}
+                      <ExternalLink size={14} />
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : (
+              <div className="editor-price-list-empty">Nessun prezzario collegato per {property.comune}</div>
+            )}
+          </details>
           <section className={`area-totals ${collapsedRightSections.totals ? "collapsed" : ""}`}>
             <button className="right-panel-toggle" type="button" onClick={() => toggleRightPanelSection("totals")}>
               <span>Riepilogo superfici</span>
