@@ -50,7 +50,7 @@ const SMART_TRACE_DEFAULTS = {
   inflate: 1,
   gap: 3,
   dash: 42,
-  wallInclusionRadius: null as number | null,
+  wallInclusionRadius: 3 as number | null,
 };
 
 type PdfDocument = Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>;
@@ -1380,7 +1380,11 @@ export default function PlanimetriaEditor({
       setInflate(draft.inflate);
       setGap(draft.gap);
       setDash(draft.dash);
-      setWallInclusionRadius(normalizeWallInclusionRadius(draft.wallInclusionRadius));
+      setWallInclusionRadius(
+        Object.prototype.hasOwnProperty.call(draft, "wallInclusionRadius")
+          ? normalizeWallInclusionRadius(draft.wallInclusionRadius)
+          : SMART_TRACE_DEFAULTS.wallInclusionRadius,
+      );
       setActiveTool(normalizeEditorTool(draft.activeTool));
       setCalibration(draft.calibration ?? null);
       setKnownSegmentMeters(draft.calibration?.knownMeters ?? 50);
@@ -6114,8 +6118,10 @@ export default function PlanimetriaEditor({
                 <strong>Default attuali</strong>
                 <span>
                   Sensibilita {SMART_TRACE_DEFAULTS.threshold} · Spessore {SMART_TRACE_DEFAULTS.inflate} · Gap{" "}
-                  {SMART_TRACE_DEFAULTS.gap} · Tratteggi {SMART_TRACE_DEFAULTS.dash} · Bordo auto{" "}
-                  {autoWallInclusionRadius(SMART_TRACE_DEFAULTS.inflate, SMART_TRACE_DEFAULTS.dash)}px
+                  {SMART_TRACE_DEFAULTS.gap} · Tratteggi {SMART_TRACE_DEFAULTS.dash} · Bordo{" "}
+                  {SMART_TRACE_DEFAULTS.wallInclusionRadius === null
+                    ? `auto ${autoWallInclusionRadius(SMART_TRACE_DEFAULTS.inflate, SMART_TRACE_DEFAULTS.dash)}px`
+                    : `${SMART_TRACE_DEFAULTS.wallInclusionRadius}px`}
                 </span>
               </div>
               <div className="area-tuning-grid">
