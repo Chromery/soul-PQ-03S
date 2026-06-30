@@ -22,6 +22,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   PencilLine,
+  Plus,
   Redo2,
   RotateCcw,
   RotateCw,
@@ -64,6 +65,12 @@ type UsageDefinition = {
   id: UsageId;
   label: string;
   shortLabel: string;
+  color: string;
+  rate: number;
+};
+type CustomUsagePreset = {
+  id: string;
+  label: string;
   color: string;
   rate: number;
 };
@@ -165,6 +172,7 @@ type AreaSelection = {
   id: string;
   page: number;
   usageId: UsageId;
+  customUsageId?: string;
   customUsageLabel?: string;
   color: string;
   opacity: number;
@@ -185,6 +193,7 @@ type SavedSelection = {
   id: string;
   page: number;
   usageId: UsageId;
+  customUsageId?: string;
   customUsageLabel?: string;
   color?: string;
   rate?: number;
@@ -239,6 +248,8 @@ type SavedDraft = {
   aiScaleDetectedAt?: string | null;
   pageRotations?: Record<string, PageRotation>;
   activeUsage: UsageId;
+  activeCustomUsageId?: string | null;
+  customUsages?: CustomUsagePreset[];
   customUsageLabel?: string;
   opacityPercent: number;
   threshold: number;
@@ -303,6 +314,7 @@ type SelectedPolygonVertex = {
 
 type ClipboardSelection = {
   usageId: UsageId;
+  customUsageId?: string;
   customUsageLabel?: string;
   color: string;
   opacity: number;
@@ -349,6 +361,8 @@ type EditorSnapshot = {
   aiScale: AiScaleState;
   pageRotations: Map<number, PageRotation>;
   activeUsage: UsageId;
+  activeCustomUsageId: string | null;
+  customUsages: CustomUsagePreset[];
   customUsageLabel: string;
   opacityPercent: number;
   threshold: number;
@@ -409,6 +423,8 @@ const USAGES: UsageDefinition[] = [
 ];
 
 const CUSTOM_USAGE_ID: UsageId = "custom";
+const FIXED_USAGES = USAGES.filter((usage) => usage.id !== CUSTOM_USAGE_ID);
+const CUSTOM_USAGE_COLORS = ["#0891b2", "#0e7490", "#0f766e", "#2563eb", "#9333ea", "#be123c", "#ca8a04"];
 
 const DRAFT_KEY_PREFIX = "soul-planimetria-draft:";
 const PANEL_STORAGE_KEYS = {
@@ -525,19 +541,122 @@ function usageById(id: UsageId) {
   return USAGES.find((usage) => usage.id === id) ?? USAGES[0];
 }
 
-function usageWithCustomLabel(usageId: UsageId, customUsageLabel?: string): UsageDefinition {
-  const usage = usageById(usageId);
-  if (usageId !== CUSTOM_USAGE_ID) return usage;
-  const label = normalizeCustomUsageLabel(customUsageLabel) || usage.label;
-  return {
-    ...usage,
-    label,
-    shortLabel: label.length > 18 ? `${label.slice(0, 17)}...` : label,
-  };
+function shortCustomUsageLabel(label: string) {
+  return label.length > 18 ? `${label.slice(0, 17)}...` : label;
 }
 
 function normalizeCustomUsageLabel(value?: string) {
   return (value ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
+}
+
+function isHexColor(value?: string) {
+  return /^#[0-9a-f]{6}$/i.test(value ?? "");
+}
+
+function stableStringHash(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+function createCustomUsageId(label: string, index = 0) {
+  const slug =
+    normalizeCustomUsageLabel(label)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "area";
+  return `custom-${slug}-${stableStringHash(`${label}:${index}`)}`;
+}
+
+function nextCustomUsageLabel(presets: CustomUsagePreset[], base = "Custom") {
+  const normalizedBase = normalizeCustomUsageLabel(base) || "Custom";
+  const usedLabels = new Set(presets.map((preset) => preset.label.toLowerCase()));
+  if (!usedLabels.has(normalizedBase.toLowerCase())) return normalizedBase;
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${normalizedBase} ${index}`;
+    if (!usedLabels.has(candidate.toLowerCase())) return candidate;
+  }
+  return `${normalizedBase} ${Date.now()}`;
+}
+
+function normalizeCustomUsagePreset(
+  value: Partial<CustomUsagePreset> | undefined,
+  fallbackIndex: number,
+): CustomUsagePreset | null {
+  const label = normalizeCustomUsageLabel(value?.label);
+  if (!label) return null;
+  const color = isHexColor(value?.color)
+    ? value!.color!.toLowerCase()
+    : CUSTOM_USAGE_COLORS[fallbackIndex % CUSTOM_USAGE_COLORS.length];
+  const rate = typeof value?.rate === "number" && Number.isFinite(value.rate) ? value.rate : usageById(CUSTOM_USAGE_ID).rate;
+  return {
+    id: value?.id || createCustomUsageId(label, fallbackIndex),
+    label,
+    color,
+    rate,
+  };
+}
+
+function addCustomUsagePresetUnique(presets: CustomUsagePreset[], preset: CustomUsagePreset | null) {
+  if (!preset) return;
+  const hasSameId = presets.some((item) => item.id === preset.id);
+  const hasSameLabel = presets.some((item) => item.label.toLowerCase() === preset.label.toLowerCase());
+  if (!hasSameId && !hasSameLabel) presets.push(preset);
+}
+
+function customUsagesFromDraft(draft: Pick<SavedDraft, "customUsages" | "customUsageLabel" | "selections">) {
+  const presets: CustomUsagePreset[] = [];
+  draft.customUsages?.forEach((preset, index) => {
+    addCustomUsagePresetUnique(presets, normalizeCustomUsagePreset(preset, index));
+  });
+  draft.selections.forEach((selection, index) => {
+    if (selection.usageId !== CUSTOM_USAGE_ID) return;
+    addCustomUsagePresetUnique(
+      presets,
+      normalizeCustomUsagePreset(
+        {
+          id: selection.customUsageId,
+          label: selection.customUsageLabel,
+          color: selection.color,
+          rate: selection.rate,
+        },
+        presets.length + index,
+      ),
+    );
+  });
+  addCustomUsagePresetUnique(
+    presets,
+    normalizeCustomUsagePreset({ label: draft.customUsageLabel }, presets.length),
+  );
+  return presets;
+}
+
+function customUsageByIdOrLabel(
+  presets: CustomUsagePreset[],
+  customUsageId?: string | null,
+  customUsageLabel?: string,
+) {
+  if (customUsageId) {
+    const byId = presets.find((preset) => preset.id === customUsageId);
+    if (byId) return byId;
+  }
+  const label = normalizeCustomUsageLabel(customUsageLabel);
+  if (!label) return null;
+  return presets.find((preset) => preset.label.toLowerCase() === label.toLowerCase()) ?? null;
+}
+
+function usageFromCustomPreset(preset: CustomUsagePreset | null | undefined, fallbackLabel?: string): UsageDefinition {
+  const customUsage = usageById(CUSTOM_USAGE_ID);
+  const label = normalizeCustomUsageLabel(preset?.label ?? fallbackLabel) || customUsage.label;
+  return {
+    ...customUsage,
+    label,
+    shortLabel: shortCustomUsageLabel(label),
+    color: preset?.color ?? customUsage.color,
+    rate: preset?.rate ?? customUsage.rate,
+  };
 }
 
 function rgba(hex: string, alpha: number) {
@@ -767,6 +886,8 @@ export default function PlanimetriaEditor({
   const [pageCount, setPageCount] = useState(0);
   const [canvasPixels, setCanvasPixels] = useState("0 x 0");
   const [activeUsage, setActiveUsage] = useState<UsageId>("capannone");
+  const [activeCustomUsageId, setActiveCustomUsageId] = useState<string | null>(null);
+  const [customUsages, setCustomUsages] = useState<CustomUsagePreset[]>([]);
   const [customUsageLabel, setCustomUsageLabel] = useState("");
   const [scaleDenominator, setScaleDenominator] = useState(500);
   const [sheetSize, setSheetSize] = useState<SheetSize>("A3");
@@ -830,7 +951,11 @@ export default function PlanimetriaEditor({
         : null,
     [property.documentUrls?.planimetria, property.documents.planimetria],
   );
-  const activeUsageOption = usageWithCustomLabel(activeUsage, customUsageLabel);
+  const activeCustomUsage = customUsageByIdOrLabel(customUsages, activeCustomUsageId, customUsageLabel);
+  const activeUsageOption =
+    activeUsage === CUSTOM_USAGE_ID
+      ? usageFromCustomPreset(activeCustomUsage, customUsageLabel)
+      : usageById(activeUsage);
   const hasPdf = pageCount > 0;
   const selections = hasPdf ? currentSelections() : [];
   const allSelections = hasPdf
@@ -851,8 +976,15 @@ export default function PlanimetriaEditor({
   const selectedAreas = useMemo(
     () =>
       allSelections.map((selection, index) => {
+        const selectionCustomUsage = customUsageByIdOrLabel(
+          customUsages,
+          selection.customUsageId,
+          selection.customUsageLabel,
+        );
         const usage = {
-          ...usageWithCustomLabel(selection.usageId, selection.customUsageLabel),
+          ...(selection.usageId === CUSTOM_USAGE_ID
+            ? usageFromCustomPreset(selectionCustomUsage, selection.customUsageLabel)
+            : usageById(selection.usageId)),
           color: selection.color,
         };
         const area = areaFromPixels(
@@ -869,7 +1001,7 @@ export default function PlanimetriaEditor({
           amount: area * selection.rate,
         };
       }),
-    [allSelections, scaleDenominator, sheetSize, revision],
+    [allSelections, customUsages, scaleDenominator, sheetSize, revision],
   );
 
   const totals = useMemo(() => {
@@ -1016,11 +1148,11 @@ export default function PlanimetriaEditor({
         const usageShortcutIndex = /^[1-9]$/.test(key) ? Number(key) - 1 : -1;
         if (
           usageShortcutIndex >= 0 &&
-          usageShortcutIndex < USAGES.length - 1 &&
+          usageShortcutIndex < FIXED_USAGES.length &&
           (activeTool === "select" || activeTool === "smart" || activeTool === "polygon")
         ) {
           event.preventDefault();
-          const usage = USAGES[usageShortcutIndex];
+          const usage = FIXED_USAGES[usageShortcutIndex];
           changeActiveUsage(usage.id);
           return;
         }
@@ -1052,7 +1184,22 @@ export default function PlanimetriaEditor({
     window.addEventListener("keydown", handleKeyboard);
     return () => window.removeEventListener("keydown", handleKeyboard);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSelectionIds, selectedPolygonVertex, clipboardCount, currentPage, hasPdf, revision, focusMode, activeTool, activeUsage, customUsageLabel, zoomPercent, busy]);
+  }, [
+    selectedSelectionIds,
+    selectedPolygonVertex,
+    clipboardCount,
+    currentPage,
+    hasPdf,
+    revision,
+    focusMode,
+    activeTool,
+    activeUsage,
+    activeCustomUsageId,
+    customUsages,
+    customUsageLabel,
+    zoomPercent,
+    busy,
+  ]);
 
   useEffect(() => {
     const shell = canvasShellRef.current;
@@ -1094,6 +1241,9 @@ export default function PlanimetriaEditor({
     setMarqueeDraft(null);
     setPolygonDraft([]);
     setPointerPreview(null);
+    setActiveCustomUsageId(null);
+    setCustomUsages([]);
+    setCustomUsageLabel("");
     dragStateRef.current = null;
     marqueeDragRef.current = null;
     segmentDragRef.current = null;
@@ -1115,7 +1265,6 @@ export default function PlanimetriaEditor({
       setSavedAt(draft?.savedAt ?? "");
 
       if (!draft) {
-        setCustomUsageLabel("");
         applyPropertyScaleFallback();
         if (linkedRemotePlan) {
           void loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName, undefined, true);
@@ -1129,9 +1278,17 @@ export default function PlanimetriaEditor({
       setScaleDenominator(draft.scaleDenominator);
       setScaleSource(normalizeScaleSource(draft.scaleSource, "DEFAULT"));
       const draftAiScale = aiScaleFromDraft(draft);
+      const draftCustomUsages = customUsagesFromDraft(draft);
+      const draftActiveCustomUsage = customUsageByIdOrLabel(
+        draftCustomUsages,
+        draft.activeCustomUsageId,
+        draft.customUsageLabel,
+      );
       setAiScale(draftAiScale.denominator ? draftAiScale : aiScaleFromProperty(property));
       setActiveUsage(draft.activeUsage);
-      setCustomUsageLabel(draft.customUsageLabel ?? "");
+      setCustomUsages(draftCustomUsages);
+      setActiveCustomUsageId(draftActiveCustomUsage?.id ?? null);
+      setCustomUsageLabel(draftActiveCustomUsage?.label ?? draft.customUsageLabel ?? "");
       setOpacityPercent(draft.opacityPercent);
       setThreshold(draft.threshold);
       setInflate(draft.inflate);
@@ -1494,9 +1651,18 @@ export default function PlanimetriaEditor({
   }
 
   async function restoreDraftSelections(draft: SavedDraft) {
+    const draftCustomUsages = customUsagesFromDraft(draft);
+    setCustomUsages(draftCustomUsages);
     const restored = new Map<number, AreaSelection[]>();
     for (const saved of draft.selections) {
-      const usage = usageWithCustomLabel(saved.usageId, saved.customUsageLabel);
+      const customUsage =
+        saved.usageId === CUSTOM_USAGE_ID
+          ? customUsageByIdOrLabel(draftCustomUsages, saved.customUsageId, saved.customUsageLabel)
+          : null;
+      const usage =
+        saved.usageId === CUSTOM_USAGE_ID
+          ? usageFromCustomPreset(customUsage, saved.customUsageLabel)
+          : usageById(saved.usageId);
       const alphaCanvas = await canvasFromDataUrl(
         saved.region.alphaDataUrl,
         saved.region.width,
@@ -1514,7 +1680,11 @@ export default function PlanimetriaEditor({
         id: saved.id,
         page: saved.page,
         usageId: saved.usageId,
-        customUsageLabel: saved.customUsageLabel,
+        customUsageId: saved.usageId === CUSTOM_USAGE_ID ? (customUsage?.id ?? saved.customUsageId) : undefined,
+        customUsageLabel:
+          saved.usageId === CUSTOM_USAGE_ID
+            ? normalizeCustomUsageLabel(saved.customUsageLabel ?? customUsage?.label)
+            : undefined,
         color: saved.color ?? usage.color,
         rate: saved.rate ?? usage.rate,
         opacity: saved.opacity,
@@ -1544,6 +1714,7 @@ export default function PlanimetriaEditor({
         id: selection.id,
         page: selection.page,
         usageId: selection.usageId,
+        customUsageId: selection.customUsageId,
         customUsageLabel: selection.customUsageLabel,
         color: selection.color,
         rate: selection.rate,
@@ -1576,6 +1747,8 @@ export default function PlanimetriaEditor({
       aiScaleDetectedAt: aiScale.detectedAt,
       pageRotations: serializePageRotations(runtimeRef.current.pageRotations),
       activeUsage,
+      activeCustomUsageId,
+      customUsages,
       customUsageLabel,
       opacityPercent,
       threshold,
@@ -2866,6 +3039,8 @@ export default function PlanimetriaEditor({
       aiScale: { ...aiScale },
       pageRotations: new Map(runtimeRef.current.pageRotations),
       activeUsage,
+      activeCustomUsageId,
+      customUsages: customUsages.map((preset) => ({ ...preset })),
       customUsageLabel,
       opacityPercent,
       threshold,
@@ -2927,6 +3102,8 @@ export default function PlanimetriaEditor({
     const restoredRotation = snapshot.pageRotations.get(runtimeRef.current.currentPage) ?? 0;
     runtimeRef.current.pageRotations = new Map(snapshot.pageRotations);
     setActiveUsage(snapshot.activeUsage);
+    setActiveCustomUsageId(snapshot.activeCustomUsageId);
+    setCustomUsages(snapshot.customUsages.map((preset) => ({ ...preset })));
     setCustomUsageLabel(snapshot.customUsageLabel);
     setOpacityPercent(snapshot.opacityPercent);
     setThreshold(snapshot.threshold);
@@ -2979,17 +3156,36 @@ export default function PlanimetriaEditor({
     opacity: number,
     source: SelectionSource = "smart",
     polygon?: CanvasPoint[],
-    options: { recordHistory?: boolean; select?: boolean; rate?: number; customUsageLabel?: string; color?: string } = {},
+    options: {
+      recordHistory?: boolean;
+      select?: boolean;
+      rate?: number;
+      customUsageId?: string;
+      customUsageLabel?: string;
+      color?: string;
+    } = {},
   ) {
-    const customLabel = usageId === CUSTOM_USAGE_ID ? normalizeCustomUsageLabel(options.customUsageLabel ?? customUsageLabel) : undefined;
+    const customPreset =
+      usageId === CUSTOM_USAGE_ID
+        ? customUsageByIdOrLabel(
+            customUsages,
+            options.customUsageId ?? activeCustomUsageId,
+            options.customUsageLabel ?? customUsageLabel,
+          )
+        : null;
+    const customLabel =
+      usageId === CUSTOM_USAGE_ID
+        ? normalizeCustomUsageLabel(options.customUsageLabel ?? customPreset?.label ?? customUsageLabel)
+        : undefined;
     if (usageId === CUSTOM_USAGE_ID && !customLabel) {
-      setStatus("Inserisci il nome della destinazione custom");
+      setStatus("Crea o seleziona una destinazione custom");
       bumpRevision();
       return null;
     }
-    const usage = usageWithCustomLabel(usageId, customLabel);
+    const usage = usageId === CUSTOM_USAGE_ID ? usageFromCustomPreset(customPreset, customLabel) : usageById(usageId);
     const rate = options.rate ?? usage.rate;
     const color = options.color ?? usage.color;
+    const customUsageId = usageId === CUSTOM_USAGE_ID ? customPreset?.id ?? options.customUsageId : undefined;
     const selectionsForPage = currentSelections();
     const duplicateIndex = selectionsForPage.findIndex((selection) => sameRegion(selection.region, region));
     const shouldRecord = options.recordHistory !== false;
@@ -2999,6 +3195,7 @@ export default function PlanimetriaEditor({
       if (shouldRecord) recordUndoState();
       const selection = selectionsForPage[duplicateIndex];
       selection.usageId = usageId;
+      selection.customUsageId = customUsageId;
       selection.customUsageLabel = customLabel;
       selection.color = color;
       selection.rate = rate;
@@ -3021,6 +3218,7 @@ export default function PlanimetriaEditor({
       id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
       page: runtimeRef.current.currentPage,
       usageId,
+      customUsageId,
       customUsageLabel: customLabel,
       color,
       rate,
@@ -3505,32 +3703,266 @@ export default function PlanimetriaEditor({
     bumpRevision();
   }
 
-  function changeSelectionUsage(id: string, usageId: UsageId) {
-    const customLabel = usageId === CUSTOM_USAGE_ID ? normalizeCustomUsageLabel(customUsageLabel) : undefined;
-    if (usageId === CUSTOM_USAGE_ID && !customLabel) {
-      setStatus("Inserisci il nome della destinazione custom");
+  function buildCustomUsagePreset(options: { label?: string; color?: string; rate?: number } = {}) {
+    const label = nextCustomUsageLabel(customUsages, options.label ?? "Custom");
+    return {
+      id: createCustomUsageId(label, customUsages.length),
+      label,
+      color: isHexColor(options.color)
+        ? options.color!.toLowerCase()
+        : CUSTOM_USAGE_COLORS[customUsages.length % CUSTOM_USAGE_COLORS.length],
+      rate: typeof options.rate === "number" && Number.isFinite(options.rate) ? options.rate : usageById(CUSTOM_USAGE_ID).rate,
+    };
+  }
+
+  function selectCustomUsagePreset(presetId: string) {
+    const preset = customUsages.find((item) => item.id === presetId);
+    if (!preset) return;
+    if (activeUsage === CUSTOM_USAGE_ID && activeCustomUsageId === preset.id) return;
+    recordUndoState();
+    setActiveUsage(CUSTOM_USAGE_ID);
+    setActiveCustomUsageId(preset.id);
+    setCustomUsageLabel(preset.label);
+    setStatus(`Destinazione d'uso: ${preset.label}`);
+    markDirty();
+  }
+
+  function createCustomUsagePreset() {
+    const preset = buildCustomUsagePreset();
+    recordUndoState();
+    setCustomUsages((current) => [...current, preset]);
+    setActiveUsage(CUSTOM_USAGE_ID);
+    setActiveCustomUsageId(preset.id);
+    setCustomUsageLabel(preset.label);
+    setStatus(`Destinazione custom creata: ${preset.label}`);
+    markDirty();
+    bumpRevision();
+  }
+
+  function renameCustomUsagePreset(presetId: string, rawLabel: string) {
+    const preset = customUsages.find((item) => item.id === presetId);
+    if (!preset) return false;
+    const nextLabel = normalizeCustomUsageLabel(rawLabel);
+    if (!nextLabel) {
+      setStatus("Il nome della destinazione custom e obbligatorio");
       bumpRevision();
+      return false;
+    }
+    if (nextLabel === preset.label) return true;
+    const duplicate = customUsages.find(
+      (item) => item.id !== preset.id && item.label.toLowerCase() === nextLabel.toLowerCase(),
+    );
+    if (duplicate) {
+      setStatus(`Destinazione custom gia esistente: ${duplicate.label}`);
+      bumpRevision();
+      return false;
+    }
+
+    recordUndoState();
+    const previousLabel = preset.label;
+    setCustomUsages((current) =>
+      current.map((item) => (item.id === preset.id ? { ...item, label: nextLabel } : item)),
+    );
+    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
+      pageSelections.forEach((selection) => {
+        const matchesPreset =
+          selection.usageId === CUSTOM_USAGE_ID &&
+          (selection.customUsageId === preset.id ||
+            (!selection.customUsageId && selection.customUsageLabel?.toLowerCase() === previousLabel.toLowerCase()));
+        if (!matchesPreset) return;
+        selection.customUsageId = preset.id;
+        selection.customUsageLabel = nextLabel;
+      });
+    }
+    if (activeCustomUsageId === preset.id) setCustomUsageLabel(nextLabel);
+    redrawMasks();
+    setStatus(`Destinazione custom rinominata: ${nextLabel}`);
+    markDirty();
+    bumpRevision();
+    return true;
+  }
+
+  function changeCustomUsageColor(presetId: string, color: string) {
+    if (!isHexColor(color)) return;
+    const preset = customUsages.find((item) => item.id === presetId);
+    if (!preset || preset.color.toLowerCase() === color.toLowerCase()) return;
+    recordUndoState();
+    setCustomUsages((current) =>
+      current.map((item) => (item.id === preset.id ? { ...item, color: color.toLowerCase() } : item)),
+    );
+    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
+      pageSelections.forEach((selection) => {
+        const matchesPreset =
+          selection.usageId === CUSTOM_USAGE_ID &&
+          (selection.customUsageId === preset.id ||
+            (!selection.customUsageId && selection.customUsageLabel?.toLowerCase() === preset.label.toLowerCase()));
+        if (!matchesPreset) return;
+        selection.customUsageId = preset.id;
+        selection.color = color;
+        selection.bitmap = createTintedCanvas(selection.region, color, selection.opacity);
+      });
+    }
+    redrawMasks();
+    setStatus(`Colore custom aggiornato: ${preset.label}`);
+    markDirty();
+    bumpRevision();
+  }
+
+  function deleteCustomUsagePreset(presetId: string) {
+    const preset = customUsages.find((item) => item.id === presetId);
+    if (!preset) return;
+    recordUndoState();
+    const nextCustomUsages = customUsages.filter((item) => item.id !== preset.id);
+    setCustomUsages(nextCustomUsages);
+    let affectedSelections = 0;
+    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
+      pageSelections.forEach((selection) => {
+        if (selection.usageId !== CUSTOM_USAGE_ID || selection.customUsageId !== preset.id) return;
+        selection.customUsageId = undefined;
+        affectedSelections += 1;
+      });
+    }
+    if (activeCustomUsageId === preset.id) {
+      const nextActiveCustom = nextCustomUsages[0] ?? null;
+      setActiveUsage(nextActiveCustom ? CUSTOM_USAGE_ID : "capannone");
+      setActiveCustomUsageId(nextActiveCustom?.id ?? null);
+      setCustomUsageLabel(nextActiveCustom?.label ?? "");
+    }
+    redrawMasks();
+    setStatus(
+      affectedSelections > 0
+        ? `Preset custom rimosso; ${affectedSelections} aree esistenti mantenute`
+        : `Preset custom eliminato: ${preset.label}`,
+    );
+    markDirty();
+    bumpRevision();
+  }
+
+  function changeSelectionUsage(id: string, usageId: UsageId) {
+    if (usageId === CUSTOM_USAGE_ID) return;
+    const usage = usageById(usageId);
+    const selection = findSelectionById(id);
+    if (!selection) return;
+    recordUndoState();
+    selection.usageId = usageId;
+    selection.customUsageId = undefined;
+    selection.customUsageLabel = undefined;
+    selection.color = usage.color;
+    selection.rate = usage.rate;
+    selection.bitmap = createTintedCanvas(selection.region, usage.color, selection.opacity);
+    redrawMasks();
+    setStatus(`Area aggiornata: ${usage.label}`);
+    markDirty();
+    bumpRevision();
+  }
+
+  function changeSelectionCustomUsage(id: string, presetId: string) {
+    const preset = customUsages.find((item) => item.id === presetId);
+    const selection = findSelectionById(id);
+    if (!preset || !selection) return;
+    recordUndoState();
+    selection.usageId = CUSTOM_USAGE_ID;
+    selection.customUsageId = preset.id;
+    selection.customUsageLabel = preset.label;
+    selection.color = preset.color;
+    selection.rate = preset.rate;
+    selection.bitmap = createTintedCanvas(selection.region, preset.color, selection.opacity);
+    setActiveUsage(CUSTOM_USAGE_ID);
+    setActiveCustomUsageId(preset.id);
+    setCustomUsageLabel(preset.label);
+    redrawMasks();
+    setStatus(`Area aggiornata: ${preset.label}`);
+    markDirty();
+    bumpRevision();
+  }
+
+  function changeSelectionUsageChoice(id: string, value: string) {
+    if (value.startsWith("fixed:")) {
+      changeSelectionUsage(id, value.slice("fixed:".length) as UsageId);
       return;
     }
-    const usage = usageWithCustomLabel(usageId, customLabel);
-    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
-      const selection = pageSelections.find((item) => item.id === id);
-      if (!selection) continue;
-      recordUndoState();
-      selection.usageId = usageId;
-      selection.customUsageLabel = customLabel;
-      selection.color = usage.color;
-      selection.rate = usage.rate;
-      selection.bitmap = createTintedCanvas(selection.region, usage.color, selection.opacity);
-      redrawMasks();
-      markDirty();
-      bumpRevision();
-      return;
+    if (value.startsWith("custom:")) {
+      changeSelectionCustomUsage(id, value.slice("custom:".length));
     }
   }
 
+  function createCustomUsageForSelection(id: string) {
+    const selection = findSelectionById(id);
+    if (!selection) return;
+    const preset = buildCustomUsagePreset({
+      color: selection.usageId === CUSTOM_USAGE_ID ? selection.color : undefined,
+      rate: selection.usageId === CUSTOM_USAGE_ID ? selection.rate : undefined,
+    });
+    recordUndoState();
+    setCustomUsages((current) => [...current, preset]);
+    selection.usageId = CUSTOM_USAGE_ID;
+    selection.customUsageId = preset.id;
+    selection.customUsageLabel = preset.label;
+    selection.color = preset.color;
+    selection.rate = preset.rate;
+    selection.bitmap = createTintedCanvas(selection.region, preset.color, selection.opacity);
+    setActiveUsage(CUSTOM_USAGE_ID);
+    setActiveCustomUsageId(preset.id);
+    setCustomUsageLabel(preset.label);
+    redrawMasks();
+    setStatus(`Nuova destinazione custom applicata: ${preset.label}`);
+    markDirty();
+    bumpRevision();
+  }
+
+  function renameSelectionCustomUsage(id: string, rawLabel: string) {
+    const selection = findSelectionById(id);
+    if (!selection || selection.usageId !== CUSTOM_USAGE_ID) return false;
+    const nextLabel = normalizeCustomUsageLabel(rawLabel);
+    if (!nextLabel) {
+      setStatus("Il nome della destinazione custom e obbligatorio");
+      bumpRevision();
+      return false;
+    }
+    const preset = customUsageByIdOrLabel(customUsages, selection.customUsageId, selection.customUsageLabel);
+    if (preset) return renameCustomUsagePreset(preset.id, nextLabel);
+
+    const existing = customUsages.find((item) => item.label.toLowerCase() === nextLabel.toLowerCase());
+    if (existing) {
+      changeSelectionCustomUsage(id, existing.id);
+      return true;
+    }
+
+    const newPreset = {
+      ...buildCustomUsagePreset({
+        label: nextLabel,
+        color: selection.color,
+        rate: selection.rate,
+      }),
+      label: nextLabel,
+    };
+    recordUndoState();
+    setCustomUsages((current) => [...current, newPreset]);
+    selection.customUsageId = newPreset.id;
+    selection.customUsageLabel = newPreset.label;
+    setActiveUsage(CUSTOM_USAGE_ID);
+    setActiveCustomUsageId(newPreset.id);
+    setCustomUsageLabel(newPreset.label);
+    redrawMasks();
+    setStatus(`Destinazione custom creata: ${newPreset.label}`);
+    markDirty();
+    bumpRevision();
+    return true;
+  }
+
+  function selectionCustomUsagePreset(selection: AreaSelection) {
+    if (selection.usageId !== CUSTOM_USAGE_ID) return null;
+    return customUsageByIdOrLabel(customUsages, selection.customUsageId, selection.customUsageLabel);
+  }
+
+  function selectionUsageChoiceValue(selection: AreaSelection) {
+    if (selection.usageId !== CUSTOM_USAGE_ID) return `fixed:${selection.usageId}`;
+    const preset = selectionCustomUsagePreset(selection);
+    return preset ? `custom:${preset.id}` : `orphan:${selection.id}`;
+  }
+
   function changeSelectionColor(id: string, color: string) {
-    if (!/^#[0-9a-f]{6}$/i.test(color)) return;
+    if (!isHexColor(color)) return;
     for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
       const selection = pageSelections.find((item) => item.id === id);
       if (!selection || selection.color.toLowerCase() === color.toLowerCase()) continue;
@@ -4039,6 +4471,7 @@ export default function PlanimetriaEditor({
     if (source.length === 0) return;
     clipboardRef.current = source.map((selection) => ({
       usageId: selection.usageId,
+      customUsageId: selection.customUsageId,
       customUsageLabel: selection.customUsageLabel,
       color: selection.color,
       opacity: selection.opacity,
@@ -4066,7 +4499,14 @@ export default function PlanimetriaEditor({
     const pastedIds: string[] = [];
     const pageSelections = currentSelections();
     clipboardRef.current.forEach((item) => {
-      const usage = usageWithCustomLabel(item.usageId, item.customUsageLabel);
+      const customUsage =
+        item.usageId === CUSTOM_USAGE_ID
+          ? customUsageByIdOrLabel(customUsages, item.customUsageId, item.customUsageLabel)
+          : null;
+      const usage =
+        item.usageId === CUSTOM_USAGE_ID
+          ? usageFromCustomPreset(customUsage, item.customUsageLabel)
+          : usageById(item.usageId);
       const color = item.color ?? usage.color;
       const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
       const region = cloneRegion(item.region, dx, dy);
@@ -4074,6 +4514,7 @@ export default function PlanimetriaEditor({
         id,
         page: runtimeRef.current.currentPage,
         usageId: item.usageId,
+        customUsageId: item.customUsageId,
         customUsageLabel: item.customUsageLabel,
         color,
         rate: item.rate,
@@ -4140,6 +4581,7 @@ export default function PlanimetriaEditor({
     removeSelectionsFromCurrentPage(new Set(selected.map((selection) => selection.id)));
     const mergedId = commitSelection(mergedRegion, activeUsage, opacity, "merged", undefined, {
       recordHistory: false,
+      customUsageId: activeCustomUsageId ?? undefined,
       customUsageLabel,
     });
     if (mergedId) setSelectedSelectionIds([mergedId]);
@@ -4168,6 +4610,7 @@ export default function PlanimetriaEditor({
     const mergedId = commitSelection(region, first.usageId, first.opacity, "merged", undefined, {
       recordHistory: false,
       rate: first.rate,
+      customUsageId: first.customUsageId,
       customUsageLabel: first.customUsageLabel,
       color: first.color,
     });
@@ -4839,10 +5282,14 @@ export default function PlanimetriaEditor({
     if (usageId === activeUsage) return;
     recordUndoState();
     setActiveUsage(usageId);
-    const usage = usageWithCustomLabel(usageId, customUsageLabel);
+    if (usageId !== CUSTOM_USAGE_ID) setActiveCustomUsageId(null);
+    const usage =
+      usageId === CUSTOM_USAGE_ID
+        ? usageFromCustomPreset(activeCustomUsage, customUsageLabel)
+        : usageById(usageId);
     setStatus(
-      usageId === CUSTOM_USAGE_ID && !normalizeCustomUsageLabel(customUsageLabel)
-        ? "Inserisci il nome della destinazione custom"
+      usageId === CUSTOM_USAGE_ID && !activeCustomUsage && !normalizeCustomUsageLabel(customUsageLabel)
+        ? "Crea o seleziona una destinazione custom"
         : `Destinazione d'uso: ${usage.label}`,
     );
     markDirty();
@@ -4936,8 +5383,8 @@ export default function PlanimetriaEditor({
   }
 
   function canUseActiveUsage() {
-    if (activeUsage !== CUSTOM_USAGE_ID || normalizeCustomUsageLabel(customUsageLabel)) return true;
-    setStatus("Inserisci il nome della destinazione custom");
+    if (activeUsage !== CUSTOM_USAGE_ID || activeCustomUsage || normalizeCustomUsageLabel(customUsageLabel)) return true;
+    setStatus("Crea o seleziona una destinazione custom");
     bumpRevision();
     return false;
   }
@@ -5061,7 +5508,7 @@ export default function PlanimetriaEditor({
             {!collapsedSections.usage && (
               <>
                 <div className="usage-grid">
-                  {USAGES.filter((usage) => usage.id !== CUSTOM_USAGE_ID).map((usage, index) => (
+                  {FIXED_USAGES.map((usage, index) => (
                     <button
                       key={usage.id}
                       className={`usage-button ${activeUsage === usage.id ? "active" : ""}`}
@@ -5074,21 +5521,69 @@ export default function PlanimetriaEditor({
                     </button>
                   ))}
                 </div>
-                <label className={`custom-usage-field ${activeUsage === CUSTOM_USAGE_ID ? "active" : ""}`}>
-                  <span>Destinazione custom</span>
-                  <input
-                    type="text"
-                    value={customUsageLabel}
-                    placeholder="Es. cabina elettrica"
-                    onChange={(event) => {
-                      const nextLabel = event.target.value;
-                      setCustomUsageLabel(nextLabel);
-                      setActiveUsage(CUSTOM_USAGE_ID);
-                      markDirty();
-                    }}
-                    onFocus={() => setActiveUsage(CUSTOM_USAGE_ID)}
-                  />
-                </label>
+                <div className="custom-usage-manager">
+                  <div className="custom-usage-head">
+                    <span>Destinazioni custom</span>
+                    <button type="button" onClick={createCustomUsagePreset}>
+                      <Plus size={14} />
+                      Nuova
+                    </button>
+                  </div>
+                  {customUsages.length === 0 ? (
+                    <div className="custom-usage-empty">Nessuna destinazione custom</div>
+                  ) : (
+                    <div className="custom-usage-list">
+                      {customUsages.map((preset) => {
+                        const isActive = activeUsage === CUSTOM_USAGE_ID && activeCustomUsageId === preset.id;
+                        return (
+                          <div key={preset.id} className={`custom-usage-row ${isActive ? "active" : ""}`}>
+                            <button
+                              type="button"
+                              className="custom-usage-selector"
+                              title={`Usa ${preset.label}`}
+                              onClick={() => selectCustomUsagePreset(preset.id)}
+                            >
+                              <span style={{ background: preset.color }} />
+                            </button>
+                            <input
+                              key={`${preset.id}-${preset.label}`}
+                              type="text"
+                              defaultValue={preset.label}
+                              onFocus={() => selectCustomUsagePreset(preset.id)}
+                              onBlur={(event) => {
+                                if (!renameCustomUsagePreset(preset.id, event.currentTarget.value)) {
+                                  event.currentTarget.value = preset.label;
+                                }
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") event.currentTarget.blur();
+                                if (event.key === "Escape") {
+                                  event.currentTarget.value = preset.label;
+                                  event.currentTarget.blur();
+                                }
+                              }}
+                            />
+                            <input
+                              type="color"
+                              value={preset.color}
+                              title={`Colore ${preset.label}`}
+                              onFocus={() => selectCustomUsagePreset(preset.id)}
+                              onChange={(event) => changeCustomUsageColor(preset.id, event.target.value)}
+                            />
+                            <button
+                              type="button"
+                              className="custom-usage-remove"
+                              title={`Elimina ${preset.label}`}
+                              onClick={() => deleteCustomUsagePreset(preset.id)}
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </section>
@@ -5578,6 +6073,11 @@ export default function PlanimetriaEditor({
                   ) : (
                     selectedAreas.map(({ selection, index, usage, area, amount }) => {
                       const areaCollapsed = collapsedAreaIds.includes(selection.id);
+                      const selectedCustomPreset = selectionCustomUsagePreset(selection);
+                      const orphanCustomLabel =
+                        selection.usageId === CUSTOM_USAGE_ID && !selectedCustomPreset
+                          ? normalizeCustomUsageLabel(selection.customUsageLabel) || "Custom"
+                          : "";
                       return (
                         <article
                           key={selection.id}
@@ -5635,19 +6135,62 @@ export default function PlanimetriaEditor({
                           </div>
                           {!areaCollapsed && (
                             <>
-                              <select
-                                value={selection.usageId}
-                                onClick={(event) => event.stopPropagation()}
-                                onChange={(event) => changeSelectionUsage(selection.id, event.target.value as UsageId)}
-                              >
-                                {USAGES.map((usageOption) => (
-                                  <option key={usageOption.id} value={usageOption.id}>
-                                    {usageOption.id === CUSTOM_USAGE_ID && selection.customUsageLabel
-                                      ? `Custom: ${selection.customUsageLabel}`
-                                      : usageOption.label}
-                                  </option>
-                                ))}
-                              </select>
+                              <div className="area-usage-editor" onClick={(event) => event.stopPropagation()}>
+                                <select
+                                  value={selectionUsageChoiceValue(selection)}
+                                  onChange={(event) => changeSelectionUsageChoice(selection.id, event.target.value)}
+                                >
+                                  <optgroup label="Predefinite">
+                                    {FIXED_USAGES.map((usageOption) => (
+                                      <option key={usageOption.id} value={`fixed:${usageOption.id}`}>
+                                        {usageOption.label}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                  {customUsages.length > 0 && (
+                                    <optgroup label="Custom">
+                                      {customUsages.map((preset) => (
+                                        <option key={preset.id} value={`custom:${preset.id}`}>
+                                          {preset.label}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                  {orphanCustomLabel && (
+                                    <option value={`orphan:${selection.id}`}>{orphanCustomLabel}</option>
+                                  )}
+                                </select>
+                                <button
+                                  type="button"
+                                  className="icon-button"
+                                  title="Crea nuova destinazione custom per questa area"
+                                  onClick={() => createCustomUsageForSelection(selection.id)}
+                                >
+                                  <Plus size={15} />
+                                </button>
+                              </div>
+                              {selection.usageId === CUSTOM_USAGE_ID && (
+                                <label className="area-custom-name-field" onClick={(event) => event.stopPropagation()}>
+                                  <span>Nome custom</span>
+                                  <input
+                                    key={`${selection.id}-${selection.customUsageId ?? "orphan"}-${usage.label}`}
+                                    type="text"
+                                    defaultValue={usage.label}
+                                    onBlur={(event) => {
+                                      if (!renameSelectionCustomUsage(selection.id, event.currentTarget.value)) {
+                                        event.currentTarget.value = usage.label;
+                                      }
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter") event.currentTarget.blur();
+                                      if (event.key === "Escape") {
+                                        event.currentTarget.value = usage.label;
+                                        event.currentTarget.blur();
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              )}
                               <dl>
                                 <div>
                                   <dt>Area</dt>

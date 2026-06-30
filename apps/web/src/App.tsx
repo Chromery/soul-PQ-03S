@@ -48,7 +48,7 @@ import {
 } from "lucide-react";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.11";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.12";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -198,6 +198,8 @@ type PlanAreaDraft = {
   aiSheetSize?: PlanAreaSheetSize | null;
   aiScaleConfidence?: number | null;
   aiScaleDetectedAt?: string | null;
+  activeCustomUsageId?: string | null;
+  customUsages?: PlanAreaCustomUsage[];
   customUsageLabel?: string;
   totalArea?: number;
   totalEstimatedAmount?: number;
@@ -208,6 +210,7 @@ type PlanAreaDraftSelection = {
   id: string;
   page: number;
   usageId: PlanAreaUsageId;
+  customUsageId?: string;
   customUsageLabel?: string;
   color?: string;
   rate?: number;
@@ -217,6 +220,13 @@ type PlanAreaDraftSelection = {
   region: {
     count: number;
   };
+};
+
+type PlanAreaCustomUsage = {
+  id: string;
+  label: string;
+  color: string;
+  rate: number;
 };
 
 type PlanAreaDraftState = {
