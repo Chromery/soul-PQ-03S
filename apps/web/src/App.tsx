@@ -48,7 +48,7 @@ import {
 } from "lucide-react";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.15";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.16";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -75,6 +75,7 @@ type PropertyItem = {
   id: string;
   address: string;
   comune: string;
+  provincia?: string | null;
   ubicazione?: string | null;
   foglio?: string | null;
   particella?: string | null;
@@ -1529,7 +1530,8 @@ function usePlanAreaDraft(propertyId: string | null): PlanAreaDraftState {
 }
 
 function propertyLocation(property: PropertyItem) {
-  return property.ubicazione || `${property.address}, ${property.comune}`;
+  const comune = property.comune ? `${property.comune}${property.provincia ? ` (${property.provincia})` : ""}` : "";
+  return property.ubicazione || [property.address, comune].filter(Boolean).join(", ") || property.id;
 }
 
 function deviationPercent(current: number | null | undefined, estimated: number | null | undefined) {

@@ -76,6 +76,7 @@ model Property {
   studyId            String
   address            String
   comune             String
+  provincia          String?
   ubicazione         String?
   foglio             String?
   particella         String?

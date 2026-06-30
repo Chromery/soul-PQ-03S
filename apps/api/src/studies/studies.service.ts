@@ -103,6 +103,7 @@ export class StudiesService {
       id: property.id,
       address: property.address,
       comune: property.comune,
+      provincia: property.provincia,
       ubicazione: property.ubicazione,
       foglio: property.foglio,
       particella: property.particella,

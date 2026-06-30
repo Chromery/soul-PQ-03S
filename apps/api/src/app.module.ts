@@ -9,6 +9,7 @@ import { PriceListsModule } from "./price-lists/price-lists.module.js";
 import { PropertiesModule } from "./properties/properties.module.js";
 import { ScaleExtractionModule } from "./scale-extraction/scale-extraction.module.js";
 import { StudiesModule } from "./studies/studies.module.js";
+import { VisuraExtractionModule } from "./visura-extraction/visura-extraction.module.js";
 
 const rootEnvFile = fileURLToPath(new URL("../../../.env", import.meta.url));
 dotenv.config({ path: rootEnvFile });
@@ -23,6 +24,7 @@ process.env.DATABASE_URL ??= localDatabaseUrl();
     PriceListsModule,
     ErpSyncModule,
     ScaleExtractionModule,
+    VisuraExtractionModule,
   ],
   controllers: [HealthController],
 })

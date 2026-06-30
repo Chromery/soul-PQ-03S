@@ -6,6 +6,7 @@ import type { FeasibilityStudy, PlanAnalysisDraft, Property, PropertyDocument, S
 import { PriceListsService } from "../price-lists/price-lists.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { ScaleExtractionService } from "../scale-extraction/scale-extraction.service.js";
+import { VisuraExtractionService } from "../visura-extraction/visura-extraction.service.js";
 import { DocumentStorageService } from "./document-storage.service.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -20,6 +21,41 @@ type StudyWithRelations = FeasibilityStudy & {
   versions: StudyVersion[];
 };
 
+type NormalizedDocument = {
+  rawType: string;
+  type: DocumentType;
+  erpDocumentId?: string;
+  fileName: string;
+  mimeType: string;
+  fileBase64?: string;
+  storageKey?: string;
+  expectedSha256?: string;
+  sizeBytes?: number;
+};
+
+type NormalizedProperty = {
+  id: string;
+  address: string;
+  comune: string;
+  provincia: string;
+  ubicazione?: string;
+  foglio?: string;
+  particella?: string;
+  subalterno?: string;
+  categoria: string;
+  titolarita?: string;
+  currentRendita: number;
+  estimatedRendita: number;
+  diffPercent: number;
+  currentImu: number | null;
+  estimatedImu: number | null;
+  imuDiff: number;
+  outcome: string;
+  hasStudy: boolean;
+  displayOrder: number;
+  documents: NormalizedDocument[];
+};
+
 @Injectable()
 export class ErpSyncService {
   private readonly defaultTechnicalOwner: string;
@@ -28,6 +64,7 @@ export class ErpSyncService {
     private readonly prisma: PrismaService,
     private readonly storage: DocumentStorageService,
     private readonly scaleExtraction: ScaleExtractionService,
+    private readonly visuraExtraction: VisuraExtractionService,
     private readonly priceLists: PriceListsService,
     config: ConfigService,
   ) {
@@ -106,6 +143,7 @@ export class ErpSyncService {
     const normalizedProperties = properties.map((property, index) =>
       this.normalizeProperty(asRecord(property, `immobili[${index}]`), index),
     );
+    const visuraExtractionSummary = await this.enrichPropertiesFromVisure(normalizedProperties);
 
     const originalRendita = decimalNumber(
       metrics?.rendita_originale_totale,
@@ -207,6 +245,7 @@ export class ErpSyncService {
         studyId: studioErpId,
         address: property.address,
         comune: property.comune,
+        provincia: property.provincia || null,
         ubicazione: property.ubicazione,
         foglio: property.foglio,
         particella: property.particella,
@@ -277,10 +316,49 @@ export class ErpSyncService {
       azione: existing ? "updated" : "created",
       immobili_upserted: normalizedProperties.length,
       documenti_salvati: documentsCount,
+      visure_estratte: visuraExtractionSummary.extracted,
+      visure_errori: visuraExtractionSummary.errors,
     };
   }
 
-  private normalizeProperty(input: JsonRecord, index: number) {
+  private async enrichPropertiesFromVisure(properties: NormalizedProperty[]) {
+    const errors: Array<{ immobile_erp_id: string; file_nome: string; errore: string }> = [];
+    let extracted = 0;
+
+    for (const property of properties) {
+      const visura = property.documents.find((document) => document.type === DocumentType.VISURA && document.fileBase64);
+      if (!visura?.fileBase64) continue;
+      try {
+        const result = await this.visuraExtraction.extractFromBase64({
+          fileName: visura.fileName,
+          fileBase64: visura.fileBase64,
+          sha256: visura.expectedSha256,
+        });
+        if (!result.found) continue;
+        property.provincia = property.provincia || result.provincia || "";
+        property.comune = property.comune || result.comune || "";
+        property.foglio = property.foglio || result.foglio || undefined;
+        property.particella = property.particella || result.particella || undefined;
+        if (!property.address && property.comune) {
+          property.address = property.provincia ? `${property.comune} (${property.provincia})` : property.comune;
+        }
+        if (!property.ubicazione && property.address) {
+          property.ubicazione = property.address;
+        }
+        extracted++;
+      } catch (error) {
+        errors.push({
+          immobile_erp_id: property.id,
+          file_nome: visura.fileName,
+          errore: error instanceof Error ? error.message : "Errore sconosciuto",
+        });
+      }
+    }
+
+    return { extracted, errors };
+  }
+
+  private normalizeProperty(input: JsonRecord, index: number): NormalizedProperty {
     const id = requiredString(input.immobile_erp_id ?? input.erp_id, "immobile_erp_id");
     const currentRendita = decimalNumber(input.rendita_attuale ?? input.rendita, 0);
     const estimatedRendita = decimalNumber(input.rendita_proposta, 0);
@@ -315,7 +393,7 @@ export class ErpSyncService {
     };
   }
 
-  private normalizeDocument(input: JsonRecord) {
+  private normalizeDocument(input: JsonRecord): NormalizedDocument {
     const rawType = requiredString(input.tipo, "documenti[].tipo");
     const type = mapDocumentType(rawType);
     const fileName = requiredString(input.file_nome, "documenti[].file_nome");
@@ -376,6 +454,7 @@ export class ErpSyncService {
         sub: property.subalterno,
         ubicazione: property.ubicazione,
         comune: property.comune,
+        provincia: property.provincia,
         categoria: property.categoria,
         titolarita: property.titolarita,
         rendita_attuale: decimalToString(property.currentRendita),

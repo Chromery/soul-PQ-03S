@@ -129,6 +129,8 @@ paths:
                         azione: created
                         immobili_upserted: 1
                         documenti_salvati: 1
+                        visure_estratte: 1
+                        visure_errori: []
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -198,6 +200,7 @@ paths:
                             sub: "4"
                             ubicazione: OSIMO(AN) VIA ACHILLE GRANDI n. 1 Piano T-1
                             comune: Osimo
+                            provincia: AN
                             categoria: D/8
                             titolarita: proprietario
                             rendita_attuale: "29890.00"
@@ -530,6 +533,19 @@ components:
                 type: integer
               documenti_salvati:
                 type: integer
+              visure_estratte:
+                type: integer
+              visure_errori:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    immobile_erp_id:
+                      type: string
+                    file_nome:
+                      type: string
+                    errore:
+                      type: string
     StudiModificatiResponse:
       type: object
       properties:
@@ -637,6 +653,10 @@ components:
             - "null"
         comune:
           type: string
+        provincia:
+          type:
+            - string
+            - "null"
         categoria:
           type: string
         titolarita:

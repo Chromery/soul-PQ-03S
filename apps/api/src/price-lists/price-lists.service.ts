@@ -124,8 +124,9 @@ function rankPriceLists(property: PropertyWithStudy, priceLists: PriceList[]): P
 function territoryForProperty(property: PropertyWithStudy) {
   const comune = normalizeTerritory(property.comune);
   const cityTerritory = CITY_TERRITORIES[comune];
+  const propertyProvince = normalizeProvinceCode(property.provincia);
   const addressProvince = provinceCodeFromAddress(property.address);
-  const province = cityTerritory?.provincia || addressProvince || normalizeProvinceCode(property.study.provincia);
+  const province = cityTerritory?.provincia || propertyProvince || addressProvince || normalizeProvinceCode(property.study.provincia);
   const region = cityTerritory?.region ?? regionForProvince(province) ?? property.study.region;
   const normalizedRegion = normalizeTerritory(region);
 
