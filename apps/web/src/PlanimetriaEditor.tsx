@@ -4,16 +4,18 @@ import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.js?url";
 import {
   ArrowLeft,
+  Building2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardPaste,
   Combine,
   Copy,
-  Download,
   ExternalLink,
   FileText,
+  Globe,
   Layers,
+  MapPin,
   Maximize2,
   MousePointer2,
   Move,
@@ -751,17 +753,23 @@ function areaFromPixels(
   return (pixelCount / totalPixels) * pageRealAreaM2(sheetSize, scaleDenominator);
 }
 
-function downloadCanvas(canvas: HTMLCanvasElement, filename: string) {
-  const link = document.createElement("a");
-  link.download = filename;
-  link.href = canvas.toDataURL("image/png");
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+function propertyLocation(property: EditorProperty) {
+  return `${property.address}, ${property.comune}`;
 }
 
-function safeFilename(name: string) {
-  return name.replace(/\.pdf$/i, "").replace(/[^\w-]+/g, "-");
+function googleMapsUrl(property: EditorProperty) {
+  const url = new URL("https://www.google.com/maps/search/");
+  url.searchParams.set("api", "1");
+  url.searchParams.set("query", propertyLocation(property));
+  return url.toString();
+}
+
+function googleEarthUrl(property: EditorProperty) {
+  return `https://earth.google.com/web/search/${encodeURIComponent(propertyLocation(property))}`;
+}
+
+function forMapsUrl() {
+  return "https://www.formaps.it/";
 }
 
 function draftKey(propertyId: string) {
@@ -4774,18 +4782,6 @@ export default function PlanimetriaEditor({
     bumpRevision();
   }
 
-  function exportComposite() {
-    const { pdfCanvas, maskCanvas } = getCanvases();
-    const canvas = document.createElement("canvas");
-    canvas.width = pdfCanvas.width;
-    canvas.height = pdfCanvas.height;
-    const exportCtx = canvas.getContext("2d");
-    if (!exportCtx) return;
-    exportCtx.drawImage(pdfCanvas, 0, 0);
-    exportCtx.drawImage(maskCanvas, 0, 0);
-    downloadCanvas(canvas, `${safeFilename(fileName || property.id)}-aree.png`);
-  }
-
   function onStagePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0 || !hasPdf || busy) return;
     const point = canvasPointFromEvent(event);
@@ -5611,10 +5607,21 @@ export default function PlanimetriaEditor({
               <Upload size={17} />
               Carica planimetria
             </button>
-            <button className="button secondary" onClick={exportComposite} disabled={!hasPdf}>
-              <Download size={17} />
-              Esporta PNG
-            </button>
+            <div className="editor-map-actions" aria-label={`Apri indirizzo ${propertyLocation(property)} in mappe`}>
+              <span>Apri in</span>
+              <a className="button secondary compact-button" href={forMapsUrl()} target="_blank" rel="noreferrer">
+                <Building2 size={15} />
+                ForMaps
+              </a>
+              <a className="button secondary compact-button" href={googleEarthUrl(property)} target="_blank" rel="noreferrer">
+                <Globe size={15} />
+                Earth
+              </a>
+              <a className="button secondary compact-button" href={googleMapsUrl(property)} target="_blank" rel="noreferrer">
+                <MapPin size={15} />
+                GMaps
+              </a>
+            </div>
             <button className="button primary" onClick={() => void saveDraft()} disabled={!hasPdf}>
               <FileText size={17} />
               Salva bozza
