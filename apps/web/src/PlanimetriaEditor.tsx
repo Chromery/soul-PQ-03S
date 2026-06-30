@@ -45,6 +45,13 @@ const ZOOM_KEYBOARD_STEP = 10;
 const ZOOM_SLIDER_STEP = 1;
 const ZOOM_WHEEL_SENSITIVITY = 0.00045;
 const ZOOM_WHEEL_MAX_DELTA = 240;
+const SMART_TRACE_DEFAULTS = {
+  threshold: 236,
+  inflate: 1,
+  gap: 3,
+  dash: 42,
+  wallInclusionRadius: null as number | null,
+};
 
 type PdfDocument = Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>;
 type PdfPage = Awaited<ReturnType<PdfDocument["getPage"]>>;
@@ -80,6 +87,7 @@ type SelectionSource = "smart" | "polygon" | "merged" | "copy";
 type ScaleExtractionStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
 type ScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
 type PageRotation = 0 | 90 | 180 | 270;
+type TuningKey = "threshold" | "inflate" | "gap" | "dash";
 
 type CanvasPoint = {
   x: number;
@@ -256,6 +264,7 @@ type SavedDraft = {
   inflate: number;
   gap: number;
   dash: number;
+  wallInclusionRadius?: number | null;
   activeTool?: LegacyEditorTool;
   calibration?: SavedCalibration | null;
   totalArea?: number;
@@ -369,7 +378,19 @@ type EditorSnapshot = {
   inflate: number;
   gap: number;
   dash: number;
+  wallInclusionRadius: number | null;
   knownSegmentMeters: number;
+};
+
+type AreaTuningTrial = {
+  id: string;
+  createdAt: string;
+  threshold: number;
+  inflate: number;
+  gap: number;
+  dash: number;
+  wallInclusionRadius: number | null;
+  resolvedWallInclusionRadius: number;
 };
 
 type ToolSectionId = "usage" | "planimetry" | "smart";
@@ -427,6 +448,7 @@ const FIXED_USAGES = USAGES.filter((usage) => usage.id !== CUSTOM_USAGE_ID);
 const CUSTOM_USAGE_COLORS = ["#0891b2", "#0e7490", "#0f766e", "#2563eb", "#9333ea", "#be123c", "#ca8a04"];
 
 const DRAFT_KEY_PREFIX = "soul-planimetria-draft:";
+const AREA_TUNING_TRIALS_KEY_PREFIX = "soul-area-tuning-trials:";
 const PANEL_STORAGE_KEYS = {
   left: "soul-editor-left-panel-open",
   right: "soul-editor-right-panel-open",
@@ -746,6 +768,54 @@ function draftKey(propertyId: string) {
   return `${DRAFT_KEY_PREFIX}${propertyId}`;
 }
 
+function areaTuningTrialsKey(propertyId: string) {
+  return `${AREA_TUNING_TRIALS_KEY_PREFIX}${propertyId}`;
+}
+
+function autoWallInclusionRadius(inflate: number, dash: number) {
+  return Math.max(4, Math.min(8, inflate + Math.ceil(dash / 12)));
+}
+
+function normalizeWallInclusionRadius(value: unknown) {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(0, Math.min(8, Math.round(parsed)));
+}
+
+function isAreaTuningTrial(value: unknown): value is AreaTuningTrial {
+  if (!value || typeof value !== "object") return false;
+  const item = value as AreaTuningTrial;
+  return (
+    typeof item.id === "string" &&
+    typeof item.createdAt === "string" &&
+    typeof item.threshold === "number" &&
+    typeof item.inflate === "number" &&
+    typeof item.gap === "number" &&
+    typeof item.dash === "number" &&
+    typeof item.resolvedWallInclusionRadius === "number"
+  );
+}
+
+function readAreaTuningTrials(propertyId: string) {
+  try {
+    const serialized = window.localStorage.getItem(areaTuningTrialsKey(propertyId));
+    if (!serialized) return [];
+    const parsed = JSON.parse(serialized);
+    return Array.isArray(parsed) ? parsed.filter(isAreaTuningTrial).slice(0, 8) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAreaTuningTrials(propertyId: string, trials: AreaTuningTrial[]) {
+  try {
+    window.localStorage.setItem(areaTuningTrialsKey(propertyId), JSON.stringify(trials.slice(0, 8)));
+  } catch {
+    // Trial history is only a local tuning aid.
+  }
+}
+
 function readSavedDraft(propertyId: string) {
   try {
     const serialized = window.localStorage.getItem(draftKey(propertyId));
@@ -902,10 +972,15 @@ export default function PlanimetriaEditor({
   const [rulerSegmentSelected, setRulerSegmentSelected] = useState(false);
   const [zoomPercent, setZoomPercent] = useState(100);
   const [opacityPercent, setOpacityPercent] = useState(44);
-  const [threshold, setThreshold] = useState(236);
-  const [inflate, setInflate] = useState(1);
-  const [gap, setGap] = useState(3);
-  const [dash, setDash] = useState(42);
+  const [threshold, setThreshold] = useState(SMART_TRACE_DEFAULTS.threshold);
+  const [inflate, setInflate] = useState(SMART_TRACE_DEFAULTS.inflate);
+  const [gap, setGap] = useState(SMART_TRACE_DEFAULTS.gap);
+  const [dash, setDash] = useState(SMART_TRACE_DEFAULTS.dash);
+  const [wallInclusionRadius, setWallInclusionRadius] = useState<number | null>(
+    SMART_TRACE_DEFAULTS.wallInclusionRadius,
+  );
+  const [areaCalibrationOpen, setAreaCalibrationOpen] = useState(false);
+  const [areaTuningTrials, setAreaTuningTrials] = useState<AreaTuningTrial[]>([]);
   const [documentSource, setDocumentSource] = useState<DocumentSource | null>(null);
   const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState("");
@@ -956,6 +1031,8 @@ export default function PlanimetriaEditor({
     activeUsage === CUSTOM_USAGE_ID
       ? usageFromCustomPreset(activeCustomUsage, customUsageLabel)
       : usageById(activeUsage);
+  const autoWallRadius = autoWallInclusionRadius(inflate, dash);
+  const resolvedWallInclusionRadius = wallInclusionRadius ?? autoWallRadius;
   const hasPdf = pageCount > 0;
   const selections = hasPdf ? currentSelections() : [];
   const allSelections = hasPdf
@@ -1053,6 +1130,10 @@ export default function PlanimetriaEditor({
 
   useEffect(() => {
     setPriceListDropdownOpen(true);
+  }, [property.id]);
+
+  useEffect(() => {
+    setAreaTuningTrials(readAreaTuningTrials(property.id));
   }, [property.id]);
 
   useEffect(() => {
@@ -1254,6 +1335,11 @@ export default function PlanimetriaEditor({
     setCollapsedAreaIds([]);
     setScaleExtractionJob(null);
     setScaleExtractionBusy(false);
+    setThreshold(SMART_TRACE_DEFAULTS.threshold);
+    setInflate(SMART_TRACE_DEFAULTS.inflate);
+    setGap(SMART_TRACE_DEFAULTS.gap);
+    setDash(SMART_TRACE_DEFAULTS.dash);
+    setWallInclusionRadius(SMART_TRACE_DEFAULTS.wallInclusionRadius);
     setDirty(false);
     setSavedAt("");
     setRevision((value) => value + 1);
@@ -1294,6 +1380,7 @@ export default function PlanimetriaEditor({
       setInflate(draft.inflate);
       setGap(draft.gap);
       setDash(draft.dash);
+      setWallInclusionRadius(normalizeWallInclusionRadius(draft.wallInclusionRadius));
       setActiveTool(normalizeEditorTool(draft.activeTool));
       setCalibration(draft.calibration ?? null);
       setKnownSegmentMeters(draft.calibration?.knownMeters ?? 50);
@@ -1755,6 +1842,7 @@ export default function PlanimetriaEditor({
       inflate,
       gap,
       dash,
+      wallInclusionRadius,
       activeTool,
       calibration,
       totalArea: totals.area,
@@ -2623,9 +2711,10 @@ export default function PlanimetriaEditor({
     bounds: MaskBounds,
     canvasWidth: number,
     canvasHeight: number,
+    radius: number,
   ) {
     const visual = new Uint8Array(mask);
-    const radius = Math.max(4, Math.min(8, inflate + Math.ceil(dash / 12)));
+    if (radius <= 0) return visual;
     for (let y = bounds.minY; y <= bounds.maxY; y++) {
       const row = y * canvasWidth;
       for (let x = bounds.minX; x <= bounds.maxX; x++) {
@@ -2919,7 +3008,14 @@ export default function PlanimetriaEditor({
     canvasHeight: number,
     wallMap: Uint8Array,
   ): Region {
-    const visualMask = includeNearbyBarriers(mask, wallMap, bounds, canvasWidth, canvasHeight);
+    const visualMask = includeNearbyBarriers(
+      mask,
+      wallMap,
+      bounds,
+      canvasWidth,
+      canvasHeight,
+      resolvedWallInclusionRadius,
+    );
     let visualBounds = computeMaskBounds(visualMask, canvasWidth, canvasHeight);
     fillClosedHoles(visualMask, visualBounds, canvasWidth, canvasHeight);
     visualBounds = computeMaskBounds(visualMask, canvasWidth, canvasHeight) || { ...bounds, count };
@@ -3047,6 +3143,7 @@ export default function PlanimetriaEditor({
       inflate,
       gap,
       dash,
+      wallInclusionRadius,
       knownSegmentMeters,
     };
   }
@@ -3110,6 +3207,7 @@ export default function PlanimetriaEditor({
     setInflate(snapshot.inflate);
     setGap(snapshot.gap);
     setDash(snapshot.dash);
+    setWallInclusionRadius(snapshot.wallInclusionRadius);
     setKnownSegmentMeters(snapshot.knownSegmentMeters);
     runtimeRef.current.wallMap = null;
     runtimeRef.current.wallKey = "";
@@ -5295,11 +5393,7 @@ export default function PlanimetriaEditor({
     markDirty();
   }
 
-  function updateTraceSetting(
-    key: "threshold" | "inflate" | "gap" | "dash",
-    currentValue: number,
-    nextValue: number,
-  ) {
+  function updateTraceSetting(key: TuningKey, currentValue: number, nextValue: number) {
     if (currentValue === nextValue) return;
     recordUndoState();
     if (key === "threshold") setThreshold(nextValue);
@@ -5308,6 +5402,68 @@ export default function PlanimetriaEditor({
     if (key === "dash") setDash(nextValue);
     invalidateWallMap();
     markDirty();
+  }
+
+  function updateWallInclusionRadius(nextValue: number | null) {
+    const normalized = normalizeWallInclusionRadius(nextValue);
+    if (normalized === wallInclusionRadius) return;
+    recordUndoState();
+    setWallInclusionRadius(normalized);
+    setStatus(normalized === null ? "Inclusione muri in area: auto" : `Inclusione muri in area: ${normalized}px`);
+    markDirty();
+    bumpRevision();
+  }
+
+  function applyAreaTuningDefaults() {
+    const alreadyDefault =
+      threshold === SMART_TRACE_DEFAULTS.threshold &&
+      inflate === SMART_TRACE_DEFAULTS.inflate &&
+      gap === SMART_TRACE_DEFAULTS.gap &&
+      dash === SMART_TRACE_DEFAULTS.dash &&
+      wallInclusionRadius === SMART_TRACE_DEFAULTS.wallInclusionRadius;
+    if (alreadyDefault) return;
+    recordUndoState();
+    setThreshold(SMART_TRACE_DEFAULTS.threshold);
+    setInflate(SMART_TRACE_DEFAULTS.inflate);
+    setGap(SMART_TRACE_DEFAULTS.gap);
+    setDash(SMART_TRACE_DEFAULTS.dash);
+    setWallInclusionRadius(SMART_TRACE_DEFAULTS.wallInclusionRadius);
+    invalidateWallMap("Taratura aree ripristinata ai default");
+    markDirty();
+  }
+
+  function applyNarrowAreaTuningPreset() {
+    if (wallInclusionRadius === 1) return;
+    recordUndoState();
+    setWallInclusionRadius(1);
+    setStatus("Preset prova applicato: area piu stretta");
+    markDirty();
+    bumpRevision();
+  }
+
+  function saveCurrentAreaTuningTrial() {
+    const trial: AreaTuningTrial = {
+      id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+      createdAt: new Date().toISOString(),
+      threshold,
+      inflate,
+      gap,
+      dash,
+      wallInclusionRadius,
+      resolvedWallInclusionRadius,
+    };
+    setAreaTuningTrials((current) => {
+      const next = [trial, ...current].slice(0, 8);
+      saveAreaTuningTrials(property.id, next);
+      return next;
+    });
+    setStatus("Prova taratura aree salvata");
+  }
+
+  function clearAreaTuningTrials() {
+    setAreaTuningTrials([]);
+    saveAreaTuningTrials(property.id, []);
+    setStatus("Registro prove taratura svuotato");
   }
 
   async function toggleFocusMode() {
@@ -5938,6 +6094,133 @@ export default function PlanimetriaEditor({
               </label>
             )}
           </div>
+          <details
+            className="area-calibration-dock"
+            open={areaCalibrationOpen}
+            onToggle={(event) => setAreaCalibrationOpen(event.currentTarget.open)}
+          >
+            <summary>
+              <span>
+                <Ruler size={16} />
+                Strumento taratura aree
+              </span>
+              <em>
+                Bordo {wallInclusionRadius === null ? `auto ${resolvedWallInclusionRadius}px` : `${resolvedWallInclusionRadius}px`}
+              </em>
+              <ChevronDown size={15} />
+            </summary>
+            <div className="area-calibration-content">
+              <div className="area-calibration-baseline">
+                <strong>Default attuali</strong>
+                <span>
+                  Sensibilita {SMART_TRACE_DEFAULTS.threshold} · Spessore {SMART_TRACE_DEFAULTS.inflate} · Gap{" "}
+                  {SMART_TRACE_DEFAULTS.gap} · Tratteggi {SMART_TRACE_DEFAULTS.dash} · Bordo auto{" "}
+                  {autoWallInclusionRadius(SMART_TRACE_DEFAULTS.inflate, SMART_TRACE_DEFAULTS.dash)}px
+                </span>
+              </div>
+              <div className="area-tuning-grid">
+                <label className="area-tuning-field">
+                  <span>Sensibilita linee {threshold}</span>
+                  <input
+                    type="range"
+                    min={170}
+                    max={252}
+                    value={threshold}
+                    onChange={(event) => updateTraceSetting("threshold", threshold, Number(event.target.value))}
+                  />
+                </label>
+                <label className="area-tuning-field">
+                  <span>Spessore linee {inflate}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={5}
+                    value={inflate}
+                    onChange={(event) => updateTraceSetting("inflate", inflate, Number(event.target.value))}
+                  />
+                </label>
+                <label className="area-tuning-field">
+                  <span>Chiusura gap {gap}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={18}
+                    value={gap}
+                    onChange={(event) => updateTraceSetting("gap", gap, Number(event.target.value))}
+                  />
+                </label>
+                <label className="area-tuning-field">
+                  <span>Ponte tratteggi {dash}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={90}
+                    value={dash}
+                    onChange={(event) => updateTraceSetting("dash", dash, Number(event.target.value))}
+                  />
+                </label>
+                <label className="area-tuning-field area-tuning-field-wide">
+                  <span>
+                    Inclusione muri area{" "}
+                    {wallInclusionRadius === null
+                      ? `auto ${resolvedWallInclusionRadius}px`
+                      : `${resolvedWallInclusionRadius}px`}
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={8}
+                    value={resolvedWallInclusionRadius}
+                    onChange={(event) => updateWallInclusionRadius(Number(event.target.value))}
+                  />
+                </label>
+              </div>
+              <div className="area-tuning-wall-row">
+                <button
+                  type="button"
+                  className={wallInclusionRadius === null ? "active" : ""}
+                  onClick={() => updateWallInclusionRadius(null)}
+                >
+                  Auto
+                </button>
+                <small>0 non aggiunge pixel muro alla regione; auto replica il comportamento precedente.</small>
+              </div>
+              <div className="area-tuning-actions">
+                <button type="button" className="button secondary compact-button" onClick={applyNarrowAreaTuningPreset}>
+                  Area piu stretta
+                </button>
+                <button type="button" className="button secondary compact-button" onClick={applyAreaTuningDefaults}>
+                  Ripristina default
+                </button>
+                <button type="button" className="button primary compact-button" onClick={saveCurrentAreaTuningTrial}>
+                  Salva prova
+                </button>
+              </div>
+              <div className="area-tuning-trials">
+                <div className="area-tuning-trials-head">
+                  <strong>Prove salvate</strong>
+                  {areaTuningTrials.length > 0 && (
+                    <button type="button" onClick={clearAreaTuningTrials}>
+                      Svuota
+                    </button>
+                  )}
+                </div>
+                {areaTuningTrials.length === 0 ? (
+                  <span>Nessuna prova salvata</span>
+                ) : (
+                  areaTuningTrials.map((trial) => (
+                    <div key={trial.id} className="area-tuning-trial-row">
+                      <time>{new Date(trial.createdAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</time>
+                      <span>
+                        S {trial.threshold} · I {trial.inflate} · G {trial.gap} · T {trial.dash} · Bordo{" "}
+                        {trial.wallInclusionRadius === null ? `auto ${trial.resolvedWallInclusionRadius}px` : `${trial.wallInclusionRadius}px`}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </details>
         </section>
 
         {rightPanelOpen && (
