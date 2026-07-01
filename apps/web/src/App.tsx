@@ -61,7 +61,7 @@ const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.16";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
-type PropertyOutcome = "Positivo" | "Negativo" | "Non analizzato";
+type PropertyOutcome = "Positivo" | "Negativo" | "Neutro";
 
 type PriceListItem = {
   id: string;
@@ -278,6 +278,8 @@ type PlanAreaDraftSelection = {
   customUsageLabel?: string;
   color?: string;
   rate?: number;
+  areaOverrideM2?: number | null;
+  amountOverride?: number | null;
   opacity: number;
   totalPixels: number;
   source?: "smart" | "polygon" | "merged" | "copy";
@@ -493,7 +495,7 @@ const demoStudies: FeasibilityStudy[] = [
         estimatedRendita: 0,
         diffPercent: 0,
         imuDiff: 0,
-        outcome: "Non analizzato",
+        outcome: "Neutro",
         hasStudy: false,
         documents: {
           planimetria: "planimetria-au-06.pdf",
@@ -541,7 +543,7 @@ const demoStudies: FeasibilityStudy[] = [
         estimatedRendita: 0,
         diffPercent: 0,
         imuDiff: 0,
-        outcome: "Non analizzato",
+        outcome: "Neutro",
         hasStudy: false,
         documents: {
           planimetria: "planimetria-au-09.pdf",
@@ -573,7 +575,7 @@ const demoStudies: FeasibilityStudy[] = [
         estimatedRendita: 0,
         diffPercent: 0,
         imuDiff: 0,
-        outcome: "Non analizzato",
+        outcome: "Neutro",
         hasStudy: false,
         documents: {
           planimetria: "planimetria-au-11.pdf",
@@ -662,7 +664,7 @@ const demoStudies: FeasibilityStudy[] = [
         estimatedRendita: 0,
         diffPercent: 0,
         imuDiff: 0,
-        outcome: "Non analizzato",
+        outcome: "Neutro",
         hasStudy: false,
         documents: {
           planimetria: "planimetria-gs-03.pdf",
@@ -694,7 +696,7 @@ const demoStudies: FeasibilityStudy[] = [
         estimatedRendita: 0,
         diffPercent: 0,
         imuDiff: 0,
-        outcome: "Non analizzato",
+        outcome: "Neutro",
         hasStudy: false,
         documents: {
           planimetria: "planimetria-gs-05.pdf",
@@ -758,7 +760,7 @@ const demoStudies: FeasibilityStudy[] = [
         estimatedRendita: 0,
         diffPercent: 0,
         imuDiff: 0,
-        outcome: "Non analizzato",
+        outcome: "Neutro",
         hasStudy: false,
         documents: {
           planimetria: "planimetria-gs-09.pdf",
@@ -862,7 +864,7 @@ const demoStudies: FeasibilityStudy[] = [
         estimatedRendita: 0,
         diffPercent: 0,
         imuDiff: 0,
-        outcome: "Non analizzato",
+        outcome: "Neutro",
         hasStudy: false,
         documents: {
           planimetria: "planimetria-ai-04.pdf",
@@ -910,7 +912,7 @@ const demoStudies: FeasibilityStudy[] = [
         estimatedRendita: 0,
         diffPercent: 0,
         imuDiff: 0,
-        outcome: "Non analizzato",
+        outcome: "Neutro",
         hasStudy: false,
         documents: {
           planimetria: "planimetria-ai-07.pdf",
@@ -1031,7 +1033,7 @@ const demoStudies: FeasibilityStudy[] = [
         estimatedRendita: 0,
         diffPercent: 0,
         imuDiff: 0,
-        outcome: "Non analizzato",
+        outcome: "Neutro",
         hasStudy: false,
         documents: {
           planimetria: "planimetria-nl-05.pdf",
@@ -1135,7 +1137,7 @@ const demoStudies: FeasibilityStudy[] = [
         estimatedRendita: 0,
         diffPercent: 0,
         imuDiff: 0,
-        outcome: "Non analizzato",
+        outcome: "Neutro",
         hasStudy: false,
         documents: {
           planimetria: "planimetria-tv-04.pdf",
@@ -1280,6 +1282,8 @@ const editableStatusOptions: StudyStatus[] = [
   "In revisione",
   "Concluso",
 ];
+
+const propertyOutcomeOptions: PropertyOutcome[] = ["Positivo", "Negativo", "Neutro"];
 
 const planAreaUsages: Array<{
   id: PlanAreaUsageId;
@@ -1434,6 +1438,16 @@ function formatM2(value: number) {
   return `${areaFormatter.format(value)} m2`;
 }
 
+function parseLocalizedNumberInput(value: string) {
+  const trimmed = value.trim().replace(/\s+/g, "");
+  if (!trimmed) return null;
+  const normalized = trimmed.includes(",")
+    ? trimmed.replace(/\./g, "").replace(",", ".")
+    : trimmed;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function planAreaDraftKey(propertyId: string) {
   return `${PLAN_AREA_DRAFT_KEY_PREFIX}${propertyId}`;
 }
@@ -1480,6 +1494,57 @@ function pageRealAreaM2(sheetSize: PlanAreaSheetSize, scaleDenominator: number) 
 function planAreaFromPixels(selection: PlanAreaDraftSelection, draft: PlanAreaDraft) {
   if (!selection.totalPixels) return 0;
   return (selection.region.count / selection.totalPixels) * pageRealAreaM2(draft.sheetSize, draft.scaleDenominator);
+}
+
+function planAreaEffectiveAreaM2(selection: PlanAreaDraftSelection, draft: PlanAreaDraft) {
+  return typeof selection.areaOverrideM2 === "number" && Number.isFinite(selection.areaOverrideM2)
+    ? selection.areaOverrideM2
+    : planAreaFromPixels(selection, draft);
+}
+
+function planAreaEffectiveAmount(selection: PlanAreaDraftSelection, draft: PlanAreaDraft) {
+  const usage = planAreaUsageForSelection(selection);
+  const rate = selection.rate ?? usage.rate;
+  const computedAmount = planAreaEffectiveAreaM2(selection, draft) * rate;
+  return typeof selection.amountOverride === "number" && Number.isFinite(selection.amountOverride)
+    ? selection.amountOverride
+    : computedAmount;
+}
+
+function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft): PlanAreaDraft {
+  const totals = draft.selections.reduce(
+    (acc, selection) => {
+      acc.area += planAreaEffectiveAreaM2(selection, draft);
+      acc.amount += planAreaEffectiveAmount(selection, draft);
+      return acc;
+    },
+    { area: 0, amount: 0 },
+  );
+  return {
+    ...draft,
+    totalArea: totals.area,
+    totalEstimatedAmount: totals.amount,
+  };
+}
+
+function clonePlanAreaDraft(draft: PlanAreaDraft): PlanAreaDraft {
+  return JSON.parse(JSON.stringify(draft)) as PlanAreaDraft;
+}
+
+function planAreaUsageChoiceValue(selection: PlanAreaDraftSelection, draft: PlanAreaDraft) {
+  if (selection.usageId !== PLAN_AREA_CUSTOM_USAGE_ID) return `fixed:${selection.usageId}`;
+  if (selection.customUsageId && draft.customUsages?.some((customUsage) => customUsage.id === selection.customUsageId)) {
+    return `custom:${selection.customUsageId}`;
+  }
+  return `orphan:${selection.id}`;
+}
+
+function handleNumericInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>, fallbackValue: string) {
+  if (event.key === "Enter") event.currentTarget.blur();
+  if (event.key === "Escape") {
+    event.currentTarget.value = fallbackValue;
+    event.currentTarget.blur();
+  }
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -1537,7 +1602,10 @@ function readLocalPlanAreaDraft(propertyId: string) {
   }
 }
 
-function usePlanAreaDraft(propertyId: string | null): PlanAreaDraftState {
+function usePlanAreaDraft(propertyId: string | null): [
+  PlanAreaDraftState,
+  (draft: PlanAreaDraft, source?: PlanAreaDraftState["source"], error?: boolean) => void,
+] {
   const [state, setState] = useState<PlanAreaDraftState>({
     draft: null,
     loading: false,
@@ -1605,7 +1673,11 @@ function usePlanAreaDraft(propertyId: string | null): PlanAreaDraftState {
     };
   }, [propertyId]);
 
-  return state;
+  function updateDraft(draft: PlanAreaDraft, source: PlanAreaDraftState["source"] = "database", error = false) {
+    setState({ draft, loading: false, source, error });
+  }
+
+  return [state, updateDraft];
 }
 
 function propertyLocation(property: PropertyItem) {
@@ -1647,12 +1719,32 @@ function getCounts(study: FeasibilityStudy) {
       if (property.hasStudy) acc.performed += 1;
       if (property.outcome === "Positivo") acc.positive += 1;
       if (property.outcome === "Negativo") acc.negative += 1;
-      if (property.outcome === "Non analizzato") acc.pending += 1;
+      if (property.outcome === "Neutro") acc.pending += 1;
       if (property.categoria.startsWith("D/")) acc.catD += 1;
       return acc;
     },
     { total: 0, performed: 0, positive: 0, negative: 0, pending: 0, catD: 0 },
   );
+}
+
+function normalizePropertyOutcome(value: string): PropertyOutcome {
+  const normalized = value.toLowerCase();
+  if (normalized === "positivo") return "Positivo";
+  if (normalized === "negativo") return "Negativo";
+  return "Neutro";
+}
+
+function propertyWithEstimatedValue(property: PropertyItem, estimatedRendita: number): PropertyItem {
+  const diffPercent =
+    property.currentRendita === 0
+      ? 0
+      : ((estimatedRendita - property.currentRendita) / property.currentRendita) * 100;
+  return {
+    ...property,
+    estimatedRendita,
+    diffPercent,
+    hasStudy: true,
+  };
 }
 
 function getSortValue(study: FeasibilityStudy, sortKey: SortKey) {
@@ -1885,6 +1977,45 @@ function App() {
     }
   }
 
+  function updatePropertyInStudies(propertyId: string, updater: (property: PropertyItem) => PropertyItem) {
+    setStudies((current) =>
+      current.map((study) => {
+        let changed = false;
+        const properties = study.properties.map((property) => {
+          if (property.id !== propertyId) return property;
+          changed = true;
+          return updater(property);
+        });
+        return changed ? { ...study, properties } : study;
+      }),
+    );
+  }
+
+  function updatePropertyEstimatedValue(propertyId: string, estimatedRendita: number) {
+    updatePropertyInStudies(propertyId, (property) => propertyWithEstimatedValue(property, estimatedRendita));
+  }
+
+  async function updatePropertyOutcome(propertyId: string, outcome: PropertyOutcome) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/properties/${encodeURIComponent(propertyId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outcome }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const updated = (await response.json()) as { id: string; outcome: string };
+      updatePropertyInStudies(updated.id, (property) => ({
+        ...property,
+        outcome: normalizePropertyOutcome(updated.outcome),
+      }));
+      flash("Esito immobile aggiornato.");
+      return true;
+    } catch {
+      flash("Impossibile aggiornare l'esito immobile.");
+      return false;
+    }
+  }
+
   async function reorderStudyProperties(studyId: string, propertyIds: string[]) {
     try {
       const response = await fetch(`${API_BASE_URL}/studies/${encodeURIComponent(studyId)}/properties/order`, {
@@ -2059,6 +2190,7 @@ function App() {
             property={editorProperty}
             onBack={() => navigate({ view: "study", studyId: editorStudy.id })}
             onDirtyChange={setEditorDirty}
+            onDraftSaved={updatePropertyEstimatedValue}
           />
         </Suspense>
       </Shell>
@@ -2081,6 +2213,8 @@ function App() {
           onNotice={flash}
           onUpdate={(input) => updateStudy(activeStudy.id, input)}
           onReorder={(propertyIds) => reorderStudyProperties(activeStudy.id, propertyIds)}
+          onPropertyEstimateChange={updatePropertyEstimatedValue}
+          onOutcomeChange={updatePropertyOutcome}
           presentationFile={presentationFiles[activeStudy.id]}
           onPresentationUpload={(file) => attachPresentation(activeStudy.id, file)}
           onOpenEditor={(property) =>
@@ -2106,6 +2240,7 @@ function App() {
           onOpenEditor={(study, property) =>
             navigate({ view: "editor", studyId: study.id, propertyId: property.id })
           }
+          onOutcomeChange={updatePropertyOutcome}
         />
       </Shell>
     );
@@ -2205,7 +2340,7 @@ function App() {
                   <i className="dot negative" /> Negativo
                 </span>
                 <span>
-                  <i className="dot pending" /> Non analizzato
+                  <i className="dot pending" /> Neutro
                 </span>
               </div>
             </div>
@@ -2440,6 +2575,7 @@ function App() {
                         navigate({ view: "editor", studyId: study.id, propertyId: property.id })
                       }
                       onUpdate={(input) => updateStudy(study.id, input)}
+                      onOutcomeChange={updatePropertyOutcome}
                       onNotice={flash}
                       presentationFile={presentationFiles[study.id]}
                       onPresentationUpload={(file) => attachPresentation(study.id, file)}
@@ -2630,10 +2766,10 @@ function Shell({
         </nav>
 
         <div className="operator-card" aria-label="Operatore corrente">
-          <div className="avatar">MG</div>
+          <div className="avatar">DU</div>
           <div>
-            <strong>Marco Giordani</strong>
-            <span>Commerciale</span>
+            <strong>Default User</strong>
+            <span>Responsabile Tecnico</span>
           </div>
           <ChevronDown size={17} />
         </div>
@@ -2749,10 +2885,12 @@ function PropertiesPage({
   studies,
   onOpenStudy,
   onOpenEditor,
+  onOutcomeChange,
 }: {
   studies: FeasibilityStudy[];
   onOpenStudy: (study: FeasibilityStudy) => void;
   onOpenEditor: (study: FeasibilityStudy, property: PropertyItem) => void;
+  onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
 }) {
   const properties = studies.flatMap((study) =>
     study.properties.map((property) => ({ property, study })),
@@ -2798,7 +2936,10 @@ function PropertiesPage({
                   <td>{property.categoria}</td>
                   <td>{formatEuro(property.currentRendita)}</td>
                   <td>
-                    <OutcomeBadge outcome={property.outcome} />
+                    <OutcomeSelect
+                      outcome={property.outcome}
+                      onChange={(outcome) => onOutcomeChange(property.id, outcome)}
+                    />
                   </td>
                   <td>
                     <button className="inline-link" onClick={() => onOpenStudy(study)}>
@@ -3187,6 +3328,7 @@ function StudyRows({
   onOpenDetail,
   onOpenEditor,
   onUpdate,
+  onOutcomeChange,
   onNotice,
   presentationFile,
   onPresentationUpload,
@@ -3201,6 +3343,7 @@ function StudyRows({
   onOpenDetail: () => void;
   onOpenEditor: (property: PropertyItem) => void;
   onUpdate: (input: StudyUpdate) => Promise<boolean>;
+  onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
   onNotice: (message: string) => void;
   presentationFile?: File;
   onPresentationUpload: (file: File) => void;
@@ -3410,7 +3553,7 @@ function StudyRows({
                         </span>
                         <span>
                           <i className="dot pending" />
-                          {counts.pending} non analizzati
+                          {counts.pending} neutri
                         </span>
                       </div>
                     </div>
@@ -3499,7 +3642,7 @@ function StudyRows({
                             <th>Indirizzo</th>
                             <th>Categoria</th>
                             <th>Rendita attuale</th>
-                            <th>Rendita stimata</th>
+                            <th>Rendita proposta</th>
                             <th>Diff. rendita</th>
                             <th>Esito</th>
                             <th>Documenti</th>
@@ -3512,6 +3655,7 @@ function StudyRows({
                               property={property}
                               onOpenEditor={() => onOpenEditor(property)}
                               onOpenDocument={(type) => handleOpenDocument(property, type)}
+                              onOutcomeChange={onOutcomeChange}
                             />
                           ))}
                         </tbody>
@@ -3532,10 +3676,12 @@ function PropertyRow({
   property,
   onOpenEditor,
   onOpenDocument,
+  onOutcomeChange,
 }: {
   property: PropertyItem;
   onOpenEditor?: () => void;
   onOpenDocument?: (type: PropertyDocumentKind) => void;
+  onOutcomeChange?: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
 }) {
   const planimetriaUrl = propertyDocumentUrl(property, "planimetria");
   const visuraUrl = propertyDocumentUrl(property, "visura");
@@ -3555,7 +3701,11 @@ function PropertyRow({
         <Delta value={property.diffPercent} suffix="%" muted={!property.hasStudy} />
       </td>
       <td>
-        <OutcomeBadge outcome={property.outcome} />
+        {onOutcomeChange ? (
+          <OutcomeSelect outcome={property.outcome} onChange={(outcome) => onOutcomeChange(property.id, outcome)} />
+        ) : (
+          <OutcomeBadge outcome={property.outcome} />
+        )}
       </td>
       <td>
         <div className="document-actions">
@@ -3678,6 +3828,8 @@ function StudyDetail({
   onNotice,
   onUpdate,
   onReorder,
+  onPropertyEstimateChange,
+  onOutcomeChange,
   presentationFile,
   onPresentationUpload,
 }: {
@@ -3688,6 +3840,8 @@ function StudyDetail({
   onNotice: (message: string) => void;
   onUpdate: (input: StudyUpdate) => Promise<boolean>;
   onReorder: (propertyIds: string[]) => Promise<boolean>;
+  onPropertyEstimateChange: (propertyId: string, estimatedRendita: number) => void;
+  onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
   presentationFile?: File;
   onPresentationUpload: (file: File) => void;
 }) {
@@ -3751,7 +3905,7 @@ function StudyDetail({
     orderedProperties.every((property) => selectedPropertyIds.includes(property.id));
   const activeProperty =
     orderedProperties.find((property) => property.id === activePropertyId) ?? null;
-  const activeAreaDraftState = usePlanAreaDraft(activeProperty?.id ?? null);
+  const [activeAreaDraftState, setActiveAreaDraft] = usePlanAreaDraft(activeProperty?.id ?? null);
 
   useEffect(() => {
     if (activePropertyId && !study.properties.some((property) => property.id === activePropertyId)) {
@@ -3958,7 +4112,6 @@ function StudyDetail({
                 <PropertySortHeader label="Categoria" sortKey="categoria" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Titolarita" sortKey="titolarita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Esito" sortKey="outcome" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <th>Azioni</th>
               </tr>
             </thead>
             <tbody>
@@ -4021,84 +4174,10 @@ function StudyDetail({
                     <td>{property.categoria}</td>
                     <td>{property.titolarita || "In attesa ERP"}</td>
                     <td>
-                      <OutcomeBadge outcome={property.outcome} />
-                    </td>
-                    <td>
-                      <div className="property-external-actions">
-                        <button
-                          type="button"
-                          className={activePropertyId === property.id ? "active" : ""}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setActivePropertyId(property.id);
-                          }}
-                        >
-                          <FileText size={14} />
-                          Dettaglio
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!toForMapsEntry(propertyForMapsPayload(property))}
-                          title="Apri forMaps"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openPropertyInForMaps(property);
-                          }}
-                        >
-                          <Building2 size={14} />
-                          forMaps
-                        </button>
-                        <a href={googleEarthUrl(property)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
-                          <Globe size={14} />
-                          Earth
-                        </a>
-                        <a href={googleMapsUrl(property)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
-                          <MapPin size={14} />
-                          Maps
-                        </a>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onOpenEditor(property);
-                          }}
-                        >
-                          <File size={14} />
-                          Editor
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!propertyDocumentUrl(property, "planimetria")}
-                          title={
-                            propertyDocumentUrl(property, "planimetria")
-                              ? "Apri planimetria PDF"
-                              : "Planimetria PDF non disponibile nello storage documentale"
-                          }
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleOpenDocument(property, "planimetria");
-                          }}
-                        >
-                          <File size={14} />
-                          Planimetria PDF
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!propertyDocumentUrl(property, "visura")}
-                          title={
-                            propertyDocumentUrl(property, "visura")
-                              ? "Apri visura PDF"
-                              : "Visura PDF non disponibile nello storage documentale"
-                          }
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleOpenDocument(property, "visura");
-                          }}
-                        >
-                          <FileText size={14} />
-                          Visura PDF
-                        </button>
-                      </div>
+                      <OutcomeSelect
+                        outcome={property.outcome}
+                        onChange={(outcome) => onOutcomeChange(property.id, outcome)}
+                      />
                     </td>
                   </tr>
                 );
@@ -4106,17 +4185,25 @@ function StudyDetail({
             </tbody>
           </table>
         </div>
-        {activeProperty && (
-          <PropertyAreaDetail
-            property={activeProperty}
-            draftState={activeAreaDraftState}
-            onOpenEditor={() => onOpenEditor(activeProperty)}
-            onOpenDocument={(type) => handleOpenDocument(activeProperty, type)}
-            onMissing={onNotice}
-            onClose={() => setActivePropertyId(null)}
-          />
-        )}
       </section>
+      {activeProperty && (
+        <PropertyAreaDetail
+          property={activeProperty}
+          draftState={activeAreaDraftState}
+          onDraftSaved={(draft, source, error) => {
+            setActiveAreaDraft(draft, source, error);
+            if (typeof draft.totalEstimatedAmount === "number" && Number.isFinite(draft.totalEstimatedAmount)) {
+              onPropertyEstimateChange(activeProperty.id, draft.totalEstimatedAmount);
+            }
+          }}
+          onOpenEditor={() => onOpenEditor(activeProperty)}
+          canOpenForMaps={Boolean(toForMapsEntry(propertyForMapsPayload(activeProperty)))}
+          onOpenForMaps={() => openPropertyInForMaps(activeProperty)}
+          onOpenDocument={(type) => handleOpenDocument(activeProperty, type)}
+          onMissing={onNotice}
+          onClose={() => setActivePropertyId(null)}
+        />
+      )}
 
       <section className="detail-metrics">
         <DetailMetric
@@ -4160,7 +4247,7 @@ function StudyDetail({
             <SummaryStat label="Studi eseguiti" value={`${counts.performed}/${counts.total}`} />
             <SummaryStat label="Positivi" value={counts.positive.toString()} />
             <SummaryStat label="Negativi" value={counts.negative.toString()} />
-            <SummaryStat label="Non analizzati" value={counts.pending.toString()} />
+            <SummaryStat label="Neutri" value={counts.pending.toString()} />
           </div>
         </div>
 
@@ -4196,35 +4283,58 @@ function StudyDetail({
 function PropertyAreaDetail({
   property,
   draftState,
+  onDraftSaved,
   onOpenEditor,
+  canOpenForMaps,
+  onOpenForMaps,
   onOpenDocument,
   onMissing,
   onClose,
 }: {
   property: PropertyItem;
   draftState: PlanAreaDraftState;
+  onDraftSaved: (draft: PlanAreaDraft, source?: PlanAreaDraftState["source"], error?: boolean) => void;
   onOpenEditor: () => void;
+  canOpenForMaps: boolean;
+  onOpenForMaps: () => void;
   onOpenDocument: (type: PropertyDocumentKind) => void;
   onMissing: (message: string) => void;
   onClose: () => void;
 }) {
-  const draft = draftState.draft;
+  const [editableDraft, setEditableDraft] = useState<PlanAreaDraft | null>(() =>
+    draftState.draft ? clonePlanAreaDraft(draftState.draft) : null,
+  );
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setEditableDraft(draftState.draft ? clonePlanAreaDraft(draftState.draft) : null);
+    setDirty(false);
+  }, [draftState.draft?.propertyId, draftState.draft?.savedAt]);
+
+  const draft = editableDraft;
   const rows = useMemo(() => {
     if (!draft) return [];
     return draft.selections.map((selection, index) => {
       const usage = planAreaUsageForSelection(selection);
       const rate = selection.rate ?? usage.rate;
-      const area = planAreaFromPixels(selection, draft);
+      const calculatedArea = planAreaFromPixels(selection, draft);
+      const area = planAreaEffectiveAreaM2(selection, draft);
+      const calculatedAmount = area * rate;
+      const amount = planAreaEffectiveAmount(selection, draft);
       return {
         id: selection.id,
         index: index + 1,
         page: selection.page,
+        selection,
         usage,
         rate,
         area,
-        amount: area * rate,
-        pixels: selection.region.count,
-        opacity: Math.round(selection.opacity * 100),
+        calculatedArea,
+        amount,
+        calculatedAmount,
+        areaOverridden: typeof selection.areaOverrideM2 === "number" && Number.isFinite(selection.areaOverrideM2),
+        amountOverridden: typeof selection.amountOverride === "number" && Number.isFinite(selection.amountOverride),
         source: planAreaSourceLabel(selection.source),
       };
     });
@@ -4266,23 +4376,184 @@ function PropertyAreaDetail({
   const topPriceLists = property.priceLists?.slice(0, 5) ?? [];
   const primaryPriceList = topPriceLists[0];
 
+  function updateEditableDraft(updater: (draft: PlanAreaDraft) => void) {
+    setEditableDraft((current) => {
+      if (!current) return current;
+      const next = clonePlanAreaDraft(current);
+      updater(next);
+      return recalculatePlanAreaDraftTotals(next);
+    });
+    setDirty(true);
+  }
+
+  function updateEditableSelection(selectionId: string, updater: (selection: PlanAreaDraftSelection, draft: PlanAreaDraft) => void) {
+    updateEditableDraft((nextDraft) => {
+      const selection = nextDraft.selections.find((item) => item.id === selectionId);
+      if (!selection) return;
+      updater(selection, nextDraft);
+    });
+  }
+
+  function handleUsageChange(selectionId: string, value: string) {
+    updateEditableSelection(selectionId, (selection, nextDraft) => {
+      if (value.startsWith("fixed:")) {
+        const usage = planAreaUsageById(value.slice("fixed:".length));
+        selection.usageId = usage.id;
+        selection.customUsageId = undefined;
+        selection.customUsageLabel = undefined;
+        selection.color = usage.color;
+        selection.rate = usage.rate;
+        return;
+      }
+      if (value.startsWith("custom:")) {
+        const customUsage = nextDraft.customUsages?.find((item) => item.id === value.slice("custom:".length));
+        if (!customUsage) return;
+        selection.usageId = PLAN_AREA_CUSTOM_USAGE_ID;
+        selection.customUsageId = customUsage.id;
+        selection.customUsageLabel = customUsage.label;
+        selection.color = customUsage.color;
+        selection.rate = customUsage.rate;
+      }
+    });
+  }
+
+  function handleNumberBlur(
+    rawValue: string,
+    fallback: number,
+    onValid: (value: number) => void,
+    input: HTMLInputElement,
+    message: string,
+  ) {
+    const parsed = parseLocalizedNumberInput(rawValue);
+    if (parsed === null || parsed < 0) {
+      input.value = areaFormatter.format(fallback);
+      onMissing(message);
+      return;
+    }
+    onValid(parsed);
+    input.value = areaFormatter.format(parsed);
+  }
+
+  function handleAreaBlur(row: (typeof rows)[number], input: HTMLInputElement) {
+    handleNumberBlur(
+      input.value,
+      row.area,
+      (value) =>
+        updateEditableSelection(row.id, (selection) => {
+          selection.areaOverrideM2 = Math.abs(value - row.calculatedArea) < 0.005 ? null : value;
+        }),
+      input,
+      "Inserisci una superficie valida.",
+    );
+  }
+
+  function handleRateBlur(row: (typeof rows)[number], input: HTMLInputElement) {
+    handleNumberBlur(
+      input.value,
+      row.rate,
+      (value) =>
+        updateEditableSelection(row.id, (selection) => {
+          selection.rate = value;
+        }),
+      input,
+      "Inserisci un valore al m2 valido.",
+    );
+  }
+
+  function handleAmountBlur(row: (typeof rows)[number], input: HTMLInputElement) {
+    handleNumberBlur(
+      input.value,
+      row.amount,
+      (value) =>
+        updateEditableSelection(row.id, (selection) => {
+          selection.amountOverride = Math.abs(value - row.calculatedAmount) < 0.005 ? null : value;
+        }),
+      input,
+      "Inserisci una stima valida.",
+    );
+  }
+
+  async function saveAreaDraft() {
+    if (!draft || saving) return;
+    setSaving(true);
+    const nextDraft = recalculatePlanAreaDraftTotals({
+      ...clonePlanAreaDraft(draft),
+      savedAt: new Date().toISOString(),
+    });
+    try {
+      window.localStorage.setItem(planAreaDraftKey(property.id), JSON.stringify(nextDraft));
+    } catch {
+      // Database save still proceeds when browser storage is unavailable.
+    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/analysis-draft`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextDraft),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      onDraftSaved(nextDraft, "database", false);
+      setEditableDraft(clonePlanAreaDraft(nextDraft));
+      setDirty(false);
+      onMissing("Lista aree salvata.");
+    } catch (error) {
+      console.error(error);
+      onDraftSaved(nextDraft, "local", true);
+      setEditableDraft(clonePlanAreaDraft(nextDraft));
+      setDirty(false);
+      onMissing("Lista aree salvata localmente; database non disponibile.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <section className="property-area-detail" aria-label={`Lista aree ${property.address}`}>
-      <div className="section-title property-area-detail-title">
-        <div>
-          <h2>Lista aree</h2>
-          <span>
-            {propertyLocation(property)} - {property.categoria}
-          </span>
+    <div className="modal-backdrop property-area-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="editor-modal property-area-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="property-area-modal-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head property-area-modal-head">
+          <div>
+            <h2 id="property-area-modal-title">Lista aree</h2>
+            <p>
+              {propertyLocation(property)} - {property.categoria}
+            </p>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi lista aree">
+            <X size={16} />
+          </button>
         </div>
+
         <div className="property-area-detail-actions">
           <span className={`area-draft-source ${draftState.error ? "warning" : ""}`}>
             {draftState.loading ? "Caricamento bozza..." : sourceLabel}
           </span>
           <button className="button secondary compact-button" type="button" onClick={onOpenEditor}>
             <File size={14} />
-            Apri editor
+            Editor
           </button>
+          <button
+            className="button secondary compact-button"
+            type="button"
+            disabled={!canOpenForMaps}
+            title={canOpenForMaps ? "Apri forMaps" : "Dati catastali incompleti per forMaps"}
+            onClick={onOpenForMaps}
+          >
+            <Building2 size={14} />
+            forMaps
+          </button>
+          <a className="button secondary compact-button" href={googleEarthUrl(property)} target="_blank" rel="noreferrer">
+            <Globe size={14} />
+            Earth
+          </a>
+          <a className="button secondary compact-button" href={googleMapsUrl(property)} target="_blank" rel="noreferrer">
+            <MapPin size={14} />
+            Maps
+          </a>
           <button
             className="button secondary compact-button"
             type="button"
@@ -4315,138 +4586,233 @@ function PropertyAreaDetail({
             className="button secondary compact-button"
             type="button"
             disabled={!primaryPriceList}
-            title={
-              primaryPriceList
-                ? `Apri ${primaryPriceList.title}`
-                : "Nessun prezzario territoriale disponibile"
-            }
+            title={primaryPriceList ? `Apri ${primaryPriceList.title}` : "Nessun prezzario territoriale disponibile"}
             onClick={() => openPriceListDocument(primaryPriceList, onMissing)}
           >
             <ExternalLink size={14} />
             Prezzario
           </button>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi dettaglio immobile">
-            <X size={16} />
-          </button>
         </div>
-      </div>
-      {topPriceLists.length > 0 && (
-        <section className="property-price-list-panel" aria-label="Prezzari rilevanti">
-          <div className="property-price-list-header">
-            <strong>Prezzari rilevanti</strong>
-          </div>
-          <div className="property-price-list-list">
-            {topPriceLists.map((priceList, index) => (
-              <button
-                key={priceList.id}
-                className={index === 0 ? "primary" : ""}
-                type="button"
-                title={`${priceList.reason}${priceList.distanceKm ? ` - ${Math.round(priceList.distanceKm)} km` : ""}`}
-                onClick={() => openPriceListDocument(priceList, onMissing)}
-              >
-                <span className="price-list-rank">{priceList.rank}</span>
-                <span className="price-list-copy">
-                  <strong>{priceList.territoryName}</strong>
-                  <small>
-                    {priceList.reason}
-                    {priceList.distanceKm ? ` - ${Math.round(priceList.distanceKm)} km` : ""}
-                  </small>
-                </span>
-                {priceList.year && <span className="price-list-year">{priceList.year}</span>}
-                <ExternalLink size={14} />
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
 
-      {!draft && draftState.loading ? (
-        <div className="property-area-empty">
-          <FileText size={22} />
-          <strong>Caricamento lista aree</strong>
-        </div>
-      ) : !draft ? (
-        <div className="property-area-empty">
-          <FileText size={24} />
-          <strong>Nessuna lista aree salvata</strong>
-          <span>Salva una bozza dall'editor planimetrie per vedere qui superfici, valori e stime.</span>
-          <button className="button primary compact-button" type="button" onClick={onOpenEditor}>
-            <File size={14} />
-            Apri editor planimetria
-          </button>
-        </div>
-      ) : (
-        <>
-          <div className="property-area-summary">
-            <SummaryStat label="Aree tracciate" value={rows.length.toString()} />
-            <SummaryStat label="Area totale" value={formatM2(totals.area)} />
-            <SummaryStat label="Stima prototipo" value={formatEuro(totals.amount)} />
-            <SummaryStat label="Scala e foglio" value={`${draft.sheetSize} 1:${draft.scaleDenominator}`} />
-            <SummaryStat label="Origine scala" value={planScaleSourceLabel(draft.scaleSource)} />
-            <SummaryStat
-              label="Scala AI"
-              value={draft.aiScaleDenominator ? `${draft.aiSheetSize ?? draft.sheetSize} 1:${draft.aiScaleDenominator}` : "Non rilevata"}
-            />
-          </div>
-
-          <div className="property-area-meta">
-            <span>Documento: {draft.document.fileName}</span>
-            <span>Bozza salvata: {formatDateTime(draft.savedAt)}</span>
-            {draftState.error && <span>Database non raggiungibile, visualizzo la bozza locale.</span>}
-          </div>
-
-          {breakdown.length > 0 && (
-            <div className="property-area-breakdown" aria-label="Ripartizione aree">
-              {breakdown.map(({ usage, area }) => (
-                <span key={`${usage.id}-${usage.label}`}>
-                  <i style={{ background: usage.color }} />
-                  <strong>{usage.shortLabel}</strong>
-                  {formatM2(area)}
-                </span>
+        {topPriceLists.length > 0 && (
+          <details className="property-price-list-dropdown">
+            <summary>
+              <span>Prezzari rilevanti</span>
+              <strong>{topPriceLists.length}</strong>
+              <ChevronDown size={15} />
+            </summary>
+            <div className="property-price-list-menu">
+              {topPriceLists.map((priceList, index) => (
+                <button
+                  key={priceList.id}
+                  className={index === 0 ? "primary" : ""}
+                  type="button"
+                  title={`${priceList.reason}${priceList.distanceKm ? ` - ${Math.round(priceList.distanceKm)} km` : ""}`}
+                  onClick={() => openPriceListDocument(priceList, onMissing)}
+                >
+                  <span className="price-list-rank">{priceList.rank}</span>
+                  <span className="price-list-copy">
+                    <strong>{priceList.territoryName}</strong>
+                    <small>
+                      {priceList.reason}
+                      {priceList.distanceKm ? ` - ${Math.round(priceList.distanceKm)} km` : ""}
+                    </small>
+                  </span>
+                  {priceList.year && <span className="price-list-year">{priceList.year}</span>}
+                  <ExternalLink size={14} />
+                </button>
               ))}
             </div>
-          )}
+          </details>
+        )}
 
-          <div className="compact-table-wrap">
-            <table className="compact-table property-area-table">
-              <thead>
-                <tr>
-                  <th>Area</th>
-                  <th>Pagina</th>
-                  <th>Tipologia</th>
-                  <th>Superficie</th>
-                  <th>Valore</th>
-                  <th>Stima</th>
-                  <th>Pixel</th>
-                  <th>Opacita</th>
-                  <th>Origine</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.id}>
-                    <td>Area {row.index}</td>
-                    <td>{row.page}</td>
-                    <td>
-                      <span className="area-usage-cell">
-                        <i style={{ background: row.usage.color }} />
-                        {row.usage.label}
-                      </span>
-                    </td>
-                    <td>{formatM2(row.area)}</td>
-                    <td>{areaFormatter.format(row.rate)} Euro/m2</td>
-                    <td>{formatEuro(row.amount)}</td>
-                    <td>{row.pixels.toLocaleString("it-IT")}</td>
-                    <td>{row.opacity}%</td>
-                    <td>{row.source}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {!draft && draftState.loading ? (
+          <div className="property-area-empty">
+            <FileText size={22} />
+            <strong>Caricamento lista aree</strong>
           </div>
-        </>
-      )}
-    </section>
+        ) : !draft ? (
+          <div className="property-area-empty">
+            <FileText size={24} />
+            <strong>Nessuna lista aree salvata</strong>
+            <span>Salva una bozza dall'editor planimetrie per vedere qui superfici, valori e stime.</span>
+            <button className="button primary compact-button" type="button" onClick={onOpenEditor}>
+              <File size={14} />
+              Apri editor planimetria
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="property-area-summary">
+              <SummaryStat label="Aree tracciate" value={rows.length.toString()} />
+              <SummaryStat label="Area totale" value={formatM2(totals.area)} />
+              <SummaryStat label="Stima prototipo" value={formatEuro(totals.amount)} />
+              <SummaryStat label="Scala e foglio" value={`${draft.sheetSize} 1:${draft.scaleDenominator}`} />
+              <SummaryStat label="Origine scala" value={planScaleSourceLabel(draft.scaleSource)} />
+              <SummaryStat
+                label="Scala AI"
+                value={draft.aiScaleDenominator ? `${draft.aiSheetSize ?? draft.sheetSize} 1:${draft.aiScaleDenominator}` : "Non rilevata"}
+              />
+            </div>
+
+            <div className="property-area-meta">
+              <span>Documento: {draft.document.fileName}</span>
+              <span>Bozza salvata: {formatDateTime(draft.savedAt)}</span>
+              {draftState.error && <span>Database non raggiungibile, visualizzo la bozza locale.</span>}
+            </div>
+
+            {breakdown.length > 0 && (
+              <div className="property-area-breakdown" aria-label="Ripartizione aree">
+                {breakdown.map(({ usage, area }) => (
+                  <span key={`${usage.id}-${usage.label}`}>
+                    <i style={{ background: usage.color }} />
+                    <strong>{usage.shortLabel}</strong>
+                    {formatM2(area)}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div className="compact-table-wrap">
+              <table className="compact-table property-area-table editable-property-area-table">
+                <thead>
+                  <tr>
+                    <th>Area</th>
+                    <th>Pagina</th>
+                    <th>Tipologia</th>
+                    <th>Superficie</th>
+                    <th>Valore</th>
+                    <th>Stima</th>
+                    <th>Origine</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => {
+                    const orphanCustomLabel =
+                      row.selection.usageId === PLAN_AREA_CUSTOM_USAGE_ID &&
+                      row.selection.customUsageId &&
+                      !draft.customUsages?.some((customUsage) => customUsage.id === row.selection.customUsageId)
+                        ? row.usage.label
+                        : "";
+                    return (
+                      <tr key={row.id}>
+                        <td>Area {row.index}</td>
+                        <td>{row.page}</td>
+                        <td>
+                          <select
+                            className="property-area-input"
+                            value={planAreaUsageChoiceValue(row.selection, draft)}
+                            onChange={(event) => handleUsageChange(row.id, event.target.value)}
+                          >
+                            <optgroup label="Predefinite">
+                              {planAreaUsages
+                                .filter((usage) => usage.id !== PLAN_AREA_CUSTOM_USAGE_ID)
+                                .map((usage) => (
+                                  <option key={usage.id} value={`fixed:${usage.id}`}>
+                                    {usage.label}
+                                  </option>
+                                ))}
+                            </optgroup>
+                            {draft.customUsages && draft.customUsages.length > 0 && (
+                              <optgroup label="Custom">
+                                {draft.customUsages.map((customUsage) => (
+                                  <option key={customUsage.id} value={`custom:${customUsage.id}`}>
+                                    {customUsage.label}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {orphanCustomLabel && <option value={`orphan:${row.id}`}>{orphanCustomLabel}</option>}
+                          </select>
+                        </td>
+                        <td>
+                          <div className="property-area-edit-field">
+                            <input
+                              key={`${row.id}-area-${row.area}`}
+                              type="text"
+                              inputMode="decimal"
+                              defaultValue={areaFormatter.format(row.area)}
+                              onBlur={(event) => handleAreaBlur(row, event.currentTarget)}
+                              onKeyDown={(event) => handleNumericInputKeyDown(event, areaFormatter.format(row.area))}
+                            />
+                            {row.areaOverridden && <span className="manual-override-badge">Manuale</span>}
+                            {row.areaOverridden && (
+                              <button
+                                type="button"
+                                className="inline-reset-button"
+                                onClick={() =>
+                                  updateEditableSelection(row.id, (selection) => {
+                                    selection.areaOverrideM2 = null;
+                                  })
+                                }
+                              >
+                                Annulla
+                              </button>
+                            )}
+                            {row.areaOverridden && <small>Calc. {formatM2(row.calculatedArea)}</small>}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="property-area-edit-field">
+                            <input
+                              key={`${row.id}-rate-${row.rate}`}
+                              type="text"
+                              inputMode="decimal"
+                              defaultValue={areaFormatter.format(row.rate)}
+                              onBlur={(event) => handleRateBlur(row, event.currentTarget)}
+                              onKeyDown={(event) => handleNumericInputKeyDown(event, areaFormatter.format(row.rate))}
+                            />
+                            <small>Euro/m2</small>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="property-area-edit-field">
+                            <input
+                              key={`${row.id}-amount-${row.amount}`}
+                              type="text"
+                              inputMode="decimal"
+                              defaultValue={areaFormatter.format(row.amount)}
+                              onBlur={(event) => handleAmountBlur(row, event.currentTarget)}
+                              onKeyDown={(event) => handleNumericInputKeyDown(event, areaFormatter.format(row.amount))}
+                            />
+                            {row.amountOverridden && <span className="manual-override-badge">Manuale</span>}
+                            {row.amountOverridden && (
+                              <button
+                                type="button"
+                                className="inline-reset-button"
+                                onClick={() =>
+                                  updateEditableSelection(row.id, (selection) => {
+                                    selection.amountOverride = null;
+                                  })
+                                }
+                              >
+                                Annulla
+                              </button>
+                            )}
+                            {row.amountOverridden && <small>Calc. {formatEuro(row.calculatedAmount)}</small>}
+                          </div>
+                        </td>
+                        <td>{row.source}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        <div className="modal-actions property-area-modal-actions">
+          <button className="button secondary" type="button" onClick={onClose}>
+            Chiudi
+          </button>
+          <button className="button primary" type="button" disabled={!draft || saving || !dirty} onClick={() => void saveAreaDraft()}>
+            <Save size={15} />
+            {saving ? "Salvataggio..." : "Salva"}
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -4529,6 +4895,43 @@ function StatusSelect({
 
 function OutcomeBadge({ outcome }: { outcome: PropertyOutcome }) {
   return <span className={`outcome-badge ${outcomeClass(outcome)}`}>{outcome}</span>;
+}
+
+function OutcomeSelect({
+  outcome,
+  onChange,
+}: {
+  outcome: PropertyOutcome;
+  onChange: (outcome: PropertyOutcome) => Promise<boolean>;
+}) {
+  const [saving, setSaving] = useState(false);
+
+  async function handleChange(nextOutcome: PropertyOutcome) {
+    if (nextOutcome === outcome || saving) return;
+    setSaving(true);
+    await onChange(nextOutcome);
+    setSaving(false);
+  }
+
+  return (
+    <select
+      className={`outcome-select ${outcomeClass(outcome)}`}
+      value={outcome}
+      disabled={saving}
+      aria-label="Modifica esito immobile"
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => {
+        event.stopPropagation();
+        void handleChange(event.target.value as PropertyOutcome);
+      }}
+    >
+      {propertyOutcomeOptions.map((option) => (
+        <option key={option} value={option}>
+          {option}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 function Delta({

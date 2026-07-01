@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import { DocumentType } from "../generated/prisma/enums.js";
 import type {
   FeasibilityStudy,
+  PlanAnalysisDraft,
   PriceList,
   Property,
   PropertyDocument,
@@ -13,6 +14,7 @@ import type { UpdateStudyDto } from "./dto/update-study.dto.js";
 
 type PropertyWithDocuments = Property & {
   documents: PropertyDocument[];
+  analysisDraft: PlanAnalysisDraft | null;
   priceLists: Array<PropertyPriceList & { priceList: PriceList }>;
 };
 type StudyWithRelations = FeasibilityStudy & {
@@ -99,6 +101,11 @@ export class StudiesService {
   private toApiProperty(property: PropertyWithDocuments) {
     const planimetria = property.documents.find((document) => document.type === DocumentType.PLANIMETRIA);
     const visura = property.documents.find((document) => document.type === DocumentType.VISURA);
+    const currentRendita = Number(property.currentRendita);
+    const estimatedRendita =
+      property.analysisDraft?.totalEstimatedValue === null || property.analysisDraft?.totalEstimatedValue === undefined
+        ? Number(property.estimatedRendita)
+        : Number(property.analysisDraft.totalEstimatedValue);
     return {
       id: property.id,
       address: property.address,
@@ -110,14 +117,14 @@ export class StudiesService {
       subalterno: property.subalterno,
       categoria: property.categoria,
       titolarita: property.titolarita,
-      currentRendita: Number(property.currentRendita),
-      estimatedRendita: Number(property.estimatedRendita),
-      diffPercent: Number(property.diffPercent),
+      currentRendita,
+      estimatedRendita,
+      diffPercent: currentRendita === 0 ? 0 : ((estimatedRendita - currentRendita) / currentRendita) * 100,
       currentImu: property.currentImu === null ? null : Number(property.currentImu),
       estimatedImu: property.estimatedImu === null ? null : Number(property.estimatedImu),
       imuDiff: Number(property.imuDiff),
       displayOrder: property.displayOrder,
-      outcome: property.outcome,
+      outcome: normalizePropertyOutcome(property.outcome),
       hasStudy: property.hasStudy,
       sheetSize: property.sheetSize,
       scaleDenominator: property.scaleDenominator,
@@ -160,11 +167,18 @@ export class StudiesService {
 function propertyInclude() {
   return {
     documents: true,
+    analysisDraft: true,
     priceLists: {
       include: { priceList: true },
       orderBy: { rank: "asc" as const },
     },
   };
+}
+
+function normalizePropertyOutcome(value: string | null | undefined) {
+  if (value === "Positivo" || value?.toLowerCase() === "positivo") return "Positivo";
+  if (value === "Negativo" || value?.toLowerCase() === "negativo") return "Negativo";
+  return "Neutro";
 }
 
 function documentDownloadUrl(propertyId: string, type: "planimetria" | "visura", document?: PropertyDocument) {

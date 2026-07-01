@@ -571,10 +571,11 @@ function mapStudyStatus(value?: string) {
 
 function mapPropertyOutcome(value: string | undefined, hasStudy: boolean) {
   const normalized = value?.toLowerCase();
-  if (!hasStudy || normalized === "non_in_studio") return "Non in studio";
   if (normalized === "positivo") return "Positivo";
   if (normalized === "negativo") return "Negativo";
-  return "Non analizzato";
+  if (normalized === "neutro") return "Neutro";
+  if (!hasStudy || normalized === "non_in_studio") return "Neutro";
+  return "Neutro";
 }
 
 function mapDocumentType(value: string) {

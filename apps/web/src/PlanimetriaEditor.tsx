@@ -188,6 +188,8 @@ type AreaSelection = {
   color: string;
   opacity: number;
   rate: number;
+  areaOverrideM2?: number | null;
+  amountOverride?: number | null;
   totalPixels: number;
   region: Region;
   bitmap: HTMLCanvasElement;
@@ -208,6 +210,8 @@ type SavedSelection = {
   customUsageLabel?: string;
   color?: string;
   rate?: number;
+  areaOverrideM2?: number | null;
+  amountOverride?: number | null;
   opacity: number;
   totalPixels: number;
   source?: SelectionSource;
@@ -331,6 +335,8 @@ type ClipboardSelection = {
   color: string;
   opacity: number;
   rate: number;
+  areaOverrideM2?: number | null;
+  amountOverride?: number | null;
   totalPixels: number;
   source: SelectionSource;
   polygon?: CanvasPoint[];
@@ -413,6 +419,7 @@ type PlanimetriaEditorProps = {
   property: EditorProperty;
   onBack: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  onDraftSaved?: (propertyId: string, totalEstimatedAmount: number) => void;
 };
 
 const USAGES: UsageDefinition[] = [
@@ -754,6 +761,18 @@ function areaFromPixels(
   return (pixelCount / totalPixels) * pageRealAreaM2(sheetSize, scaleDenominator);
 }
 
+function effectiveSelectionAreaM2(selection: Pick<AreaSelection, "areaOverrideM2">, calculatedArea: number) {
+  return typeof selection.areaOverrideM2 === "number" && Number.isFinite(selection.areaOverrideM2)
+    ? selection.areaOverrideM2
+    : calculatedArea;
+}
+
+function effectiveSelectionAmount(selection: Pick<AreaSelection, "amountOverride">, calculatedAmount: number) {
+  return typeof selection.amountOverride === "number" && Number.isFinite(selection.amountOverride)
+    ? selection.amountOverride
+    : calculatedAmount;
+}
+
 function propertyLocation(property: EditorProperty) {
   const comune = property.comune ? `${property.comune}${property.provincia ? ` (${property.provincia})` : ""}` : "";
   return property.ubicazione || [property.address, comune].filter(Boolean).join(", ") || property.id;
@@ -937,6 +956,7 @@ export default function PlanimetriaEditor({
   property,
   onBack,
   onDirtyChange,
+  onDraftSaved,
 }: PlanimetriaEditorProps) {
   const editorRootRef = useRef<HTMLElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1078,18 +1098,25 @@ export default function PlanimetriaEditor({
             : usageById(selection.usageId)),
           color: selection.color,
         };
-        const area = areaFromPixels(
+        const calculatedArea = areaFromPixels(
           selection.region.count,
           selection.totalPixels,
           sheetSize,
           scaleDenominator,
         );
+        const area = effectiveSelectionAreaM2(selection, calculatedArea);
+        const calculatedAmount = area * selection.rate;
+        const amount = effectiveSelectionAmount(selection, calculatedAmount);
         return {
           selection,
           index,
           usage,
           area,
-          amount: area * selection.rate,
+          calculatedArea,
+          amount,
+          calculatedAmount,
+          areaOverridden: typeof selection.areaOverrideM2 === "number" && Number.isFinite(selection.areaOverrideM2),
+          amountOverridden: typeof selection.amountOverride === "number" && Number.isFinite(selection.amountOverride),
         };
       }),
     [allSelections, customUsages, scaleDenominator, sheetSize, revision],
@@ -1792,6 +1819,14 @@ export default function PlanimetriaEditor({
             : undefined,
         color: saved.color ?? usage.color,
         rate: saved.rate ?? usage.rate,
+        areaOverrideM2:
+          typeof saved.areaOverrideM2 === "number" && Number.isFinite(saved.areaOverrideM2)
+            ? saved.areaOverrideM2
+            : null,
+        amountOverride:
+          typeof saved.amountOverride === "number" && Number.isFinite(saved.amountOverride)
+            ? saved.amountOverride
+            : null,
         opacity: saved.opacity,
         totalPixels: saved.totalPixels,
         region,
@@ -1823,6 +1858,8 @@ export default function PlanimetriaEditor({
         customUsageLabel: selection.customUsageLabel,
         color: selection.color,
         rate: selection.rate,
+        areaOverrideM2: selection.areaOverrideM2 ?? null,
+        amountOverride: selection.amountOverride ?? null,
         opacity: selection.opacity,
         totalPixels: selection.totalPixels,
         source: selection.source,
@@ -1890,12 +1927,14 @@ export default function PlanimetriaEditor({
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       setSavedAt(savedTime);
       setDirty(false);
+      onDraftSaved?.(property.id, totals.amount);
       setStatus("Bozza salvata nel database");
     } catch (error) {
       console.error(error);
       if (localSaved) {
         setSavedAt(savedTime);
         setDirty(false);
+        onDraftSaved?.(property.id, totals.amount);
         setStatus("Bozza salvata localmente; database non disponibile");
       } else {
         setStatus("Salvataggio non riuscito");
@@ -4131,6 +4170,56 @@ export default function PlanimetriaEditor({
     return null;
   }
 
+  function changeSelectionAreaOverride(id: string, rawValue: string, calculatedArea: number) {
+    const parsed = parseNumberInput(rawValue);
+    if (parsed === null || parsed < 0) {
+      setStatus("Inserisci una superficie valida");
+      bumpRevision();
+      return null;
+    }
+    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
+      const selection = pageSelections.find((item) => item.id === id);
+      if (!selection) continue;
+      const nextOverride = Math.abs(parsed - calculatedArea) < 0.005 ? null : parsed;
+      if ((selection.areaOverrideM2 ?? null) === nextOverride) {
+        return effectiveSelectionAreaM2(selection, calculatedArea);
+      }
+      recordUndoState();
+      selection.areaOverrideM2 = nextOverride;
+      setStatus(nextOverride === null ? "Override superficie rimosso" : "Superficie manuale aggiornata");
+      markDirty();
+      bumpRevision();
+      return nextOverride ?? calculatedArea;
+    }
+    return null;
+  }
+
+  function clearSelectionAreaOverride(id: string) {
+    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
+      const selection = pageSelections.find((item) => item.id === id);
+      if (!selection || selection.areaOverrideM2 === null || selection.areaOverrideM2 === undefined) continue;
+      recordUndoState();
+      selection.areaOverrideM2 = null;
+      setStatus("Override superficie rimosso");
+      markDirty();
+      bumpRevision();
+      return;
+    }
+  }
+
+  function clearSelectionAmountOverride(id: string) {
+    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
+      const selection = pageSelections.find((item) => item.id === id);
+      if (!selection || selection.amountOverride === null || selection.amountOverride === undefined) continue;
+      recordUndoState();
+      selection.amountOverride = null;
+      setStatus("Override stima rimosso");
+      markDirty();
+      bumpRevision();
+      return;
+    }
+  }
+
   function updateMaskOpacity(nextOpacityPercent: number) {
     const opacity = nextOpacityPercent / 100;
     if (nextOpacityPercent === opacityPercent) return;
@@ -4592,6 +4681,8 @@ export default function PlanimetriaEditor({
       color: selection.color,
       opacity: selection.opacity,
       rate: selection.rate,
+      areaOverrideM2: selection.areaOverrideM2,
+      amountOverride: selection.amountOverride,
       totalPixels: selection.totalPixels,
       source: selection.source === "merged" ? "merged" : "copy",
       polygon: selection.polygon?.map((point) => ({ ...point })),
@@ -4634,6 +4725,8 @@ export default function PlanimetriaEditor({
         customUsageLabel: item.customUsageLabel,
         color,
         rate: item.rate,
+        areaOverrideM2: item.areaOverrideM2,
+        amountOverride: item.amountOverride,
         opacity: item.opacity,
         totalPixels: getCanvasTotalPixels(),
         region,
@@ -6385,7 +6478,7 @@ export default function PlanimetriaEditor({
                       <strong>Nessuna area</strong>
                     </div>
                   ) : (
-                    selectedAreas.map(({ selection, index, usage, area, amount }) => {
+                    selectedAreas.map(({ selection, index, usage, area, calculatedArea, amount, calculatedAmount, areaOverridden, amountOverridden }) => {
                       const areaCollapsed = collapsedAreaIds.includes(selection.id);
                       const selectedCustomPreset = selectionCustomUsagePreset(selection);
                       const orphanCustomLabel =
@@ -6435,7 +6528,12 @@ export default function PlanimetriaEditor({
                             <span style={{ background: usage.color }} />
                             <div className="area-row-title">
                               <strong>Area {index + 1} - pagina {selection.page}</strong>
-                              {areaCollapsed && <em>{formatCompactM2(area)}</em>}
+                              {areaCollapsed && (
+                                <em>
+                                  {formatCompactM2(area)}
+                                  {areaOverridden ? " - manuale" : ""}
+                                </em>
+                              )}
                             </div>
                             <button
                               title={withShortcut("Rimuovi area", SHORTCUTS.delete)}
@@ -6508,7 +6606,42 @@ export default function PlanimetriaEditor({
                               <dl>
                                 <div>
                                   <dt>Area</dt>
-                                  <dd>{formatM2(area)}</dd>
+                                  <dd className="area-override-cell">
+                                    <input
+                                      key={`${selection.id}-area-${area}`}
+                                      className="area-value-input"
+                                      type="text"
+                                      inputMode="decimal"
+                                      defaultValue={String(areaFormatter.format(area))}
+                                      onClick={(event) => event.stopPropagation()}
+                                      onBlur={(event) => {
+                                        const nextArea = changeSelectionAreaOverride(selection.id, event.currentTarget.value, calculatedArea);
+                                        event.currentTarget.value = areaFormatter.format(nextArea ?? area);
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") event.currentTarget.blur();
+                                        if (event.key === "Escape") {
+                                          event.currentTarget.value = areaFormatter.format(area);
+                                          event.currentTarget.blur();
+                                        }
+                                      }}
+                                    />
+                                    <span className="area-value-unit">m2</span>
+                                    {areaOverridden && <span className="manual-override-badge">Manuale</span>}
+                                    {areaOverridden && (
+                                      <button
+                                        type="button"
+                                        className="inline-reset-button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          clearSelectionAreaOverride(selection.id);
+                                        }}
+                                      >
+                                        Annulla
+                                      </button>
+                                    )}
+                                    {areaOverridden && <small>Calcolata: {formatM2(calculatedArea)}</small>}
+                                  </dd>
                                 </div>
                                 <div>
                                   <dt>Valore</dt>
@@ -6537,7 +6670,23 @@ export default function PlanimetriaEditor({
                                 </div>
                                 <div>
                                   <dt>Stima</dt>
-                                  <dd>{moneyFormatter.format(amount)}</dd>
+                                  <dd className="area-override-cell">
+                                    <strong>{moneyFormatter.format(amount)}</strong>
+                                    {amountOverridden && <span className="manual-override-badge">Manuale</span>}
+                                    {amountOverridden && (
+                                      <button
+                                        type="button"
+                                        className="inline-reset-button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          clearSelectionAmountOverride(selection.id);
+                                        }}
+                                      >
+                                        Annulla
+                                      </button>
+                                    )}
+                                    {amountOverridden && <small>Calcolata: {moneyFormatter.format(calculatedAmount)}</small>}
+                                  </dd>
                                 </div>
                                 <div>
                                   <dt>Pixel</dt>

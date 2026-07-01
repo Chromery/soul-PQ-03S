@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Put, Res, StreamableFile } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Put, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import { PropertiesService } from "./properties.service.js";
 
@@ -14,6 +14,11 @@ export class PropertiesController {
   @Put(":id/analysis-draft")
   saveDraft(@Param("id") propertyId: string, @Body() body: unknown) {
     return this.properties.saveDraft(propertyId, body);
+  }
+
+  @Patch(":id")
+  updateProperty(@Param("id") propertyId: string, @Body() body: unknown) {
+    return this.properties.updateProperty(propertyId, body);
   }
 
   @Get(":id/documents/:type/download")

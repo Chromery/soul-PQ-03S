@@ -112,6 +112,19 @@ export class PropertiesService {
     return draft.payload;
   }
 
+  async updateProperty(propertyId: string, body: unknown) {
+    await this.requireProperty(propertyId);
+    if (!body || typeof body !== "object") throw new BadRequestException("Modifica immobile non valida");
+    const input = body as Record<string, unknown>;
+    const outcome = validatePropertyOutcome(input.outcome);
+    const property = await this.prisma.property.update({
+      where: { id: propertyId },
+      data: { outcome },
+      select: { id: true, outcome: true },
+    });
+    return property;
+  }
+
   async openDocument(propertyId: string, rawType: string) {
     const type = mapDocumentType(rawType);
     await this.requireProperty(propertyId);
@@ -186,6 +199,11 @@ function mapDocumentType(value: string) {
 function normalizeScaleSource(value: unknown): ScaleSource {
   if (value === "AI" || value === "USER" || value === "CALIBRATION" || value === "DEFAULT") return value;
   return "DEFAULT";
+}
+
+function validatePropertyOutcome(value: unknown) {
+  if (value === "Positivo" || value === "Negativo" || value === "Neutro") return value;
+  throw new BadRequestException("Esito immobile non valido");
 }
 
 function validateOptionalScaleDenominator(value: unknown, field: string) {
