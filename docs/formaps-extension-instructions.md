@@ -1,0 +1,157 @@
+# Integrazione forMaps Open nella piattaforma principale
+
+## Obiettivo
+
+Implementare nella piattaforma principale un pulsante che, partendo da una lista di dati catastali, apra una nuova scheda forMaps per ogni particella e lasci all'estensione Chrome `forMaps Open` il compito di compilare automaticamente la UI di forMaps.
+
+La piattaforma principale non deve chiamare il webserver helper. Deve solo generare gli URL forMaps con il payload corretto nel fragment `#formapsOpen=...`.
+
+## Prerequisito Utente
+
+L'utente deve avere installata l'estensione Chrome `forMaps Open`.
+
+Senza estensione:
+
+- forMaps si apre comunque;
+- i dati non vengono compilati automaticamente.
+
+## Contratto Dati
+
+Ogni particella deve essere rappresentata così:
+
+```ts
+type ForMapsEntry = {
+  provincia: string;
+  comune: string;
+  foglio: string | number;
+  particella: string | number;
+};
+```
+
+Esempio:
+
+```ts
+{
+  provincia: "Como",
+  comune: "CASNATE CON BERNATE/sez.B",
+  foglio: 4,
+  particella: 370
+}
+```
+
+## Implementazione Consigliata
+
+Aggiungere nel frontend della piattaforma principale una utility equivalente:
+
+```ts
+const defaultLayers = [
+  { Nome: "particelle", Acceso: true, Opacita: 50 },
+  { Nome: "fabbricati", Acceso: true, Opacita: 75 },
+  { Nome: "numeroParticella", Acceso: true, Opacita: 100 },
+  { Nome: "simboloGraffa", Acceso: true, Opacita: 100 }
+];
+
+function toBase64Url(value: unknown): string {
+  const json = JSON.stringify(value);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function buildForMapsUrl(entry: ForMapsEntry): string {
+  const lCat = encodeURIComponent(JSON.stringify(defaultLayers));
+  const payload = toBase64Url({
+    source: "formaps-open",
+    version: 2,
+    createdAt: new Date().toISOString(),
+    entry: {
+      provincia: entry.provincia,
+      comune: entry.comune,
+      foglio: String(entry.foglio),
+      particella: String(entry.particella)
+    },
+    options: {
+      openCatPanel: false,
+      captureCaptcha: true
+    }
+  });
+
+  return `https://www.formaps.it/Mappa?LCat=${lCat}&Experimental=False#formapsOpen=${payload}`;
+}
+
+export function openEntriesInForMaps(entries: ForMapsEntry[]): void {
+  for (const entry of entries) {
+    const tab = window.open(buildForMapsUrl(entry), "_blank");
+
+    if (tab) {
+      tab.opener = null;
+    }
+  }
+}
+```
+
+## Uso Nel Pulsante
+
+Il metodo `openEntriesInForMaps` deve essere chiamato direttamente dentro l'handler del click utente.
+
+Esempio:
+
+```ts
+button.addEventListener("click", () => {
+  openEntriesInForMaps(entries);
+});
+```
+
+Non chiamarlo dopo await, timeout, polling o callback non direttamente collegati al click: Chrome potrebbe bloccare le nuove schede come popup.
+
+## Opzioni Payload
+
+`openCatPanel`:
+
+- `false`: comportamento consigliato. L'estensione usa il DOM di forMaps senza aprire visivamente il pannello CAT.
+- `true`: apre la sezione CAT prima della compilazione. Utile per debug o maggiore visibilità.
+
+`captureCaptcha`:
+
+- `true`: quando forMaps mostra il CAPTCHA, l'estensione salva file diagnostici in `Downloads/formaps-open/`.
+- `false`: disabilita la cattura diagnostica.
+
+L'estensione non risolve automaticamente CAPTCHA.
+
+## Vincoli Browser
+
+- Aprire molte schede può richiedere autorizzazione popup da parte dell'utente.
+- La chiamata deve partire da un gesto utente esplicito.
+- Non usare iframe verso forMaps: la compilazione cross-origin non è consentita.
+- Non provare a comunicare direttamente con la pagina forMaps dalla piattaforma principale; il fragment URL è il canale previsto.
+
+## Test Di Accettazione
+
+1. Installare l'estensione Chrome `forMaps Open`.
+2. Aprire la piattaforma principale.
+3. Selezionare una o più particelle.
+4. Cliccare il pulsante "Apri in forMaps".
+5. Verificare che venga aperta una scheda forMaps per ogni particella.
+6. Verificare che l'estensione compili provincia, comune, foglio e particella.
+7. Se compare CAPTCHA, verificare che l'estensione salvi i file in `Downloads/formaps-open/`.
+
+## Dati Di Test
+
+Usare questi valori per il test iniziale:
+
+```json
+{
+  "provincia": "Como",
+  "comune": "CASNATE CON BERNATE/sez.B",
+  "foglio": "4",
+  "particella": "370"
+}
+```

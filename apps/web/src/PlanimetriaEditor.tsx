@@ -37,6 +37,8 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
+import { DEFAULT_EDITOR_PREFERENCES, readEditorPreferences } from "./editorPreferences";
+import { openEntriesInForMaps, toForMapsEntry } from "./formaps";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
@@ -47,13 +49,7 @@ const ZOOM_KEYBOARD_STEP = 10;
 const ZOOM_SLIDER_STEP = 1;
 const ZOOM_WHEEL_SENSITIVITY = 0.00045;
 const ZOOM_WHEEL_MAX_DELTA = 240;
-const SMART_TRACE_DEFAULTS = {
-  threshold: 236,
-  inflate: 1,
-  gap: 3,
-  dash: 42,
-  wallInclusionRadius: 3 as number | null,
-};
+const SMART_TRACE_DEFAULTS = DEFAULT_EDITOR_PREFERENCES.smartSelection;
 
 type PdfDocument = Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>;
 type PdfPage = Awaited<ReturnType<PdfDocument["getPage"]>>;
@@ -99,6 +95,7 @@ type CanvasPoint = {
 type EditorStudy = {
   id: string;
   company: string;
+  provincia?: string | null;
 };
 
 type EditorPriceList = {
@@ -117,6 +114,10 @@ type EditorProperty = {
   id: string;
   address: string;
   comune: string;
+  provincia?: string | null;
+  ubicazione?: string | null;
+  foglio?: string | number | null;
+  particella?: string | number | null;
   categoria: string;
   currentRendita: number;
   estimatedRendita: number;
@@ -754,7 +755,8 @@ function areaFromPixels(
 }
 
 function propertyLocation(property: EditorProperty) {
-  return `${property.address}, ${property.comune}`;
+  const comune = property.comune ? `${property.comune}${property.provincia ? ` (${property.provincia})` : ""}` : "";
+  return property.ubicazione || [property.address, comune].filter(Boolean).join(", ") || property.id;
 }
 
 function googleMapsUrl(property: EditorProperty) {
@@ -766,10 +768,6 @@ function googleMapsUrl(property: EditorProperty) {
 
 function googleEarthUrl(property: EditorProperty) {
   return `https://earth.google.com/web/search/${encodeURIComponent(propertyLocation(property))}`;
-}
-
-function forMapsUrl() {
-  return "https://www.formaps.it/";
 }
 
 function draftKey(propertyId: string) {
@@ -967,8 +965,8 @@ export default function PlanimetriaEditor({
   const [activeCustomUsageId, setActiveCustomUsageId] = useState<string | null>(null);
   const [customUsages, setCustomUsages] = useState<CustomUsagePreset[]>([]);
   const [customUsageLabel, setCustomUsageLabel] = useState("");
-  const [scaleDenominator, setScaleDenominator] = useState(500);
-  const [sheetSize, setSheetSize] = useState<SheetSize>("A3");
+  const [scaleDenominator, setScaleDenominator] = useState(() => readEditorPreferences().scale.denominator);
+  const [sheetSize, setSheetSize] = useState<SheetSize>(() => readEditorPreferences().scale.sheetSize);
   const [scaleSource, setScaleSource] = useState<ScaleSource>("DEFAULT");
   const [aiScale, setAiScale] = useState<AiScaleState>(() => emptyAiScale());
   const [activeTool, setActiveTool] = useState<EditorTool>("smart");
@@ -996,7 +994,7 @@ export default function PlanimetriaEditor({
   const [rightPanelOpen, setRightPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.right));
   const [priceListDropdownOpen, setPriceListDropdownOpen] = useState(true);
   const [scaleModalOpen, setScaleModalOpen] = useState(false);
-  const [scaleModalSheetSize, setScaleModalSheetSize] = useState<SheetSize>("A3");
+  const [scaleModalSheetSize, setScaleModalSheetSize] = useState<SheetSize>(() => readEditorPreferences().scale.sheetSize);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
   const [clearPageConfirmOpen, setClearPageConfirmOpen] = useState(false);
   const [opacityDockOpen, setOpacityDockOpen] = useState(false);
@@ -1033,6 +1031,14 @@ export default function PlanimetriaEditor({
           }
         : null,
     [property.documentUrls?.planimetria, property.documents.planimetria],
+  );
+  const forMapsEntry = useMemo(
+    () =>
+      toForMapsEntry({
+        ...property,
+        provincia: property.provincia || study.provincia,
+      }),
+    [property, study.provincia],
   );
   const activeCustomUsage = customUsageByIdOrLabel(customUsages, activeCustomUsageId, customUsageLabel);
   const activeUsageOption =
@@ -5609,10 +5615,22 @@ export default function PlanimetriaEditor({
             </button>
             <div className="editor-map-actions" aria-label={`Apri indirizzo ${propertyLocation(property)} in mappe`}>
               <span>Apri in</span>
-              <a className="button secondary compact-button" href={forMapsUrl()} target="_blank" rel="noreferrer">
+              <button
+                className="button secondary compact-button"
+                type="button"
+                disabled={!forMapsEntry}
+                title={
+                  forMapsEntry
+                    ? "Apri particella in forMaps"
+                    : "Provincia, comune, foglio o particella mancanti"
+                }
+                onClick={() => {
+                  if (forMapsEntry) openEntriesInForMaps([forMapsEntry]);
+                }}
+              >
                 <Building2 size={15} />
                 ForMaps
-              </a>
+              </button>
               <a className="button secondary compact-button" href={googleEarthUrl(property)} target="_blank" rel="noreferrer">
                 <Globe size={15} />
                 Earth

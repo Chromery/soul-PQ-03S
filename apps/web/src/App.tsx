@@ -46,6 +46,15 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import {
+  DEFAULT_EDITOR_PREFERENCES,
+  type EditorPreferences,
+  normalizeEditorPreferences,
+  readEditorPreferences,
+  resetEditorPreferences,
+  writeEditorPreferences,
+} from "./editorPreferences";
+import { openEntriesInForMaps, toForMapsEntries, toForMapsEntry } from "./formaps";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.16";
@@ -136,6 +145,60 @@ type FeasibilityStudy = {
 };
 
 type StudyUpdate = Partial<Pick<FeasibilityStudy, "status" | "notes">>;
+
+type SystemBackupInfo = {
+  fileName: string;
+  localPath: string;
+  sizeBytes: number;
+  createdAt: string;
+  remoteKey: string;
+  uploaded: boolean;
+};
+
+type SystemStatus = {
+  generatedAt: string;
+  environment: string;
+  database: {
+    connected: boolean;
+    studies: number;
+    properties: number;
+    documents: number;
+    priceLists: number;
+    planDrafts: number;
+  };
+  storage: {
+    provider: string;
+    configured: boolean;
+    endpoint: string | null;
+    endpointHost: string | null;
+    region: string;
+    bucket: string | null;
+    keyPrefix: string;
+    backupRemotePrefix: string;
+    forcePathStyle: boolean;
+    accessKeyConfigured: boolean;
+    secretKeyConfigured: boolean;
+  };
+  backup: {
+    configured: boolean;
+    running: boolean;
+    localDir: string;
+    schedule: {
+      timeLocal: string;
+      timezone: string;
+      retentionDays: number;
+    };
+    latest: SystemBackupInfo | null;
+  };
+  integrations: {
+    erpSyncTokenConfigured: boolean;
+    openRouterConfigured: boolean;
+    scaleModel: string;
+    visuraModel: string;
+    pdfEngine: string;
+    authentication: string;
+  };
+};
 
 type SortKey =
   | "id"
@@ -1308,6 +1371,22 @@ function formatDateTime(value?: string) {
   return dateTimeFormatter.format(new Date(value));
 }
 
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+  return `${size.toLocaleString("it-IT", { maximumFractionDigits: unitIndex === 0 ? 0 : 1 })} ${units[unitIndex]}`;
+}
+
+function configuredLabel(value?: boolean) {
+  return value ? "Configurato" : "Non configurato";
+}
+
 function formatPercent(value: number) {
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toLocaleString("it-IT", {
@@ -1550,10 +1629,6 @@ function googleMapsUrl(property: PropertyItem) {
 
 function googleEarthUrl(property: PropertyItem) {
   return `https://earth.google.com/web/search/${encodeURIComponent(propertyLocation(property))}`;
-}
-
-function forMapsUrl() {
-  return "https://www.formaps.it/";
 }
 
 function getInitials(name: string) {
@@ -2036,7 +2111,21 @@ function App() {
     );
   }
 
-  if (route.view === "analysis" || route.view === "report" || route.view === "settings" || route.view === "activity") {
+  if (route.view === "settings") {
+    return (
+      <Shell
+        query={query}
+        setQuery={handleGlobalQuery}
+        toast={toast}
+        activeSection={navSectionForRoute(route)}
+        onNavigate={navigate}
+      >
+        <SettingsPage appVersion={APP_DEPLOY_VERSION} onNotice={flash} />
+      </Shell>
+    );
+  }
+
+  if (route.view === "analysis" || route.view === "report" || route.view === "activity") {
     const sections = {
       analysis: {
         title: "Analisi",
@@ -2045,10 +2134,6 @@ function App() {
       report: {
         title: "Report",
         description: "La generazione di report e presentazioni richiede il servizio documentale.",
-      },
-      settings: {
-        title: "Impostazioni",
-        description: "Configurazioni e permessi saranno disponibili con l'autenticazione aziendale.",
       },
       activity: {
         title: "Registro attivita",
@@ -2524,12 +2609,16 @@ function Shell({
             active={activeSection === "Analisi"}
             icon={<BarChart3 size={21} />}
             label="Analisi"
+            disabled
+            title="Analisi in preparazione"
             onClick={() => onNavigate({ view: "analysis" })}
           />
           <NavItem
             active={activeSection === "Report"}
             icon={<FileText size={21} />}
             label="Report"
+            disabled
+            title="Report in preparazione"
             onClick={() => onNavigate({ view: "report" })}
           />
           <NavItem
@@ -2571,11 +2660,6 @@ function Shell({
               <ChevronDown size={15} />
             </button>
 
-            <button className="button primary top-action" disabled title="Disponibile dopo integrazione ERP">
-              <RefreshCw size={18} />
-              Sincronizza ERP
-            </button>
-
             <div className="top-icons">
               <button className="icon-button notification" title="Notifiche in preparazione" disabled aria-label="Notifiche in preparazione">
                 <Bell size={19} />
@@ -2608,19 +2692,24 @@ function NavItem({
   icon,
   label,
   active = false,
+  disabled = false,
+  title,
   onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   active?: boolean;
+  disabled?: boolean;
+  title?: string;
   onClick: () => void;
 }) {
   return (
     <button
       className={`nav-item ${active ? "active" : ""}`}
       onClick={onClick}
+      disabled={disabled}
       aria-current={active ? "page" : undefined}
-      title={label}
+      title={title ?? label}
     >
       {icon}
       <span>{label}</span>
@@ -2730,6 +2819,330 @@ function PropertiesPage({
       </section>
     </main>
   );
+}
+
+function SettingsPage({ appVersion, onNotice }: { appVersion: string; onNotice: (message: string) => void }) {
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [loadingStatus, setLoadingStatus] = useState(true);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [preferences, setPreferences] = useState<EditorPreferences>(() => readEditorPreferences());
+
+  useEffect(() => {
+    void refreshSystemStatus();
+  }, []);
+
+  async function refreshSystemStatus() {
+    setLoadingStatus(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/system/status`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setSystemStatus((await response.json()) as SystemStatus);
+    } catch {
+      onNotice("Impossibile leggere lo stato sistema.");
+    } finally {
+      setLoadingStatus(false);
+    }
+  }
+
+  async function createBackupNow() {
+    setBackupBusy(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/system/backups`, { method: "POST" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const backup = (await response.json()) as SystemBackupInfo;
+      onNotice(backup.uploaded ? "Backup creato e caricato su B2." : "Backup creato localmente; upload B2 non configurato.");
+      await refreshSystemStatus();
+    } catch {
+      onNotice("Backup manuale non riuscito.");
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  function updatePreferences(next: EditorPreferences) {
+    setPreferences(normalizeEditorPreferences(next));
+  }
+
+  function savePreferences() {
+    setPreferences(writeEditorPreferences(preferences));
+    onNotice("Preferenze editor salvate.");
+  }
+
+  function resetPreferences() {
+    setPreferences(resetEditorPreferences());
+    onNotice("Preferenze editor ripristinate.");
+  }
+
+  return (
+    <main className="detail-page settings-page">
+      <section className="detail-hero section-hero settings-hero">
+        <div>
+          <p className="eyebrow">Configurazione PQ</p>
+          <h1>Impostazioni</h1>
+          <p>Preferenze operative dell'editor, stato storage, backup e integrazioni collegate.</p>
+        </div>
+        <button className="button secondary" onClick={() => void refreshSystemStatus()} disabled={loadingStatus}>
+          <RefreshCw size={17} />
+          Aggiorna stato
+        </button>
+      </section>
+
+      <section className="settings-grid">
+        <div className="detail-card settings-card">
+          <div className="settings-card-header">
+            <div>
+              <h2>Deploy e integrazioni</h2>
+              <p>Versione corrente e servizi applicativi principali.</p>
+            </div>
+            <span className="settings-version">v{appVersion}</span>
+          </div>
+          <div className="settings-kv-grid">
+            <SettingsValue label="Ambiente" value={systemStatus?.environment ?? "Non disponibile"} />
+            <SettingsValue label="ERP sync token" value={configuredLabel(systemStatus?.integrations.erpSyncTokenConfigured)} />
+            <SettingsValue label="OpenRouter/Qwen" value={configuredLabel(systemStatus?.integrations.openRouterConfigured)} />
+            <SettingsValue label="Auth utenti" value={systemStatus?.integrations.authentication === "not-configured" ? "Non configurata" : "Configurata"} />
+            <SettingsValue label="Modello scala" value={systemStatus?.integrations.scaleModel ?? "qwen/qwen3.5-flash-02-23"} />
+            <SettingsValue label="Modello visure" value={systemStatus?.integrations.visuraModel ?? "qwen/qwen3.5-flash-02-23"} />
+            <SettingsValue label="OCR PDF" value={systemStatus?.integrations.pdfEngine ?? "mistral-ocr"} />
+            <SettingsValue label="Stato letto" value={systemStatus ? formatDateTime(systemStatus.generatedAt) : "Caricamento"} />
+          </div>
+        </div>
+
+        <div className="detail-card settings-card">
+          <div className="settings-card-header">
+            <div>
+              <h2>Default scala editor</h2>
+              <p>Applicati ai nuovi editor quando non esiste una bozza o una scala AI.</p>
+            </div>
+          </div>
+          <div className="settings-form-grid">
+            <label>
+              <span>Formato foglio</span>
+              <select
+                value={preferences.scale.sheetSize}
+                onChange={(event) =>
+                  updatePreferences({
+                    ...preferences,
+                    scale: { ...preferences.scale, sheetSize: event.target.value === "A4" ? "A4" : "A3" },
+                  })
+                }
+              >
+                <option value="A3">A3</option>
+                <option value="A4">A4</option>
+              </select>
+            </label>
+            <label>
+              <span>Scala iniziale</span>
+              <input
+                type="number"
+                min={20}
+                max={20000}
+                value={preferences.scale.denominator}
+                onChange={(event) =>
+                  updatePreferences({
+                    ...preferences,
+                    scale: { ...preferences.scale, denominator: Number(event.target.value) },
+                  })
+                }
+              />
+            </label>
+          </div>
+          <p className="settings-note">La scala AI continua a prevalere quando viene rilevata; le modifiche manuali dell'utente restano prioritarie.</p>
+        </div>
+
+        <div className="detail-card settings-card settings-card-wide">
+          <div className="settings-card-header">
+            <div>
+              <h2>Default selezione smart</h2>
+              <p>Valori iniziali dello strumento di selezione aree e inclusione muri.</p>
+            </div>
+            <div className="settings-actions">
+              <button className="button secondary compact-button" type="button" onClick={resetPreferences}>
+                Ripristina
+              </button>
+              <button className="button primary compact-button" type="button" onClick={savePreferences}>
+                <Save size={15} />
+                Salva
+              </button>
+            </div>
+          </div>
+          <div className="settings-form-grid smart-settings-grid">
+            <SettingsNumberInput
+              label="Soglia"
+              min={0}
+              max={255}
+              value={preferences.smartSelection.threshold}
+              onChange={(threshold) =>
+                updatePreferences({ ...preferences, smartSelection: { ...preferences.smartSelection, threshold } })
+              }
+            />
+            <SettingsNumberInput
+              label="Inflate"
+              min={0}
+              max={12}
+              value={preferences.smartSelection.inflate}
+              onChange={(inflate) =>
+                updatePreferences({ ...preferences, smartSelection: { ...preferences.smartSelection, inflate } })
+              }
+            />
+            <SettingsNumberInput
+              label="Gap"
+              min={0}
+              max={24}
+              value={preferences.smartSelection.gap}
+              onChange={(gap) =>
+                updatePreferences({ ...preferences, smartSelection: { ...preferences.smartSelection, gap } })
+              }
+            />
+            <SettingsNumberInput
+              label="Dash"
+              min={0}
+              max={120}
+              value={preferences.smartSelection.dash}
+              onChange={(dash) =>
+                updatePreferences({ ...preferences, smartSelection: { ...preferences.smartSelection, dash } })
+              }
+            />
+            <label>
+              <span>Inclusione muri area</span>
+              <input
+                type="number"
+                min={0}
+                max={8}
+                disabled={preferences.smartSelection.wallInclusionRadius === null}
+                value={preferences.smartSelection.wallInclusionRadius ?? DEFAULT_EDITOR_PREFERENCES.smartSelection.wallInclusionRadius ?? 3}
+                onChange={(event) =>
+                  updatePreferences({
+                    ...preferences,
+                    smartSelection: { ...preferences.smartSelection, wallInclusionRadius: Number(event.target.value) },
+                  })
+                }
+              />
+            </label>
+            <label className="settings-checkbox">
+              <input
+                type="checkbox"
+                checked={preferences.smartSelection.wallInclusionRadius === null}
+                onChange={(event) =>
+                  updatePreferences({
+                    ...preferences,
+                    smartSelection: {
+                      ...preferences.smartSelection,
+                      wallInclusionRadius: event.target.checked ? null : DEFAULT_EDITOR_PREFERENCES.smartSelection.wallInclusionRadius,
+                    },
+                  })
+                }
+              />
+              Automatico
+            </label>
+          </div>
+          <p className="settings-note">I default salvati sono locali al browser e vengono usati dai nuovi editor aperti dopo il salvataggio.</p>
+        </div>
+
+        <div className="detail-card settings-card">
+          <div className="settings-card-header">
+            <div>
+              <h2>Storage S3/B2</h2>
+              <p>Configurazione documenti, prezzari e backup remoti.</p>
+            </div>
+            <StatusPill ok={Boolean(systemStatus?.storage.configured)} label={systemStatus?.storage.configured ? "Collegato" : "Non configurato"} />
+          </div>
+          <div className="settings-kv-grid">
+            <SettingsValue label="Bucket" value={systemStatus?.storage.bucket ?? "Non disponibile"} />
+            <SettingsValue label="Endpoint" value={systemStatus?.storage.endpointHost ?? "Non disponibile"} />
+            <SettingsValue label="Regione" value={systemStatus?.storage.region ?? "Non disponibile"} />
+            <SettingsValue label="Prefisso documenti" value={systemStatus?.storage.keyPrefix ?? "erp"} />
+            <SettingsValue label="Prefisso backup" value={systemStatus?.storage.backupRemotePrefix ?? "backups/postgres"} />
+            <SettingsValue label="Path style" value={systemStatus?.storage.forcePathStyle ? "Attivo" : "Disattivo"} />
+          </div>
+        </div>
+
+        <div className="detail-card settings-card">
+          <div className="settings-card-header">
+            <div>
+              <h2>Backup database</h2>
+              <p>Dump PostgreSQL locali e caricamento remoto su B2.</p>
+            </div>
+            <button className="button primary compact-button" onClick={() => void createBackupNow()} disabled={backupBusy || systemStatus?.backup.running}>
+              <Upload size={15} />
+              {backupBusy || systemStatus?.backup.running ? "Backup..." : "Backup ora"}
+            </button>
+          </div>
+          <div className="settings-kv-grid">
+            <SettingsValue label="Ultimo backup" value={systemStatus?.backup.latest ? formatDateTime(systemStatus.backup.latest.createdAt) : "Nessun backup"} />
+            <SettingsValue label="Dimensione" value={systemStatus?.backup.latest ? formatBytes(systemStatus.backup.latest.sizeBytes) : "N.d."} />
+            <SettingsValue label="Upload B2" value={systemStatus?.backup.latest?.uploaded ? "Presente" : "Non verificato"} />
+            <SettingsValue label="Backup giornaliero" value={`${systemStatus?.backup.schedule.timeLocal ?? "03:00"} (${systemStatus?.backup.schedule.timezone ?? "Europe/Rome"})`} />
+            <SettingsValue label="Retention locale" value={`${systemStatus?.backup.schedule.retentionDays ?? 14} giorni`} />
+            <SettingsValue label="Cartella locale" value={systemStatus?.backup.localDir ?? "/backups/postgres"} />
+          </div>
+          {systemStatus?.backup.latest && (
+            <p className="settings-note">Remote key: {systemStatus.backup.latest.remoteKey}</p>
+          )}
+        </div>
+
+        <div className="detail-card settings-card settings-card-wide">
+          <div className="settings-card-header">
+            <div>
+              <h2>Database e contenuti</h2>
+              <p>Stato operativo e volumi principali attualmente indicizzati.</p>
+            </div>
+            <StatusPill ok={Boolean(systemStatus?.database.connected)} label={systemStatus?.database.connected ? "Connesso" : "Non disponibile"} />
+          </div>
+          <div className="settings-stat-grid">
+            <SettingsStat label="Studi" value={systemStatus?.database.studies ?? 0} />
+            <SettingsStat label="Immobili" value={systemStatus?.database.properties ?? 0} />
+            <SettingsStat label="Documenti" value={systemStatus?.database.documents ?? 0} />
+            <SettingsStat label="Prezzari" value={systemStatus?.database.priceLists ?? 0} />
+            <SettingsStat label="Bozze planimetrie" value={systemStatus?.database.planDrafts ?? 0} />
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function SettingsNumberInput({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label>
+      <span>{label}</span>
+      <input type="number" min={min} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+    </label>
+  );
+}
+
+function SettingsValue({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="settings-value">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function SettingsStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="settings-stat">
+      <span>{label}</span>
+      <strong>{value.toLocaleString("it-IT")}</strong>
+    </div>
+  );
+}
+
+function StatusPill({ ok, label }: { ok: boolean; label: string }) {
+  return <span className={`settings-status-pill ${ok ? "ok" : "warning"}`}>{label}</span>;
 }
 
 function PendingPage({
@@ -3379,15 +3792,39 @@ function StudyDetail({
   }
 
   function openSelected(service: "maps" | "earth" | "formaps") {
+    if (service === "formaps") {
+      const entries = toForMapsEntries(selectedProperties.map(propertyForMapsPayload));
+      if (entries.length === 0) {
+        onNotice("Nessun immobile selezionato ha provincia, comune, foglio e particella completi.");
+        return;
+      }
+      openEntriesInForMaps(entries);
+      if (entries.length < selectedProperties.length) {
+        onNotice("Alcuni immobili selezionati non sono stati aperti perche mancano dati catastali completi.");
+      }
+      return;
+    }
+
     selectedProperties.forEach((property) => {
-      const url =
-        service === "maps"
-          ? googleMapsUrl(property)
-          : service === "earth"
-            ? googleEarthUrl(property)
-            : forMapsUrl();
+      const url = service === "maps" ? googleMapsUrl(property) : googleEarthUrl(property);
       window.open(url, "_blank", "noopener,noreferrer");
     });
+  }
+
+  function openPropertyInForMaps(property: PropertyItem) {
+    const entry = toForMapsEntry(propertyForMapsPayload(property));
+    if (!entry) {
+      onNotice("Impossibile aprire forMaps: provincia, comune, foglio o particella mancanti.");
+      return;
+    }
+    openEntriesInForMaps([entry]);
+  }
+
+  function propertyForMapsPayload(property: PropertyItem) {
+    return {
+      ...property,
+      provincia: property.provincia || study.provincia,
+    };
   }
 
   function handleOpenDocument(property: PropertyItem, type: PropertyDocumentKind) {
@@ -3477,7 +3914,7 @@ function StudyDetail({
             onClick={() => openSelected("formaps")}
           >
             <Building2 size={15} />
-            Apri su forMaps
+            Apri in forMaps
           </button>
           <button
             className="button secondary compact-button"
@@ -3599,16 +4036,18 @@ function StudyDetail({
                           <FileText size={14} />
                           Dettaglio
                         </button>
-                        <a
-                          href={forMapsUrl()}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          type="button"
+                          disabled={!toForMapsEntry(propertyForMapsPayload(property))}
                           title="Apri forMaps"
-                          onClick={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openPropertyInForMaps(property);
+                          }}
                         >
                           <Building2 size={14} />
                           forMaps
-                        </a>
+                        </button>
                         <a href={googleEarthUrl(property)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
                           <Globe size={14} />
                           Earth
