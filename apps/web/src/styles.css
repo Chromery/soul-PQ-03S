@@ -2667,6 +2667,7 @@ a.button {
   max-height: calc(100dvh - 48px);
   align-content: start;
   overflow: auto;
+  overflow-x: hidden;
 }
 
 .property-area-modal-head {
@@ -2700,6 +2701,7 @@ a.button {
 .property-price-list-dropdown {
   width: min(420px, 100%);
   position: relative;
+  z-index: 8;
 }
 
 .property-price-list-dropdown summary {
@@ -2734,10 +2736,15 @@ a.button {
 }
 
 .property-price-list-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
   width: min(420px, calc(100vw - 64px));
   display: grid;
   gap: 7px;
-  margin-top: 8px;
+  max-height: min(360px, calc(100dvh - 220px));
+  overflow: auto;
   padding: 8px;
   border: 1px solid #d8e6f7;
   border-radius: 8px;
