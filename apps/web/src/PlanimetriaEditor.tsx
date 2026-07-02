@@ -1018,6 +1018,7 @@ export default function PlanimetriaEditor({
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
   const [clearPageConfirmOpen, setClearPageConfirmOpen] = useState(false);
   const [opacityDockOpen, setOpacityDockOpen] = useState(false);
+  const [areaTableCollapsed, setAreaTableCollapsed] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<ToolSectionId, boolean>>({
     usage: false,
@@ -5666,6 +5667,28 @@ export default function PlanimetriaEditor({
 
   const topPriceLists = property.priceLists?.slice(0, 5) ?? [];
 
+  const renderAreaUsageOptions = (orphanCustomLabel: string, orphanValue: string) => (
+    <>
+      <optgroup label="Predefinite">
+        {FIXED_USAGES.map((usageOption) => (
+          <option key={usageOption.id} value={`fixed:${usageOption.id}`}>
+            {usageOption.label}
+          </option>
+        ))}
+      </optgroup>
+      {customUsages.length > 0 && (
+        <optgroup label="Custom">
+          {customUsages.map((preset) => (
+            <option key={preset.id} value={`custom:${preset.id}`}>
+              {preset.label}
+            </option>
+          ))}
+        </optgroup>
+      )}
+      {orphanCustomLabel && <option value={orphanValue}>{orphanCustomLabel}</option>}
+    </>
+  );
+
   return (
     <main ref={editorRootRef} className={`plan-editor ${focusMode ? "focus-mode" : ""}`}>
       <div className="plan-editor-header">
@@ -6216,6 +6239,282 @@ export default function PlanimetriaEditor({
               </label>
             )}
           </div>
+          <section className={`area-table-dock ${areaTableCollapsed ? "collapsed" : ""}`} aria-label="Tabella aree selezionate">
+            <button
+              className="area-table-dock-toggle"
+              type="button"
+              onClick={() => setAreaTableCollapsed((collapsed) => !collapsed)}
+              aria-expanded={!areaTableCollapsed}
+            >
+              <span>Aree selezionate</span>
+              <strong>{selectedSelectionIds.length}/{selectedAreas.length}</strong>
+              <ChevronDown size={16} />
+            </button>
+            {!areaTableCollapsed && (
+              <div className="area-table-dock-content">
+                <div className="area-table-actions">
+                  <button
+                    className="icon-button"
+                    title={withShortcut("Copia aree selezionate", SHORTCUTS.copy)}
+                    disabled={selectedSelections.length === 0}
+                    onClick={copySelectedSelections}
+                  >
+                    <Copy size={16} />
+                  </button>
+                  <button
+                    className="icon-button"
+                    title={withShortcut("Incolla aree copiate", SHORTCUTS.paste)}
+                    disabled={clipboardCount === 0 || !hasPdf}
+                    onClick={pasteCopiedSelections}
+                  >
+                    <ClipboardPaste size={16} />
+                  </button>
+                  <button
+                    className="button secondary compact-button"
+                    disabled={selectedCurrentPageSelections.length < 2}
+                    onClick={mergeSelectedSelections}
+                  >
+                    <Combine size={15} />
+                    Unisci
+                  </button>
+                  <button
+                    className="icon-button danger-icon"
+                    title={withShortcut("Cancella elemento selezionato", SHORTCUTS.delete)}
+                    disabled={selectedSelectionIds.length === 0 && !rulerSegmentSelected}
+                    onClick={deleteSelectedObjects}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+                <div className="area-table-scroll">
+                  {selectedAreas.length === 0 ? (
+                    <div className="areas-empty compact">
+                      <MousePointer2 size={20} />
+                      <strong>Nessuna area</strong>
+                    </div>
+                  ) : (
+                    <table className="area-selection-table">
+                      <thead>
+                        <tr>
+                          <th>Sel.</th>
+                          <th>Area</th>
+                          <th>Tipologia</th>
+                          <th>Nome custom</th>
+                          <th>Superficie</th>
+                          <th>Valore</th>
+                          <th>Stima</th>
+                          <th>Pixel</th>
+                          <th>Colore</th>
+                          <th>Opacita</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedAreas.map(
+                          ({
+                            selection,
+                            index,
+                            usage,
+                            area,
+                            calculatedArea,
+                            amount,
+                            calculatedAmount,
+                            areaOverridden,
+                            amountOverridden,
+                          }) => {
+                            const selectedCustomPreset = selectionCustomUsagePreset(selection);
+                            const orphanCustomLabel =
+                              selection.usageId === CUSTOM_USAGE_ID && !selectedCustomPreset
+                                ? normalizeCustomUsageLabel(selection.customUsageLabel) || "Custom"
+                                : "";
+                            return (
+                              <tr
+                                key={selection.id}
+                                className={selectedSelectionIds.includes(selection.id) ? "selected" : ""}
+                              >
+                                <td>
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedSelectionIds.includes(selection.id)}
+                                    onChange={() =>
+                                      setSelectedSelectionIds((current) =>
+                                        current.includes(selection.id)
+                                          ? current.filter((id) => id !== selection.id)
+                                          : [...current, selection.id],
+                                      )
+                                    }
+                                    aria-label={`Seleziona area ${index + 1}`}
+                                  />
+                                </td>
+                                <td>
+                                  <span className="area-table-name">
+                                    <i style={{ background: usage.color }} />
+                                    <strong>Area {index + 1}</strong>
+                                    <small>pag. {selection.page}</small>
+                                  </span>
+                                </td>
+                                <td>
+                                  <div className="area-table-usage-cell">
+                                    <select
+                                      value={selectionUsageChoiceValue(selection)}
+                                      onChange={(event) => changeSelectionUsageChoice(selection.id, event.target.value)}
+                                    >
+                                      {renderAreaUsageOptions(orphanCustomLabel, `orphan:${selection.id}`)}
+                                    </select>
+                                    <button
+                                      type="button"
+                                      className="icon-button"
+                                      title="Crea nuova destinazione custom per questa area"
+                                      onClick={() => createCustomUsageForSelection(selection.id)}
+                                    >
+                                      <Plus size={14} />
+                                    </button>
+                                  </div>
+                                </td>
+                                <td>
+                                  {selection.usageId === CUSTOM_USAGE_ID ? (
+                                    <input
+                                      key={`${selection.id}-table-${selection.customUsageId ?? "orphan"}-${usage.label}`}
+                                      className="area-table-text-input"
+                                      type="text"
+                                      defaultValue={usage.label}
+                                      onBlur={(event) => {
+                                        if (!renameSelectionCustomUsage(selection.id, event.currentTarget.value)) {
+                                          event.currentTarget.value = usage.label;
+                                        }
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") event.currentTarget.blur();
+                                        if (event.key === "Escape") {
+                                          event.currentTarget.value = usage.label;
+                                          event.currentTarget.blur();
+                                        }
+                                      }}
+                                    />
+                                  ) : (
+                                    <span className="area-table-muted">-</span>
+                                  )}
+                                </td>
+                                <td>
+                                  <div className="area-table-value-cell">
+                                    <input
+                                      key={`${selection.id}-table-area-${area}`}
+                                      className="area-value-input"
+                                      type="text"
+                                      inputMode="decimal"
+                                      defaultValue={String(areaFormatter.format(area))}
+                                      onBlur={(event) => {
+                                        const nextArea = changeSelectionAreaOverride(
+                                          selection.id,
+                                          event.currentTarget.value,
+                                          calculatedArea,
+                                        );
+                                        event.currentTarget.value = areaFormatter.format(nextArea ?? area);
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") event.currentTarget.blur();
+                                        if (event.key === "Escape") {
+                                          event.currentTarget.value = areaFormatter.format(area);
+                                          event.currentTarget.blur();
+                                        }
+                                      }}
+                                    />
+                                    <span className="area-value-unit">m2</span>
+                                    {areaOverridden && <span className="manual-override-badge">Manuale</span>}
+                                    {areaOverridden && (
+                                      <button
+                                        type="button"
+                                        className="inline-reset-button"
+                                        onClick={() => clearSelectionAreaOverride(selection.id)}
+                                      >
+                                        Annulla
+                                      </button>
+                                    )}
+                                    {areaOverridden && <small>Calc. {formatM2(calculatedArea)}</small>}
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="area-table-value-cell compact">
+                                    <input
+                                      key={`${selection.id}-table-rate-${selection.rate}`}
+                                      className="area-value-input"
+                                      type="text"
+                                      inputMode="decimal"
+                                      defaultValue={String(selection.rate).replace(".", ",")}
+                                      onBlur={(event) => {
+                                        const nextRate = changeSelectionRate(selection.id, event.currentTarget.value);
+                                        event.currentTarget.value = String(nextRate ?? selection.rate).replace(".", ",");
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") event.currentTarget.blur();
+                                        if (event.key === "Escape") {
+                                          event.currentTarget.value = String(selection.rate).replace(".", ",");
+                                          event.currentTarget.blur();
+                                        }
+                                      }}
+                                    />
+                                    <span className="area-value-unit">€/m2</span>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="area-table-estimate-cell">
+                                    <strong>{moneyFormatter.format(amount)}</strong>
+                                    {amountOverridden && <span className="manual-override-badge">Manuale</span>}
+                                    {amountOverridden && (
+                                      <button
+                                        type="button"
+                                        className="inline-reset-button"
+                                        onClick={() => clearSelectionAmountOverride(selection.id)}
+                                      >
+                                        Annulla
+                                      </button>
+                                    )}
+                                    {amountOverridden && <small>Calc. {moneyFormatter.format(calculatedAmount)}</small>}
+                                  </div>
+                                </td>
+                                <td>{selection.region.count.toLocaleString("it-IT")}</td>
+                                <td>
+                                  <input
+                                    className="area-table-color-input"
+                                    type="color"
+                                    value={selection.color}
+                                    onChange={(event) => changeSelectionColor(selection.id, event.target.value)}
+                                    aria-label={`Colore area ${index + 1}`}
+                                  />
+                                </td>
+                                <td>
+                                  <label className="area-table-opacity">
+                                    <span>{Math.round(selection.opacity * 100)}%</span>
+                                    <input
+                                      type="range"
+                                      min={5}
+                                      max={100}
+                                      value={Math.round(selection.opacity * 100)}
+                                      onChange={(event) => changeSelectionOpacity(selection.id, Number(event.target.value))}
+                                    />
+                                  </label>
+                                </td>
+                                <td>
+                                  <button
+                                    className="icon-button danger-icon"
+                                    type="button"
+                                    title={withShortcut("Rimuovi area", SHORTCUTS.delete)}
+                                    onClick={() => removeSelection(selection.id)}
+                                  >
+                                    <X size={15} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          },
+                        )}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
           <details
             className="area-calibration-dock"
             open={areaCalibrationOpen}
