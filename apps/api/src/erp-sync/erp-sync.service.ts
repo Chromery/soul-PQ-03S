@@ -56,9 +56,15 @@ type NormalizedProperty = {
   documents: NormalizedDocument[];
 };
 
+type PendingVisuraExtraction = {
+  property: NormalizedProperty;
+  visura: NormalizedDocument & { fileBase64: string };
+};
+
 @Injectable()
 export class ErpSyncService {
   private readonly defaultTechnicalOwner: string;
+  private readonly visuraExtractionConcurrency = 4;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -324,17 +330,38 @@ export class ErpSyncService {
   private async enrichPropertiesFromVisure(properties: NormalizedProperty[]) {
     const errors: Array<{ immobile_erp_id: string; file_nome: string; errore: string }> = [];
     let extracted = 0;
-
+    const pending: PendingVisuraExtraction[] = [];
     for (const property of properties) {
       const visura = property.documents.find((document) => document.type === DocumentType.VISURA && document.fileBase64);
-      if (!visura?.fileBase64) continue;
-      try {
-        const result = await this.visuraExtraction.extractFromBase64({
-          fileName: visura.fileName,
-          fileBase64: visura.fileBase64,
-          sha256: visura.expectedSha256,
-        });
-        if (!result.found) continue;
+      if (!visura?.fileBase64 || hasCompleteCadastralData(property)) continue;
+      pending.push({ property, visura: { ...visura, fileBase64: visura.fileBase64 } });
+    }
+
+    for (let index = 0; index < pending.length; index += this.visuraExtractionConcurrency) {
+      const batch = pending.slice(index, index + this.visuraExtractionConcurrency);
+      const results = await Promise.all(
+        batch.map(async ({ property, visura }) => {
+          try {
+            const result = await this.visuraExtraction.extractFromBase64({
+              fileName: visura.fileName,
+              fileBase64: visura.fileBase64,
+              sha256: visura.expectedSha256,
+            });
+            return { property, visura, result };
+          } catch (error) {
+            errors.push({
+              immobile_erp_id: property.id,
+              file_nome: visura.fileName,
+              errore: error instanceof Error ? error.message : "Errore sconosciuto",
+            });
+            return null;
+          }
+        }),
+      );
+
+      for (const item of results) {
+        if (!item?.result.found) continue;
+        const { property, result } = item;
         property.provincia = property.provincia || result.provincia || "";
         property.comune = property.comune || result.comune || "";
         property.foglio = property.foglio || result.foglio || undefined;
@@ -346,12 +373,6 @@ export class ErpSyncService {
           property.ubicazione = property.address;
         }
         extracted++;
-      } catch (error) {
-        errors.push({
-          immobile_erp_id: property.id,
-          file_nome: visura.fileName,
-          errore: error instanceof Error ? error.message : "Errore sconosciuto",
-        });
       }
     }
 
@@ -592,6 +613,10 @@ function reverseDocumentType(value: DocumentType) {
   if (value === DocumentType.PLANIMETRIA) return "planimetria";
   if (value === DocumentType.VISURA) return "visura_catastale";
   return "elaborato_planimetrico";
+}
+
+function hasCompleteCadastralData(property: Pick<NormalizedProperty, "provincia" | "comune" | "foglio" | "particella">) {
+  return Boolean(property.provincia && property.comune && property.foglio && property.particella);
 }
 
 function normalizeCategory(value: string) {
