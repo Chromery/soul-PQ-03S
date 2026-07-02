@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, Post, Query } from "@nestjs/common";
 import { ErpSyncService } from "./erp-sync.service.js";
 
 @Controller("integrations/erp/v1")
@@ -6,6 +6,7 @@ export class ErpSyncController {
   constructor(private readonly erpSync: ErpSyncService) {}
 
   @Post("studi/sync")
+  @HttpCode(200)
   syncStudies(@Body() body: unknown, @Headers("authorization") authorization?: string) {
     this.erpSync.assertAuthorized(authorization);
     return this.erpSync.syncStudies(body);
