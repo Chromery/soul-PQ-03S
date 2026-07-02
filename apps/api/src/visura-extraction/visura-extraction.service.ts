@@ -1,10 +1,22 @@
 import { BadRequestException, Injectable, InternalServerErrorException } from "@nestjs/common";
+import type { OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash } from "node:crypto";
+import { VisuraExtractionStatus } from "../generated/prisma/enums.js";
+import type { Prisma } from "../generated/prisma/client.js";
+import { PrismaService } from "../prisma/prisma.service.js";
 
 type JsonRecord = Record<string, unknown>;
 
 type ExtractVisuraInput = {
+  fileName: string;
+  fileBase64: string;
+  sha256?: string;
+};
+
+type EnqueueVisuraDocumentInput = {
+  propertyId: string;
+  documentId: string;
   fileName: string;
   fileBase64: string;
   sha256?: string;
@@ -53,13 +65,17 @@ const VISURA_EXTRACTION_SCHEMA = {
 } as const;
 
 @Injectable()
-export class VisuraExtractionService {
+export class VisuraExtractionService implements OnModuleInit {
   private readonly model: string;
   private readonly siteUrl: string;
   private readonly appTitle: string;
   private readonly pdfEngine: string;
+  private readonly timeoutMs: number;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     this.model =
       optionalConfig(config.get<string>("OPENROUTER_VISURA_MODEL")) ??
       optionalConfig(config.get<string>("OPENROUTER_SCALE_MODEL")) ??
@@ -67,6 +83,22 @@ export class VisuraExtractionService {
     this.siteUrl = optionalConfig(config.get<string>("OPENROUTER_SITE_URL")) ?? "http://localhost:8080";
     this.appTitle = optionalConfig(config.get<string>("OPENROUTER_APP_TITLE")) ?? "Soul Prospect Qualifier";
     this.pdfEngine = optionalConfig(config.get<string>("OPENROUTER_PDF_ENGINE")) ?? "mistral-ocr";
+    this.timeoutMs = positiveIntegerConfig(config.get<string>("OPENROUTER_VISURA_TIMEOUT_MS")) ?? 180_000;
+  }
+
+  async onModuleInit() {
+    await this.prisma.visuraExtractionJob.updateMany({
+      where: {
+        status: {
+          in: [VisuraExtractionStatus.PENDING, VisuraExtractionStatus.RUNNING],
+        },
+      },
+      data: {
+        status: VisuraExtractionStatus.FAILED,
+        errorMessage: "Job interrotto da riavvio API; ripetere la sync ERP per riaccodare l'estrazione.",
+        completedAt: new Date(),
+      },
+    });
   }
 
   async extractFromBase64(input: ExtractVisuraInput) {
@@ -78,6 +110,123 @@ export class VisuraExtractionService {
       fileName: input.fileName,
       fileData: dataUrl,
       sizeBytes: buffer.byteLength,
+    });
+  }
+
+  async enqueueDocumentPdf(input: EnqueueVisuraDocumentInput) {
+    const { buffer, sha256, dataUrl } = decodePdfBase64(input.fileBase64, input.fileName);
+    if (input.sha256 && input.sha256.toLowerCase() !== sha256) {
+      throw new BadRequestException(`SHA256 non coerente per ${input.fileName}`);
+    }
+
+    const job = await this.prisma.visuraExtractionJob.create({
+      data: {
+        propertyId: input.propertyId,
+        documentId: input.documentId,
+        status: VisuraExtractionStatus.PENDING,
+        model: this.model,
+        sourceFileName: input.fileName,
+        sourceSha256: sha256,
+      },
+    });
+
+    const process = this.runJob(job.id, {
+      fileName: input.fileName,
+      fileData: dataUrl,
+      sizeBytes: buffer.byteLength,
+    });
+    void process.catch((error) => console.error("Visura extraction job failed", error));
+    return {
+      id: job.id,
+      propertyId: job.propertyId,
+      documentId: job.documentId,
+      status: job.status,
+      sourceFileName: job.sourceFileName,
+      sourceSha256: job.sourceSha256,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+    };
+  }
+
+  private async runJob(
+    jobId: string,
+    source: { fileName: string; fileData: string; sizeBytes: number },
+  ) {
+    const startedAt = new Date();
+    await this.prisma.visuraExtractionJob.update({
+      where: { id: jobId },
+      data: {
+        status: VisuraExtractionStatus.RUNNING,
+        startedAt,
+        errorMessage: null,
+      },
+    });
+
+    try {
+      const result = await this.extractVisura(source);
+      const completedAt = new Date();
+      const updatedJob = await this.prisma.visuraExtractionJob.update({
+        where: { id: jobId },
+        data: {
+          status: VisuraExtractionStatus.SUCCEEDED,
+          extractedProvincia: result.found ? result.provincia : null,
+          extractedComune: result.found ? result.comune : null,
+          extractedFoglio: result.found ? result.foglio : null,
+          extractedParticella: result.found ? result.particella : null,
+          confidence: result.confidence,
+          evidence: result.evidence,
+          warnings: result.warnings as unknown as Prisma.InputJsonValue,
+          rawResponse: result as unknown as Prisma.InputJsonValue,
+          completedAt,
+        },
+      });
+      if (result.found) await this.persistExtractedCadastralData(updatedJob.propertyId, result);
+    } catch (error) {
+      const completedAt = new Date();
+      await this.prisma.visuraExtractionJob.update({
+        where: { id: jobId },
+        data: {
+          status: VisuraExtractionStatus.FAILED,
+          errorMessage: error instanceof Error ? error.message : "Errore sconosciuto",
+          completedAt,
+        },
+      });
+      throw error;
+    }
+  }
+
+  private async persistExtractedCadastralData(propertyId: string, result: VisuraExtractionResult) {
+    await this.prisma.$transaction(async (tx) => {
+      const property = await tx.property.findUnique({
+        where: { id: propertyId },
+        select: {
+          address: true,
+          comune: true,
+          provincia: true,
+          ubicazione: true,
+          foglio: true,
+          particella: true,
+        },
+      });
+      if (!property) return;
+
+      const comune = property.comune || result.comune || "";
+      const provincia = property.provincia || result.provincia || null;
+      const address =
+        property.address || (comune ? (provincia ? `${comune} (${provincia})` : comune) : property.address);
+      const data = {
+        provincia,
+        comune,
+        foglio: property.foglio || result.foglio || null,
+        particella: property.particella || result.particella || null,
+        address,
+        ubicazione: property.ubicazione || address || null,
+      };
+
+      await tx.property.update({
+        where: { id: propertyId },
+        data,
+      });
     });
   }
 
@@ -169,22 +318,34 @@ export class VisuraExtractionService {
       };
     }
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": this.siteUrl,
-        "X-Title": this.appTitle,
-      },
-      body: JSON.stringify(payload),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": this.siteUrl,
+          "X-Title": this.appTitle,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
 
-    const rawBody = await response.text();
-    if (!response.ok) {
-      throw new Error(`OpenRouter HTTP ${response.status}: ${rawBody.slice(0, 500)}`);
+      const rawBody = await response.text();
+      if (!response.ok) {
+        throw new Error(`OpenRouter HTTP ${response.status}: ${rawBody.slice(0, 500)}`);
+      }
+      return rawBody;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(`OpenRouter timeout visura dopo ${Math.round(this.timeoutMs / 1000)}s`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
     }
-    return rawBody;
   }
 }
 
@@ -378,6 +539,13 @@ function optionalString(value: unknown) {
 function optionalConfig(value?: string) {
   const trimmed = value?.trim();
   return trimmed || undefined;
+}
+
+function positiveIntegerConfig(value?: string) {
+  const raw = optionalConfig(value);
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 const PROVINCE_CODES_BY_NAME: Record<string, string> = {

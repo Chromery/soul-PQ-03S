@@ -157,7 +157,10 @@ Response `200 OK`:
       "studio_erp_id": "SF-47824-2026-001",
       "azione": "created",
       "immobili_upserted": 1,
-      "documenti_salvati": 2
+      "documenti_salvati": 2,
+      "visure_estratte": 0,
+      "visure_in_coda": 1,
+      "visure_errori": []
     }
   ]
 }
@@ -174,6 +177,7 @@ Regole:
 - Se viene passato `sha256`, PQ lo verifica sul file decodificato.
 - PQ salva i file nel bucket Backblaze B2 configurato e registra `storage_key`, `sha256` e dimensione.
 - `storage_key` e la object key nel bucket S3/B2, non un percorso filesystem locale.
+- L'estrazione AI dei dati da visura non blocca piu la risposta di sync: PQ salva prima studio, immobili e PDF, poi accoda un job asincrono. La response indica quanti job sono stati accodati in `visure_in_coda`.
 
 ### 2. Lettura modifiche PQ da ERP
 

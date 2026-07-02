@@ -129,7 +129,8 @@ paths:
                         azione: created
                         immobili_upserted: 1
                         documenti_salvati: 1
-                        visure_estratte: 1
+                        visure_estratte: 0
+                        visure_in_coda: 1
                         visure_errori: []
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -535,6 +536,10 @@ components:
                 type: integer
               visure_estratte:
                 type: integer
+                description: Numero di visure estratte in modo sincrono. Attualmente resta 0: l'estrazione avviene via job asincrono.
+              visure_in_coda:
+                type: integer
+                description: Numero di job asincroni accodati per estrarre dati catastali dalle visure.
               visure_errori:
                 type: array
                 items:

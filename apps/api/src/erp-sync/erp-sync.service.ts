@@ -56,15 +56,9 @@ type NormalizedProperty = {
   documents: NormalizedDocument[];
 };
 
-type PendingVisuraExtraction = {
-  property: NormalizedProperty;
-  visura: NormalizedDocument & { fileBase64: string };
-};
-
 @Injectable()
 export class ErpSyncService {
   private readonly defaultTechnicalOwner: string;
-  private readonly visuraExtractionConcurrency = 4;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -149,7 +143,6 @@ export class ErpSyncService {
     const normalizedProperties = properties.map((property, index) =>
       this.normalizeProperty(asRecord(property, `immobili[${index}]`), index),
     );
-    const visuraExtractionSummary = await this.enrichPropertiesFromVisure(normalizedProperties);
 
     const originalRendita = decimalNumber(
       metrics?.rendita_originale_totale,
@@ -246,6 +239,8 @@ export class ErpSyncService {
     });
 
     let documentsCount = 0;
+    let queuedVisuraExtractions = 0;
+    const visuraExtractionErrors: Array<{ immobile_erp_id: string; file_nome: string; errore: string }> = [];
     for (const property of normalizedProperties) {
       const baseProperty = {
         studyId: studioErpId,
@@ -311,6 +306,24 @@ export class ErpSyncService {
             sha256: stored.sha256 ?? undefined,
           });
         }
+        if (document.type === DocumentType.VISURA && document.fileBase64 && !hasCompleteCadastralData(property)) {
+          try {
+            await this.visuraExtraction.enqueueDocumentPdf({
+              propertyId: property.id,
+              documentId: storedDocument.id,
+              fileName: document.fileName,
+              fileBase64: document.fileBase64,
+              sha256: stored.sha256 ?? undefined,
+            });
+            queuedVisuraExtractions++;
+          } catch (error) {
+            visuraExtractionErrors.push({
+              immobile_erp_id: property.id,
+              file_nome: document.fileName,
+              errore: error instanceof Error ? error.message : "Errore sconosciuto",
+            });
+          }
+        }
         documentsCount++;
       }
     }
@@ -322,61 +335,10 @@ export class ErpSyncService {
       azione: existing ? "updated" : "created",
       immobili_upserted: normalizedProperties.length,
       documenti_salvati: documentsCount,
-      visure_estratte: visuraExtractionSummary.extracted,
-      visure_errori: visuraExtractionSummary.errors,
+      visure_estratte: 0,
+      visure_in_coda: queuedVisuraExtractions,
+      visure_errori: visuraExtractionErrors,
     };
-  }
-
-  private async enrichPropertiesFromVisure(properties: NormalizedProperty[]) {
-    const errors: Array<{ immobile_erp_id: string; file_nome: string; errore: string }> = [];
-    let extracted = 0;
-    const pending: PendingVisuraExtraction[] = [];
-    for (const property of properties) {
-      const visura = property.documents.find((document) => document.type === DocumentType.VISURA && document.fileBase64);
-      if (!visura?.fileBase64 || hasCompleteCadastralData(property)) continue;
-      pending.push({ property, visura: { ...visura, fileBase64: visura.fileBase64 } });
-    }
-
-    for (let index = 0; index < pending.length; index += this.visuraExtractionConcurrency) {
-      const batch = pending.slice(index, index + this.visuraExtractionConcurrency);
-      const results = await Promise.all(
-        batch.map(async ({ property, visura }) => {
-          try {
-            const result = await this.visuraExtraction.extractFromBase64({
-              fileName: visura.fileName,
-              fileBase64: visura.fileBase64,
-              sha256: visura.expectedSha256,
-            });
-            return { property, visura, result };
-          } catch (error) {
-            errors.push({
-              immobile_erp_id: property.id,
-              file_nome: visura.fileName,
-              errore: error instanceof Error ? error.message : "Errore sconosciuto",
-            });
-            return null;
-          }
-        }),
-      );
-
-      for (const item of results) {
-        if (!item?.result.found) continue;
-        const { property, result } = item;
-        property.provincia = property.provincia || result.provincia || "";
-        property.comune = property.comune || result.comune || "";
-        property.foglio = property.foglio || result.foglio || undefined;
-        property.particella = property.particella || result.particella || undefined;
-        if (!property.address && property.comune) {
-          property.address = property.provincia ? `${property.comune} (${property.provincia})` : property.comune;
-        }
-        if (!property.ubicazione && property.address) {
-          property.ubicazione = property.address;
-        }
-        extracted++;
-      }
-    }
-
-    return { extracted, errors };
   }
 
   private normalizeProperty(input: JsonRecord, index: number): NormalizedProperty {
