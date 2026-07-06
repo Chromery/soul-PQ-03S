@@ -2065,6 +2065,7 @@ a.button {
 }
 
 .new-study-form-grid input,
+.new-study-form-grid select,
 .new-study-form-grid textarea {
   width: 100%;
   min-height: 39px;
@@ -2082,6 +2083,7 @@ a.button {
 }
 
 .new-study-form-grid input:focus,
+.new-study-form-grid select:focus,
 .new-study-form-grid textarea:focus {
   border-color: rgba(37, 99, 235, 0.7);
   outline: 3px solid rgba(37, 99, 235, 0.12);
@@ -2357,7 +2359,7 @@ a.button {
 }
 
 .property-operational-table {
-  min-width: 1600px;
+  min-width: 1780px;
 }
 
 .property-operational-table th,
@@ -2398,22 +2400,23 @@ a.button {
 .property-operational-table th:nth-child(9),
 .property-operational-table td:nth-child(9),
 .property-operational-table th:nth-child(10),
-.property-operational-table td:nth-child(10) {
-  width: 80px;
-}
-
+.property-operational-table td:nth-child(10),
 .property-operational-table th:nth-child(11),
-.property-operational-table td:nth-child(11) {
-  width: 94px;
+.property-operational-table td:nth-child(11),
+.property-operational-table th:nth-child(12),
+.property-operational-table td:nth-child(12),
+.property-operational-table th:nth-child(13),
+.property-operational-table td:nth-child(13) {
+  width: 108px;
 }
 
-.property-operational-table th:nth-child(12),
-.property-operational-table td:nth-child(12) {
+.property-operational-table th:nth-child(14),
+.property-operational-table td:nth-child(14) {
   width: 142px;
 }
 
-.property-operational-table th:nth-child(13),
-.property-operational-table td:nth-child(13) {
+.property-operational-table th:nth-child(15),
+.property-operational-table td:nth-child(15) {
   width: 122px;
 }
 
@@ -2468,17 +2471,17 @@ a.button {
   line-height: 1.3;
 }
 
-.amount-variance {
+.money-percent-stack {
   display: grid;
   gap: 3px;
 }
 
-.amount-variance strong {
+.money-percent-stack strong {
   color: var(--text);
   font-size: 13px;
 }
 
-.amount-variance .delta {
+.money-percent-stack .delta {
   font-size: 11px;
 }
 

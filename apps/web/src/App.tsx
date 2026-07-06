@@ -59,7 +59,7 @@ import {
 import { openEntriesInForMaps, toForMapsEntries, toForMapsEntry } from "./formaps";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.19";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.20";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -311,8 +311,10 @@ type PropertySortKey =
   | "categoria"
   | "currentRendita"
   | "estimatedRendita"
+  | "renditaDiff"
   | "currentImu"
   | "estimatedImu"
+  | "imuDiff"
   | "titolarita"
   | "outcome";
 
@@ -452,7 +454,7 @@ function navSectionForRoute(route: AppRoute) {
     case "dashboard":
     case "study":
     case "studies":
-      return "Studi di fattibilita";
+      return "Studi di fattibilità";
     case "editor":
     case "properties":
       return "Immobili";
@@ -489,7 +491,7 @@ const demoStudies: FeasibilityStudy[] = [
     commercialOwner: "Marco Giordani",
     technicalOwner: "Elena Riva",
     notes:
-      "Fattibilita confermata per gli immobili produttivi. Aggiornamento documentale richiesto per due subalterni.",
+      "Fattibilità confermata per gli immobili produttivi. Aggiornamento documentale richiesto per due subalterni.",
     erpUrl: "https://erp.soul.local/studi/S-2026-0187",
     properties: [
       {
@@ -706,7 +708,7 @@ const demoStudies: FeasibilityStudy[] = [
     commercialOwner: "Anna Verdi",
     technicalOwner: "Luca Bellini",
     notes:
-      "Da completare verifica categorie D/7 e D/8. Appuntamento commerciale gia fissato.",
+      "Da completare verifica categorie D/7 e D/8. Appuntamento commerciale già fissato.",
     erpUrl: "https://erp.soul.local/studi/S-2026-0186",
     properties: [
       {
@@ -1043,7 +1045,7 @@ const demoStudies: FeasibilityStudy[] = [
     commercialOwner: "Marco Giordani",
     technicalOwner: "Matteo Conti",
     notes:
-      "Priorita alta per appuntamento imminente. Mancano due visure aggiornate da ERP.",
+      "Priorità alta per appuntamento imminente. Mancano due visure aggiornate da ERP.",
     erpUrl: "https://erp.soul.local/studi/S-2026-0184",
     properties: [
       {
@@ -1371,6 +1373,37 @@ const editableStatusOptions: StudyStatus[] = [
 
 const propertyOutcomeOptions: PropertyOutcome[] = ["Positivo", "Negativo", "Neutro"];
 
+const titolaritaOptions = [
+  "Proprietà per 1/1",
+  "Proprietà per quota",
+  "Nuda proprietà",
+  "Usufrutto",
+  "Superficie",
+  "Enfiteusi",
+  "Uso",
+  "Abitazione",
+  "Locazione / conduzione",
+  "Altro",
+];
+
+function titolaritaLookupKey(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("it-IT").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+const titolaritaPresetLookup = new Map(titolaritaOptions.map((option) => [titolaritaLookupKey(option), option]));
+
+function getPresetTitolarita(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  return titolaritaPresetLookup.get(titolaritaLookupKey(trimmed)) ?? null;
+}
+
+function formatTitolarita(value: string | null | undefined, fallback = "In attesa ERP") {
+  const trimmed = value?.trim();
+  if (!trimmed) return fallback;
+  return getPresetTitolarita(trimmed) ?? trimmed;
+}
+
 const planAreaUsages: Array<{
   id: PlanAreaUsageId;
   label: string;
@@ -1496,7 +1529,7 @@ function initialNewPropertyForm(study: FeasibilityStudy): NewPropertyFormState {
     foglio: "",
     particella: "",
     subalterno: "",
-    titolarita: "",
+    titolarita: titolaritaOptions[0],
     currentRendita: "",
     estimatedRendita: "",
     currentImu: "",
@@ -1832,6 +1865,44 @@ function deviationPercent(current: number | null | undefined, estimated: number 
     return null;
   }
   return ((estimated - current) / current) * 100;
+}
+
+function propertyRenditaDiffAmount(property: PropertyItem) {
+  if (!property.hasStudy && property.estimatedRendita <= 0) return null;
+  return property.estimatedRendita - property.currentRendita;
+}
+
+function propertyRenditaDiffPercent(property: PropertyItem) {
+  if (!property.hasStudy && property.estimatedRendita <= 0) return null;
+  return deviationPercent(property.currentRendita, property.estimatedRendita) ?? property.diffPercent;
+}
+
+function propertyImuDiffAmount(property: PropertyItem) {
+  if (property.currentImu === null || property.currentImu === undefined || property.estimatedImu === null || property.estimatedImu === undefined) {
+    return null;
+  }
+  return property.estimatedImu - property.currentImu;
+}
+
+function propertyImuDiffPercent(property: PropertyItem) {
+  return deviationPercent(property.currentImu, property.estimatedImu);
+}
+
+function studyRenditaDiffAmount(study: FeasibilityStudy) {
+  const computed = study.totalRendita - study.originalRendita;
+  return Number.isFinite(computed) ? computed : study.diffRendita;
+}
+
+function studyRenditaDiffPercent(study: FeasibilityStudy) {
+  return deviationPercent(study.originalRendita, study.totalRendita);
+}
+
+function studyImuDiffPercent(study: FeasibilityStudy) {
+  const currentTotal = study.properties.reduce((total, property) => total + (property.currentImu ?? 0), 0);
+  const estimatedProperties = study.properties.filter((property) => property.estimatedImu !== null && property.estimatedImu !== undefined);
+  if (estimatedProperties.length === 0) return null;
+  const estimatedTotal = estimatedProperties.reduce((total, property) => total + (property.estimatedImu ?? 0), 0);
+  return deviationPercent(currentTotal, estimatedTotal);
 }
 
 function googleMapsUrl(property: PropertyItem) {
@@ -2367,7 +2438,7 @@ function App() {
       "Particella",
       "Subalterno",
       "Categoria",
-      "Titolarita",
+      "Titolarità",
       "Rendita attuale",
       "Rendita proposta",
       "Differenza rendita percentuale",
@@ -2383,7 +2454,7 @@ function App() {
       property.particella ?? "",
       property.subalterno ?? "",
       property.categoria,
-      property.titolarita ?? "",
+      formatTitolarita(property.titolarita, ""),
       property.currentRendita,
       property.estimatedRendita,
       property.diffPercent,
@@ -2529,7 +2600,7 @@ function App() {
         description: "La generazione di report e presentazioni richiede il servizio documentale.",
       },
       activity: {
-        title: "Registro attivita",
+        title: "Registro attività",
         description: "Gli eventi operativi saranno popolati dall'integrazione ERP e dalle versioni salvate.",
       },
     } as const;
@@ -2552,12 +2623,12 @@ function App() {
         query={query}
         setQuery={handleGlobalQuery}
         toast={toast}
-        activeSection="Studi di fattibilita"
+        activeSection="Studi di fattibilità"
         onNavigate={navigate}
       >
         <PendingPage
           title="Elemento non trovato"
-          description="Lo studio o l'immobile richiesto non e disponibile nella vista corrente."
+          description="Lo studio o l'immobile richiesto non è disponibile nella vista corrente."
           onOpenStudies={() => navigate({ view: "studies" })}
         />
       </Shell>
@@ -2576,9 +2647,9 @@ function App() {
         <section className="workspace">
           <div className="page-heading">
             <div>
-              <h1>{route.view === "studies" ? "Studi di fattibilita" : "Dashboard studi di fattibilita"}</h1>
+              <h1>{route.view === "studies" ? "Studi di fattibilità" : "Dashboard studi di fattibilità"}</h1>
               <p>
-                Monitora gli studi importati dall'ERP, le priorita commerciali e le differenze
+                Monitora gli studi importati dall'ERP, le priorità commerciali e le differenze
                 di rendita catastale.
               </p>
             </div>
@@ -2619,7 +2690,7 @@ function App() {
               </button>
 
               {filtersExpanded && (
-                <section className="filters-panel in-table" aria-label="Filtri studi di fattibilita">
+                <section className="filters-panel in-table" aria-label="Filtri studi di fattibilità">
                   <div className="filters-summary">
                     <div className="filter-chips">
                       {statusFilter !== "Tutti" && (
@@ -2813,7 +2884,7 @@ function App() {
                       direction={sortDirection}
                       onSort={handleSort}
                     />
-                    <th aria-label="Apri studio di fattibilita" />
+                    <th aria-label="Apri studio di fattibilità" />
                   </tr>
                 </thead>
                 <tbody>
@@ -2863,8 +2934,8 @@ function App() {
               className="side-panel-toggle"
               type="button"
               onClick={() => setSidePanelCollapsed((collapsed) => !collapsed)}
-              title={sidePanelCollapsed ? "Mostra riepilogo e attivita" : "Nascondi riepilogo e attivita"}
-              aria-label={sidePanelCollapsed ? "Mostra riepilogo e attivita" : "Nascondi riepilogo e attivita"}
+              title={sidePanelCollapsed ? "Mostra riepilogo e attività" : "Nascondi riepilogo e attività"}
+              aria-label={sidePanelCollapsed ? "Mostra riepilogo e attività" : "Nascondi riepilogo e attività"}
             >
               {sidePanelCollapsed ? <PanelRightOpen size={19} /> : <PanelRightClose size={19} />}
               {!sidePanelCollapsed && <span>Nascondi</span>}
@@ -2906,7 +2977,7 @@ function App() {
 
           <section className="activity-card">
             <div className="activity-header">
-              <h2>Attivita recenti</h2>
+              <h2>Attività recenti</h2>
               <button onClick={() => navigate({ view: "activity" })}>Vedi tutto</button>
             </div>
             <ActivityItem
@@ -2934,7 +3005,7 @@ function App() {
               time="Ieri 14:02"
             />
             <button className="button soft full-width" onClick={() => navigate({ view: "activity" })}>
-              Vai al registro attivita
+              Vai al registro attività
               <ChevronRight size={16} />
             </button>
           </section>
@@ -3102,7 +3173,7 @@ function NewStudyModal({
         </div>
 
         <p className="modal-note">
-          Lo studio viene creato in PQ; il mapping verso ERP andra completato con la prossima estensione del sync.
+          Lo studio viene creato in PQ; il mapping verso ERP andrà completato con la prossima estensione del sync.
         </p>
 
         <div className="new-study-form-grid">
@@ -3201,7 +3272,7 @@ function NewPropertyModal({
       foglio: form.foglio.trim(),
       particella: form.particella.trim(),
       subalterno: form.subalterno.trim(),
-      titolarita: form.titolarita.trim(),
+      titolarita: formatTitolarita(form.titolarita, ""),
       currentRendita: form.currentRendita.trim(),
       estimatedRendita: form.estimatedRendita.trim(),
       currentImu: form.currentImu.trim(),
@@ -3209,6 +3280,8 @@ function NewPropertyModal({
     });
     if (success) setForm(initialNewPropertyForm(study));
   }
+
+  const selectedTitolaritaPreset = getPresetTitolarita(form.titolarita);
 
   return (
     <div
@@ -3277,14 +3350,29 @@ function NewPropertyModal({
             <span>Sub</span>
             <input value={form.subalterno} onChange={(event) => updateField("subalterno", event.target.value)} />
           </label>
-          <label className="wide">
-            <span>Titolarita</span>
-            <input
-              value={form.titolarita}
-              onChange={(event) => updateField("titolarita", event.target.value)}
-              placeholder="Proprieta per 1/1"
-            />
+          <label>
+            <span>Titolarità</span>
+            <select
+              value={selectedTitolaritaPreset ?? "Altro"}
+              onChange={(event) => updateField("titolarita", event.target.value === "Altro" ? "" : event.target.value)}
+            >
+              {titolaritaOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </label>
+          {!selectedTitolaritaPreset && (
+            <label>
+              <span>Titolarità personalizzata</span>
+              <input
+                value={form.titolarita}
+                onChange={(event) => updateField("titolarita", event.target.value)}
+                placeholder="Descrivi la titolarità"
+              />
+            </label>
+          )}
           <label>
             <span>Rendita attuale</span>
             <input inputMode="decimal" value={form.currentRendita} onChange={(event) => updateField("currentRendita", event.target.value)} />
@@ -3416,9 +3504,9 @@ function Shell({
         </div>
         <nav className="nav-menu" aria-label="Navigazione principale">
           <NavItem
-            active={activeSection === "Studi di fattibilita"}
+            active={activeSection === "Studi di fattibilità"}
             icon={<ClipboardList size={21} />}
-            label="Studi di fattibilita"
+            label="Studi di fattibilità"
             onClick={() => onNavigate({ view: "studies" })}
           />
           <NavItem
@@ -4016,7 +4104,7 @@ function PendingPage({
       <section className="detail-card pending-state">
         <AlertTriangle size={24} />
         <strong>Funzione non ancora operativa</strong>
-        <p>Questa sezione sara abilitata quando i servizi applicativi richiesti saranno collegati.</p>
+        <p>Questa sezione sarà abilitata quando i servizi applicativi richiesti saranno collegati.</p>
       </section>
     </main>
   );
@@ -4131,10 +4219,10 @@ function StudyRows({
           </div>
         </td>
         <td>
-          <Delta value={study.diffRendita} suffix="%" />
+          <MoneyPercentStack amount={studyRenditaDiffAmount(study)} percent={studyRenditaDiffPercent(study)} />
         </td>
         <td>
-          <Delta value={study.diffImu} currency />
+          <MoneyPercentStack amount={study.diffImu} percent={studyImuDiffPercent(study)} />
         </td>
         <td>{formatEuro(study.totalRendita)}</td>
         <td>
@@ -4149,7 +4237,7 @@ function StudyRows({
             }}
           >
             <FileText size={15} />
-            Apri studio di fattibilita
+            Apri studio di fattibilità
           </button>
         </td>
       </tr>
@@ -4233,7 +4321,7 @@ function StudyRows({
                     </a>
                     <button className="button primary" onClick={onOpenDetail}>
                       <FileText size={16} />
-                      Apri studio di fattibilita
+                      Apri studio di fattibilità
                     </button>
                   </div>
                 </div>
@@ -4409,7 +4497,7 @@ function PropertyRow({
       <td>{formatEuro(property.currentRendita)}</td>
       <td>{property.estimatedRendita ? formatEuro(property.estimatedRendita) : "Da stimare"}</td>
       <td>
-        <Delta value={property.diffPercent} suffix="%" muted={!property.hasStudy} />
+        <MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} />
       </td>
       <td>
         {onOutcomeChange ? (
@@ -4462,7 +4550,7 @@ function PresentationAction({
 
   function generatePresentation() {
     setMenuOpen(false);
-    onNotice("La generazione sara disponibile con il servizio documentale.");
+    onNotice("La generazione sarà disponibile con il servizio documentale.");
   }
 
   function promptUpload() {
@@ -4606,9 +4694,11 @@ function StudyDetail({
         categoria: [first.categoria, second.categoria],
         currentRendita: [first.currentRendita, second.currentRendita],
         estimatedRendita: [first.estimatedRendita, second.estimatedRendita],
+        renditaDiff: [propertyRenditaDiffAmount(first) ?? -Infinity, propertyRenditaDiffAmount(second) ?? -Infinity],
         currentImu: [first.currentImu ?? -Infinity, second.currentImu ?? -Infinity],
         estimatedImu: [first.estimatedImu ?? -Infinity, second.estimatedImu ?? -Infinity],
-        titolarita: [first.titolarita ?? "", second.titolarita ?? ""],
+        imuDiff: [propertyImuDiffAmount(first) ?? -Infinity, propertyImuDiffAmount(second) ?? -Infinity],
+        titolarita: [formatTitolarita(first.titolarita, ""), formatTitolarita(second.titolarita, "")],
         outcome: [first.outcome, second.outcome],
       };
       const [left, right] = values[propertySortKey];
@@ -4675,7 +4765,7 @@ function StudyDetail({
       }
       openEntriesInForMaps(entries);
       if (entries.length < selectedProperties.length) {
-        onNotice("Alcuni immobili selezionati non sono stati aperti perche mancano dati catastali completi.");
+        onNotice("Alcuni immobili selezionati non sono stati aperti perché mancano dati catastali completi.");
       }
       return;
     }
@@ -4816,7 +4906,7 @@ function StudyDetail({
           <span>
             {selectedProperties.length > 0
               ? `${selectedProperties.length} immobili selezionati`
-              : "Seleziona uno o piu immobili per azioni multiple"}
+              : "Seleziona uno o più immobili per azioni multiple"}
           </span>
           <button
             className="button secondary compact-button"
@@ -4864,9 +4954,11 @@ function StudyDetail({
                 <PropertySortHeader label="Categoria" sortKey="categoria" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Rendita attuale" sortKey="currentRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Rendita proposta" sortKey="estimatedRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Diff. rendita" sortKey="renditaDiff" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="IMU attuale" sortKey="currentImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="IMU prevista" sortKey="estimatedImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="Titolarita" sortKey="titolarita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Diff. IMU" sortKey="imuDiff" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Titolarità" sortKey="titolarita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Esito" sortKey="outcome" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
               </tr>
             </thead>
@@ -4922,13 +5014,19 @@ function StudyDetail({
                     <td>{property.categoria}</td>
                     <td>{formatEuro(property.currentRendita)}</td>
                     <td>
-                      <AmountWithVariance value={formatEstimatedValue(property.estimatedRendita)} variance={property.hasStudy ? property.diffPercent : null} />
+                      {formatEstimatedValue(property.estimatedRendita)}
+                    </td>
+                    <td>
+                      <MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} />
                     </td>
                     <td>{property.currentImu === null || property.currentImu === undefined ? "In attesa ERP" : formatEuro(property.currentImu)}</td>
                     <td>
-                      <AmountWithVariance value={formatEstimatedValue(property.estimatedImu)} variance={imuPercent} />
+                      {formatEstimatedValue(property.estimatedImu)}
                     </td>
-                    <td>{property.titolarita || "In attesa ERP"}</td>
+                    <td>
+                      <MoneyPercentStack amount={propertyImuDiffAmount(property)} percent={imuPercent} />
+                    </td>
+                    <td>{formatTitolarita(property.titolarita)}</td>
                     <td>
                       <OutcomeSelect
                         outcome={property.outcome}
@@ -4944,7 +5042,7 @@ function StudyDetail({
             <div className="empty-state">
               <Building2 size={22} />
               <strong>Nessun immobile nello studio</strong>
-              <span>Aggiungi uno o piu immobili per iniziare analisi e caricamento documenti.</span>
+              <span>Aggiungi uno o più immobili per iniziare analisi e caricamento documenti.</span>
             </div>
           )}
         </div>
@@ -5032,7 +5130,7 @@ function StudyDetail({
 
         <div className="detail-card">
           <div className="section-title">
-            <h2>Dati responsabilita</h2>
+            <h2>Dati responsabilità</h2>
           </div>
           <div className="responsibility-list">
             <Owner owner={study.commercialOwner} label="Commerciale" />
@@ -5623,17 +5721,18 @@ function PropertySortHeader({
   );
 }
 
-function AmountWithVariance({
-  value,
-  variance,
+function MoneyPercentStack({
+  amount,
+  percent,
 }: {
-  value: string;
-  variance: number | null;
+  amount: number | null;
+  percent: number | null;
 }) {
+  if (amount === null) return <span className="delta muted">Da stimare</span>;
   return (
-    <div className="amount-variance">
-      <strong>{value}</strong>
-      {variance !== null && <Delta value={variance} suffix="%" />}
+    <div className="money-percent-stack">
+      <strong>{formatEuro(amount)}</strong>
+      {percent !== null && <Delta value={percent} suffix="%" />}
     </div>
   );
 }
@@ -5656,7 +5755,7 @@ function StatusSelect({
       className={`status-select ${statusClass(status)}`}
       value={status}
       disabled={saving}
-      aria-label="Modifica stato studio di fattibilita"
+      aria-label="Modifica stato studio di fattibilità"
       onClick={(event) => event.stopPropagation()}
       onChange={(event) => {
         event.stopPropagation();

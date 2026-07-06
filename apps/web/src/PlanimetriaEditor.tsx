@@ -4018,7 +4018,7 @@ export default function PlanimetriaEditor({
       (item) => item.id !== preset.id && item.label.toLowerCase() === nextLabel.toLowerCase(),
     );
     if (duplicate) {
-      setStatus(`Destinazione custom gia esistente: ${duplicate.label}`);
+      setStatus(`Destinazione custom già esistente: ${duplicate.label}`);
       bumpRevision();
       return false;
     }
@@ -5645,7 +5645,7 @@ export default function PlanimetriaEditor({
     if (wallInclusionRadius === 1) return;
     recordUndoState();
     setWallInclusionRadius(1);
-    setStatus("Preset prova applicato: area piu stretta");
+    setStatus("Preset prova applicato: area più stretta");
     markDirty();
     bumpRevision();
   }
@@ -6727,7 +6727,7 @@ export default function PlanimetriaEditor({
               </div>
               <div className="area-tuning-actions">
                 <button type="button" className="button secondary compact-button" onClick={applyNarrowAreaTuningPreset}>
-                  Area piu stretta
+                  Area più stretta
                 </button>
                 <button type="button" className="button secondary compact-button" onClick={applyAreaTuningDefaults}>
                   Ripristina default
@@ -7221,7 +7221,7 @@ export default function PlanimetriaEditor({
                 </strong>
               </div>
             )}
-            <p className="modal-note">La scala aggiorna subito il calcolo delle superfici gia tracciate.</p>
+            <p className="modal-note">La scala aggiorna subito il calcolo delle superfici già tracciate.</p>
             <div className="modal-actions">
               <button
                 className="button secondary scale-auto-button"
