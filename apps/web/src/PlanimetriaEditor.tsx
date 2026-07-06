@@ -81,7 +81,7 @@ type CustomUsagePreset = {
 };
 type EditorTool = "select" | "smart" | "polygon" | "ruler";
 type LegacyEditorTool = EditorTool | "calibrate";
-type SelectionSource = "smart" | "polygon" | "merged" | "copy";
+type SelectionSource = "smart" | "polygon" | "merged" | "copy" | "manual";
 type ScaleExtractionStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
 type ScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
 type PageRotation = 0 | 90 | 180 | 270;
@@ -161,6 +161,17 @@ type ScaleExtractionJob = {
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+type UploadedPropertyDocument = {
+  id: string;
+  propertyId: string;
+  type: "planimetria" | "visura" | "elaborato";
+  fileName: string;
+  mimeType: string;
+  sha256: string | null;
+  sizeBytes: number | null;
+  downloadUrl: string;
 };
 
 type MaskBounds = {
@@ -251,7 +262,7 @@ type MeasureSegment = {
 type SavedDraft = {
   version: 1;
   propertyId: string;
-  document: DocumentSource;
+  document: DocumentSource | null;
   savedAt: string;
   sheetSize: SheetSize;
   scaleDenominator: number;
@@ -420,6 +431,7 @@ type PlanimetriaEditorProps = {
   onBack: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   onDraftSaved?: (propertyId: string, totalEstimatedAmount: number) => void;
+  onDocumentSaved?: (propertyId: string, fileName: string, downloadUrl: string) => void;
 };
 
 const USAGES: UsageDefinition[] = [
@@ -957,6 +969,7 @@ export default function PlanimetriaEditor({
   onBack,
   onDirtyChange,
   onDraftSaved,
+  onDocumentSaved,
 }: PlanimetriaEditorProps) {
   const editorRootRef = useRef<HTMLElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1069,10 +1082,8 @@ export default function PlanimetriaEditor({
   const autoWallRadius = autoWallInclusionRadius(inflate, dash);
   const resolvedWallInclusionRadius = wallInclusionRadius ?? autoWallRadius;
   const hasPdf = pageCount > 0;
+  const allSelections = Array.from(runtimeRef.current.selectionsByPage.values()).flat();
   const selections = hasPdf ? currentSelections() : [];
-  const allSelections = hasPdf
-    ? Array.from(runtimeRef.current.selectionsByPage.values()).flat()
-    : [];
   const selectedSelections = allSelections.filter((selection) =>
     selectedSelectionIds.includes(selection.id),
   );
@@ -1083,6 +1094,7 @@ export default function PlanimetriaEditor({
   const canRedo = runtimeRef.current.redoStack.length > 0;
   const canDeleteSelectedObject = selectedSelectionIds.length > 0 || rulerSegmentSelected || Boolean(selectedPolygonVertex);
   const hasCurrentPageAreas = selections.length > 0;
+  const canSaveDraft = Boolean(documentSource || allSelections.length > 0);
   const currentPageRotation = currentPage ? runtimeRef.current.pageRotations.get(currentPage) ?? 0 : 0;
 
   const selectedAreas = useMemo(
@@ -1435,11 +1447,15 @@ export default function PlanimetriaEditor({
           ? { page: draft.calibration.page, start: draft.calibration.start, end: draft.calibration.end }
           : null,
       );
-      if (draft.document.kind === "sample") {
+      if (!draft.document) {
+        void restoreDraftSelections(draft);
+        setStatus("Bozza manuale ripristinata");
+      } else if (draft.document.kind === "sample") {
         if (linkedRemotePlan) {
           void loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName, draft, true);
         } else {
           setDocumentSource(null);
+          void restoreDraftSelections(draft);
           setStatus("Bozza salvata con documento mock rimosso: carica la planimetria ERP");
         }
       } else if (draft.document.kind === "remote") {
@@ -1592,23 +1608,59 @@ export default function PlanimetriaEditor({
     try {
       const draft = pendingDraftRef.current;
       const restoresUpload =
-        draft?.document.kind === "upload" && draft.document.fileName === file.name;
+        draft?.document?.kind === "upload" && draft.document.fileName === file.name;
       const data = await file.arrayBuffer();
-      await loadPdfFromData(data, file.name || "Planimetria importata.pdf");
-      setDocumentSource({ kind: "upload", fileName: file.name || "Planimetria importata.pdf" });
-      if (!restoresUpload) void triggerScaleExtraction(data, file.name || "Planimetria importata.pdf");
+      const name = file.name || "Planimetria importata.pdf";
+      await loadPdfFromData(data, name);
+      setDocumentSource({ kind: "upload", fileName: name });
+      if (!restoresUpload) void triggerScaleExtraction(data, name);
       if (restoresUpload && draft) {
         await restoreDraftSelections(draft);
         setStatus("Bozza ripristinata");
       } else {
         pendingDraftRef.current = null;
         markDirty();
+        const shouldSaveDocument = window.confirm("Vuoi salvare questa planimetria nei documenti dell'immobile?");
+        if (shouldSaveDocument) {
+          await uploadPlanimetriaDocument(data, name);
+        } else {
+          setStatus("PDF caricato localmente; planimetria non salvata nello storage");
+        }
       }
     } catch (error) {
       console.error(error);
       setStatus("PDF non caricato");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function uploadPlanimetriaDocument(data: ArrayBuffer, name: string) {
+    setStatus("Salvataggio planimetria nello storage");
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/documents/planimetria`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            file_name: name,
+            file_base64: `data:application/pdf;base64,${arrayBufferToBase64(data)}`,
+            mime_type: "application/pdf",
+          }),
+        },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const uploaded = (await response.json()) as UploadedPropertyDocument;
+      setDocumentSource({ kind: "remote", fileName: uploaded.fileName, url: uploaded.downloadUrl });
+      onDocumentSaved?.(property.id, uploaded.fileName, uploaded.downloadUrl);
+      markDirty();
+      setStatus("Planimetria salvata nello storage documentale");
+      return uploaded;
+    } catch (error) {
+      console.error(error);
+      setStatus("Planimetria caricata localmente; salvataggio storage non riuscito");
+      return null;
     }
   }
 
@@ -1848,7 +1900,7 @@ export default function PlanimetriaEditor({
   }
 
   async function saveDraft() {
-    if (!documentSource || !hasPdf) return;
+    if (!canSaveDraft) return;
     const selectionsToSave = Array.from(runtimeRef.current.selectionsByPage.values())
       .flat()
       .map<SavedSelection>((selection) => ({
@@ -3150,6 +3202,20 @@ export default function PlanimetriaEditor({
     return canvas;
   }
 
+  function createManualRegion(): Region {
+    const alphaCanvas = document.createElement("canvas");
+    alphaCanvas.width = 1;
+    alphaCanvas.height = 1;
+    return {
+      bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+      seed: { x: 0, y: 0 },
+      count: 0,
+      alphaCanvas,
+      width: 1,
+      height: 1,
+    };
+  }
+
   function cloneSelection(selection: AreaSelection): AreaSelection {
     const region = cloneRegion(selection.region);
     return {
@@ -3394,6 +3460,49 @@ export default function PlanimetriaEditor({
     markDirty();
     bumpRevision();
     return selection.id;
+  }
+
+  function addManualAreaRow() {
+    if (!canUseActiveUsage()) return;
+    const customPreset =
+      activeUsage === CUSTOM_USAGE_ID
+        ? customUsageByIdOrLabel(customUsages, activeCustomUsageId, customUsageLabel)
+        : null;
+    const customLabel =
+      activeUsage === CUSTOM_USAGE_ID
+        ? normalizeCustomUsageLabel(customPreset?.label ?? customUsageLabel)
+        : undefined;
+    const usage = activeUsage === CUSTOM_USAGE_ID ? usageFromCustomPreset(customPreset, customLabel) : usageById(activeUsage);
+    const region = createManualRegion();
+    const opacity = opacityPercent / 100;
+    const page = hasPdf ? runtimeRef.current.currentPage : 1;
+    const selection: AreaSelection = {
+      id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+      page,
+      usageId: activeUsage,
+      customUsageId: activeUsage === CUSTOM_USAGE_ID ? customPreset?.id ?? activeCustomUsageId ?? undefined : undefined,
+      customUsageLabel: customLabel,
+      color: usage.color,
+      rate: usage.rate,
+      opacity,
+      areaOverrideM2: 0,
+      amountOverride: null,
+      totalPixels: 0,
+      region,
+      bitmap: createTintedCanvas(region, usage.color, opacity),
+      source: "manual",
+    };
+    recordUndoState();
+    const pageSelections = runtimeRef.current.selectionsByPage.get(page) ?? [];
+    pageSelections.push(selection);
+    runtimeRef.current.selectionsByPage.set(page, pageSelections);
+    runtimeRef.current.history.push(selection.id);
+    setSelectedSelectionIds([selection.id]);
+    setRulerSegmentSelected(false);
+    setStatus("Riga area manuale aggiunta");
+    markDirty();
+    bumpRevision();
+    if (hasPdf) redrawMasks();
   }
 
   function drawPolygonPath(
@@ -5756,7 +5865,7 @@ export default function PlanimetriaEditor({
                 GMaps
               </a>
             </div>
-            <button className="button primary" onClick={() => void saveDraft()} disabled={!hasPdf}>
+            <button className="button primary" onClick={() => void saveDraft()} disabled={!canSaveDraft}>
               <FileText size={17} />
               Salva bozza
             </button>
@@ -6152,6 +6261,10 @@ export default function PlanimetriaEditor({
               <div className="plan-empty-state">
                 <FileText size={30} />
                 <strong>Nessuna planimetria aperta</strong>
+                <button className="button secondary compact-button" type="button" onClick={addManualAreaRow}>
+                  <Plus size={15} />
+                  Aggiungi area manuale
+                </button>
               </div>
             )}
             <div className="plan-stage-wrap">
@@ -6253,6 +6366,10 @@ export default function PlanimetriaEditor({
             {!areaTableCollapsed && (
               <div className="area-table-dock-content">
                 <div className="area-table-actions">
+                  <button className="button secondary compact-button" type="button" onClick={addManualAreaRow}>
+                    <Plus size={15} />
+                    Aggiungi riga manuale
+                  </button>
                   <button
                     className="icon-button"
                     title={withShortcut("Copia aree selezionate", SHORTCUTS.copy)}
@@ -6350,7 +6467,7 @@ export default function PlanimetriaEditor({
                                   <span className="area-table-name">
                                     <i style={{ background: usage.color }} />
                                     <strong>Area {index + 1}</strong>
-                                    <small>pag. {selection.page}</small>
+                                    <small>{selection.source === "manual" ? "manuale" : `pag. ${selection.page}`}</small>
                                   </span>
                                 </td>
                                 <td>
@@ -6472,7 +6589,7 @@ export default function PlanimetriaEditor({
                                     {amountOverridden && <small>Calc. {moneyFormatter.format(calculatedAmount)}</small>}
                                   </div>
                                 </td>
-                                <td>{selection.region.count.toLocaleString("it-IT")}</td>
+                                <td>{selection.source === "manual" ? "-" : selection.region.count.toLocaleString("it-IT")}</td>
                                 <td>
                                   <input
                                     className="area-table-color-input"
@@ -6730,6 +6847,14 @@ export default function PlanimetriaEditor({
               <>
                 <div className="selection-action-row">
                   <button
+                    className="button secondary compact-button"
+                    type="button"
+                    onClick={addManualAreaRow}
+                  >
+                    <Plus size={15} />
+                    Manuale
+                  </button>
+                  <button
                     className="icon-button"
                     title={withShortcut("Copia aree selezionate", SHORTCUTS.copy)}
                     disabled={selectedSelections.length === 0}
@@ -6826,7 +6951,9 @@ export default function PlanimetriaEditor({
                             />
                             <span style={{ background: usage.color }} />
                             <div className="area-row-title">
-                              <strong>Area {index + 1} - pagina {selection.page}</strong>
+                              <strong>
+                                Area {index + 1} - {selection.source === "manual" ? "manuale" : `pagina ${selection.page}`}
+                              </strong>
                               {areaCollapsed && (
                                 <em>
                                   {formatCompactM2(area)}
@@ -6989,7 +7116,7 @@ export default function PlanimetriaEditor({
                                 </div>
                                 <div>
                                   <dt>Pixel</dt>
-                                  <dd>{selection.region.count.toLocaleString("it-IT")}</dd>
+                                  <dd>{selection.source === "manual" ? "-" : selection.region.count.toLocaleString("it-IT")}</dd>
                                 </div>
                               </dl>
                               <div className="area-visual-controls" onClick={(event) => event.stopPropagation()}>

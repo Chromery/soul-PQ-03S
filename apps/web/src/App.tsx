@@ -57,7 +57,7 @@ import {
 import { openEntriesInForMaps, toForMapsEntries, toForMapsEntry } from "./formaps";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.16";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.17";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -1997,6 +1997,21 @@ function App() {
     updatePropertyInStudies(propertyId, (property) => propertyWithEstimatedValue(property, estimatedRendita));
   }
 
+  function updatePropertyPlanimetriaDocument(propertyId: string, fileName: string, downloadUrl: string) {
+    updatePropertyInStudies(propertyId, (property) => ({
+      ...property,
+      documents: {
+        ...property.documents,
+        planimetria: fileName,
+      },
+      documentUrls: {
+        ...property.documentUrls,
+        planimetria: downloadUrl,
+      },
+    }));
+    flash("Planimetria salvata nei documenti dell'immobile.");
+  }
+
   async function updatePropertyOutcome(propertyId: string, outcome: PropertyOutcome) {
     try {
       const response = await fetch(`${API_BASE_URL}/properties/${encodeURIComponent(propertyId)}`, {
@@ -2193,6 +2208,7 @@ function App() {
             onBack={() => navigate({ view: "study", studyId: editorStudy.id })}
             onDirtyChange={setEditorDirty}
             onDraftSaved={updatePropertyEstimatedValue}
+            onDocumentSaved={updatePropertyPlanimetriaDocument}
           />
         </Suspense>
       </Shell>
@@ -2916,7 +2932,10 @@ function PropertiesPage({
           <table className="compact-table">
             <thead>
               <tr>
-                <th>Immobile</th>
+                <th>Ubicazione</th>
+                <th>Foglio</th>
+                <th>Part.</th>
+                <th>Sub</th>
                 <th>Azienda</th>
                 <th>Categoria</th>
                 <th>Rendita attuale</th>
@@ -2934,6 +2953,9 @@ function PropertiesPage({
                       <span>{property.comune}</span>
                     </div>
                   </td>
+                  <td>{property.foglio || "In attesa ERP"}</td>
+                  <td>{property.particella || "In attesa ERP"}</td>
+                  <td>{property.subalterno || "In attesa ERP"}</td>
                   <td>{study.company}</td>
                   <td>{property.categoria}</td>
                   <td>{formatEuro(property.currentRendita)}</td>
@@ -3654,7 +3676,10 @@ function StudyRows({
                       <table className="compact-table">
                         <thead>
                           <tr>
-                            <th>Indirizzo</th>
+                            <th>Ubicazione</th>
+                            <th>Foglio</th>
+                            <th>Part.</th>
+                            <th>Sub</th>
                             <th>Categoria</th>
                             <th>Rendita attuale</th>
                             <th>Rendita proposta</th>
@@ -3709,6 +3734,9 @@ function PropertyRow({
           <span>{property.comune}</span>
         </div>
       </td>
+      <td>{property.foglio || "In attesa ERP"}</td>
+      <td>{property.particella || "In attesa ERP"}</td>
+      <td>{property.subalterno || "In attesa ERP"}</td>
       <td>{property.categoria}</td>
       <td>{formatEuro(property.currentRendita)}</td>
       <td>{property.estimatedRendita ? formatEuro(property.estimatedRendita) : "Da stimare"}</td>
@@ -4117,14 +4145,14 @@ function StudyDetail({
                 </th>
                 <th className="property-drag-cell" aria-label="Ordine manuale" />
                 <PropertySortHeader label="Ubicazione" sortKey="ubicazione" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="Rendita attuale" sortKey="currentRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="Rendita proposta" sortKey="estimatedRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="IMU attuale" sortKey="currentImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="IMU prevista" sortKey="estimatedImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Foglio" sortKey="foglio" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Part." sortKey="particella" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Sub" sortKey="subalterno" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Categoria" sortKey="categoria" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Rendita attuale" sortKey="currentRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="Rendita proposta" sortKey="estimatedRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="IMU attuale" sortKey="currentImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <PropertySortHeader label="IMU prevista" sortKey="estimatedImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Titolarita" sortKey="titolarita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Esito" sortKey="outcome" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
               </tr>
@@ -4175,6 +4203,10 @@ function StudyDetail({
                     <td className="location-cell">
                       <strong>{propertyLocation(property)}</strong>
                     </td>
+                    <td>{property.foglio || "In attesa ERP"}</td>
+                    <td>{property.particella || "In attesa ERP"}</td>
+                    <td>{property.subalterno || "In attesa ERP"}</td>
+                    <td>{property.categoria}</td>
                     <td>{formatEuro(property.currentRendita)}</td>
                     <td>
                       <AmountWithVariance value={formatEstimatedValue(property.estimatedRendita)} variance={property.hasStudy ? property.diffPercent : null} />
@@ -4183,10 +4215,6 @@ function StudyDetail({
                     <td>
                       <AmountWithVariance value={formatEstimatedValue(property.estimatedImu)} variance={imuPercent} />
                     </td>
-                    <td>{property.foglio || "In attesa ERP"}</td>
-                    <td>{property.particella || "In attesa ERP"}</td>
-                    <td>{property.subalterno || "In attesa ERP"}</td>
-                    <td>{property.categoria}</td>
                     <td>{property.titolarita || "In attesa ERP"}</td>
                     <td>
                       <OutcomeSelect

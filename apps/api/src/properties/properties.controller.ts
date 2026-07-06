@@ -21,6 +21,11 @@ export class PropertiesController {
     return this.properties.updateProperty(propertyId, body);
   }
 
+  @Put(":id/documents/:type")
+  uploadDocument(@Param("id") propertyId: string, @Param("type") documentType: string, @Body() body: unknown) {
+    return this.properties.uploadDocument(propertyId, documentType, body);
+  }
+
   @Get(":id/documents/:type/download")
   async downloadDocument(
     @Param("id") propertyId: string,
