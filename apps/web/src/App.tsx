@@ -34,6 +34,7 @@ import {
   PanelRightOpen,
   Pencil,
   Presentation,
+  Plus,
   RefreshCw,
   Save,
   Search,
@@ -57,7 +58,7 @@ import {
 import { openEntriesInForMaps, toForMapsEntries, toForMapsEntry } from "./formaps";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.17";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.18";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -145,6 +146,22 @@ type FeasibilityStudy = {
 };
 
 type StudyUpdate = Partial<Pick<FeasibilityStudy, "status" | "notes">>;
+
+type NewStudyFormState = {
+  company: string;
+  vat: string;
+  comune: string;
+  provincia: string;
+  region: string;
+  address: string;
+  categoria: string;
+  foglio: string;
+  particella: string;
+  subalterno: string;
+  titolarita: string;
+  deadline: string;
+  notes: string;
+};
 
 type SystemBackupInfo = {
   fileName: string;
@@ -254,7 +271,7 @@ type PlanAreaDraft = {
     kind: "sample" | "upload" | "remote";
     fileName: string;
     url?: string;
-  };
+  } | null;
   savedAt: string;
   sheetSize: PlanAreaSheetSize;
   scaleDenominator: number;
@@ -1377,6 +1394,37 @@ function formatDateTime(value?: string) {
   return dateTimeFormatter.format(new Date(value));
 }
 
+function dateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function futureDateInput(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return dateInputValue(date);
+}
+
+function initialNewStudyForm(): NewStudyFormState {
+  return {
+    company: "",
+    vat: "",
+    comune: "",
+    provincia: "",
+    region: "",
+    address: "",
+    categoria: "D/7",
+    foglio: "",
+    particella: "",
+    subalterno: "",
+    titolarita: "",
+    deadline: futureDateInput(30),
+    notes: "",
+  };
+}
+
 function formatBytes(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -1577,7 +1625,7 @@ function isPlanAreaDraft(value: unknown, propertyId: string): value is PlanAreaD
     if (typeof value.aiScaleConfidence !== "number" || !Number.isFinite(value.aiScaleConfidence)) return false;
   }
   if (typeof value.savedAt !== "string" || Number.isNaN(new Date(value.savedAt).getTime())) return false;
-  if (!isObject(value.document) || typeof value.document.fileName !== "string") return false;
+  if (value.document !== null && (!isObject(value.document) || typeof value.document.fileName !== "string")) return false;
   if (!Array.isArray(value.selections)) return false;
 
   return value.selections.every((selection) => {
@@ -1800,6 +1848,8 @@ function App() {
   });
   const [presentationFiles, setPresentationFiles] = useState<Record<string, File>>({});
   const [editorDirty, setEditorDirty] = useState(false);
+  const [newStudyModalOpen, setNewStudyModalOpen] = useState(false);
+  const [newStudyBusy, setNewStudyBusy] = useState(false);
   const [toast, setToast] = useState("");
 
   useEffect(() => {
@@ -1995,6 +2045,52 @@ function App() {
 
   function updatePropertyEstimatedValue(propertyId: string, estimatedRendita: number) {
     updatePropertyInStudies(propertyId, (property) => propertyWithEstimatedValue(property, estimatedRendita));
+  }
+
+  async function createStudyFromPq(form: NewStudyFormState) {
+    setNewStudyBusy(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/studies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company: form.company,
+          vat: form.vat,
+          comune: form.comune,
+          provincia: form.provincia,
+          region: form.region,
+          deadline: form.deadline,
+          commercialOwner: "Default User",
+          technicalOwner: "Default User",
+          notes: form.notes,
+          property: {
+            address: form.address,
+            comune: form.comune,
+            provincia: form.provincia,
+            ubicazione: form.address,
+            foglio: form.foglio,
+            particella: form.particella,
+            subalterno: form.subalterno,
+            categoria: form.categoria,
+            titolarita: form.titolarita,
+          },
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const createdStudy = (await response.json()) as FeasibilityStudy | null;
+      if (!createdStudy?.id) throw new Error("Risposta creazione studio non valida");
+      setStudies((current) => [createdStudy, ...current.filter((study) => study.id !== createdStudy.id)]);
+      setNewStudyModalOpen(false);
+      flash("Studio creato in PQ.");
+      navigate({ view: "study", studyId: createdStudy.id });
+      return true;
+    } catch (error) {
+      console.error(error);
+      flash("Impossibile creare lo studio.");
+      return false;
+    } finally {
+      setNewStudyBusy(false);
+    }
   }
 
   function updatePropertyPlanimetriaDocument(propertyId: string, fileName: string, downloadUrl: string) {
@@ -2342,6 +2438,10 @@ function App() {
                 di rendita catastale.
               </p>
             </div>
+            <button className="button primary" type="button" onClick={() => setNewStudyModalOpen(true)}>
+              <Plus size={17} />
+              Nuovo studio
+            </button>
           </div>
 
           <section className="table-card">
@@ -2698,7 +2798,167 @@ function App() {
           )}
         </aside>
       </main>
+      {newStudyModalOpen && (
+        <NewStudyModal
+          busy={newStudyBusy}
+          onClose={() => setNewStudyModalOpen(false)}
+          onCreate={createStudyFromPq}
+        />
+      )}
     </Shell>
+  );
+}
+
+function NewStudyModal({
+  busy,
+  onClose,
+  onCreate,
+}: {
+  busy: boolean;
+  onClose: () => void;
+  onCreate: (form: NewStudyFormState) => Promise<boolean>;
+}) {
+  const [form, setForm] = useState<NewStudyFormState>(() => initialNewStudyForm());
+
+  function updateField<K extends keyof NewStudyFormState>(field: K, value: NewStudyFormState[K]) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const success = await onCreate({
+      company: form.company.trim(),
+      vat: form.vat.trim(),
+      comune: form.comune.trim(),
+      provincia: form.provincia.trim().toUpperCase(),
+      region: form.region.trim(),
+      address: form.address.trim(),
+      categoria: form.categoria.trim().toUpperCase() || "D/7",
+      foglio: form.foglio.trim(),
+      particella: form.particella.trim(),
+      subalterno: form.subalterno.trim(),
+      titolarita: form.titolarita.trim(),
+      deadline: form.deadline,
+      notes: form.notes.trim(),
+    });
+    if (success) setForm(initialNewStudyForm());
+  }
+
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) onClose();
+      }}
+    >
+      <form
+        className="editor-modal new-study-modal"
+        aria-labelledby="new-study-title"
+        onSubmit={handleSubmit}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head">
+          <div>
+            <h2 id="new-study-title">Nuovo studio</h2>
+            <p>Creazione manuale da PQ con un primo immobile associato.</p>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} disabled={busy} aria-label="Chiudi nuovo studio">
+            <X size={16} />
+          </button>
+        </div>
+
+        <p className="modal-note">
+          Lo studio viene creato in PQ; il mapping verso ERP andra completato con la prossima estensione del sync.
+        </p>
+
+        <div className="new-study-form-grid">
+          <label>
+            <span>Azienda *</span>
+            <input
+              autoFocus
+              required
+              value={form.company}
+              onChange={(event) => updateField("company", event.target.value)}
+              placeholder="Immobiliare Aurora Srl"
+            />
+          </label>
+          <label>
+            <span>Partita IVA</span>
+            <input value={form.vat} onChange={(event) => updateField("vat", event.target.value)} placeholder="00000000000" />
+          </label>
+          <label>
+            <span>Comune *</span>
+            <input required value={form.comune} onChange={(event) => updateField("comune", event.target.value)} placeholder="Bolzano" />
+          </label>
+          <label>
+            <span>Provincia *</span>
+            <input
+              required
+              maxLength={2}
+              value={form.provincia}
+              onChange={(event) => updateField("provincia", event.target.value)}
+              placeholder="BZ"
+            />
+          </label>
+          <label>
+            <span>Regione *</span>
+            <input required value={form.region} onChange={(event) => updateField("region", event.target.value)} placeholder="Trentino-Alto Adige" />
+          </label>
+          <label>
+            <span>Scadenza</span>
+            <input type="date" value={form.deadline} onChange={(event) => updateField("deadline", event.target.value)} />
+          </label>
+          <label className="wide">
+            <span>Ubicazione immobile *</span>
+            <input
+              required
+              value={form.address}
+              onChange={(event) => updateField("address", event.target.value)}
+              placeholder="Via Roma 1, Bolzano"
+            />
+          </label>
+          <label>
+            <span>Foglio</span>
+            <input value={form.foglio} onChange={(event) => updateField("foglio", event.target.value)} />
+          </label>
+          <label>
+            <span>Particella</span>
+            <input value={form.particella} onChange={(event) => updateField("particella", event.target.value)} />
+          </label>
+          <label>
+            <span>Sub</span>
+            <input value={form.subalterno} onChange={(event) => updateField("subalterno", event.target.value)} />
+          </label>
+          <label>
+            <span>Categoria</span>
+            <input value={form.categoria} onChange={(event) => updateField("categoria", event.target.value)} placeholder="D/7" />
+          </label>
+          <label className="wide">
+            <span>Titolarita</span>
+            <input
+              value={form.titolarita}
+              onChange={(event) => updateField("titolarita", event.target.value)}
+              placeholder="Proprieta per 1/1"
+            />
+          </label>
+          <label className="wide">
+            <span>Note</span>
+            <textarea value={form.notes} onChange={(event) => updateField("notes", event.target.value)} />
+          </label>
+        </div>
+
+        <div className="modal-actions">
+          <button className="button secondary" type="button" onClick={onClose} disabled={busy}>
+            Annulla
+          </button>
+          <button className="button primary" type="submit" disabled={busy}>
+            <Plus size={15} />
+            {busy ? "Creazione..." : "Crea studio"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -4699,7 +4959,7 @@ function PropertyAreaDetail({
             </div>
 
             <div className="property-area-meta">
-              <span>Documento: {draft.document.fileName}</span>
+              <span>Documento: {draft.document?.fileName ?? "Nessun documento associato"}</span>
               <span>Bozza salvata: {formatDateTime(draft.savedAt)}</span>
               {draftState.error && <span>Database non raggiungibile, visualizzo la bozza locale.</span>}
             </div>

@@ -9,6 +9,7 @@ import type {
   PropertyPriceList,
   StudyVersion,
 } from "../generated/prisma/client.js";
+import { PriceListsService } from "../price-lists/price-lists.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import type { UpdateStudyDto } from "./dto/update-study.dto.js";
 
@@ -22,9 +23,35 @@ type StudyWithRelations = FeasibilityStudy & {
   versions: StudyVersion[];
 };
 
+type CreateStudyInput = {
+  company: string;
+  vat: string;
+  comune: string;
+  provincia: string;
+  region: string;
+  commercialOwner: string;
+  technicalOwner: string;
+  notes: string;
+  deadline?: string;
+  property: {
+    address: string;
+    comune: string;
+    provincia: string;
+    ubicazione: string;
+    foglio: string | null;
+    particella: string | null;
+    subalterno: string | null;
+    categoria: string;
+    titolarita: string | null;
+  };
+};
+
 @Injectable()
 export class StudiesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly priceLists: PriceListsService,
+  ) {}
 
   async list() {
     const studies = await this.prisma.feasibilityStudy.findMany({
@@ -61,6 +88,87 @@ export class StudiesService {
       },
     });
     return this.toApiStudy(study);
+  }
+
+  async create(body: unknown) {
+    const input = validateCreateStudyInput(body);
+    const now = new Date();
+    const stamp = now.getTime();
+    const studyId = `PQ-${stamp}`;
+    const propertyId = `IMM-PQ-${stamp}-001`;
+    const deadline = input.deadline ? parseDate(input.deadline, "deadline") : addDays(now, 30);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.feasibilityStudy.create({
+        data: {
+          id: studyId,
+          companyErpId: null,
+          company: input.company,
+          vat: input.vat,
+          comune: input.comune,
+          provincia: input.provincia,
+          region: input.region,
+          status: "Da iniziare",
+          createdAt: now,
+          concludedAt: null,
+          deadline,
+          nextAppointment: null,
+          diffRendita: 0,
+          diffImu: 0,
+          originalRendita: 0,
+          totalRendita: 0,
+          catDRendita: 0,
+          commercialOwner: input.commercialOwner,
+          technicalOwner: input.technicalOwner,
+          notes: input.notes,
+          erpUrl: null,
+          erpImportedAt: null,
+          erpUpdatedAt: null,
+          sourceSyncId: "pq-manual",
+        },
+      });
+      await tx.studyVersion.create({
+        data: {
+          studyId,
+          versionNumber: 1,
+          status: "Da iniziare",
+          technicalOwner: input.technicalOwner,
+          notes: "Studio creato direttamente da PQ.",
+        },
+      });
+      await tx.property.create({
+        data: {
+          id: propertyId,
+          studyId,
+          address: input.property.address,
+          comune: input.property.comune,
+          provincia: input.property.provincia,
+          ubicazione: input.property.ubicazione,
+          foglio: input.property.foglio,
+          particella: input.property.particella,
+          subalterno: input.property.subalterno,
+          categoria: input.property.categoria,
+          titolarita: input.property.titolarita,
+          currentRendita: 0,
+          estimatedRendita: 0,
+          diffPercent: 0,
+          currentImu: null,
+          estimatedImu: null,
+          imuDiff: 0,
+          displayOrder: 0,
+          outcome: "Neutro",
+          hasStudy: false,
+        },
+      });
+    });
+
+    try {
+      await this.priceLists.assignForProperty(propertyId);
+    } catch (error) {
+      console.error("Price list assignment failed for manually-created study", error);
+    }
+
+    return this.find(studyId);
   }
 
   async reorderProperties(id: string, propertyIds: string[]) {
@@ -184,4 +292,69 @@ function normalizePropertyOutcome(value: string | null | undefined) {
 function documentDownloadUrl(propertyId: string, type: "planimetria" | "visura", document?: PropertyDocument) {
   if (!document || document.storageKey.startsWith("demo/")) return null;
   return `/api/properties/${encodeURIComponent(propertyId)}/documents/${type}/download`;
+}
+
+function validateCreateStudyInput(body: unknown): CreateStudyInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new BadRequestException("Creazione studio non valida");
+  }
+  const input = body as Record<string, unknown>;
+  const property = input.property;
+  if (!property || typeof property !== "object" || Array.isArray(property)) {
+    throw new BadRequestException("Immobile iniziale obbligatorio");
+  }
+  const propertyInput = property as Record<string, unknown>;
+  const company = requiredString(input.company, "company", 160);
+  const studyComune = requiredString(input.comune, "comune", 100);
+  const studyProvincia = requiredString(input.provincia, "provincia", 10).toUpperCase();
+  const region = requiredString(input.region, "region", 80);
+  const address = requiredString(propertyInput.address, "property.address", 200);
+  const propertyComune = optionalString(propertyInput.comune, 100) ?? studyComune;
+  const propertyProvincia = (optionalString(propertyInput.provincia, 10) ?? studyProvincia).toUpperCase();
+
+  return {
+    company,
+    vat: optionalString(input.vat, 40) ?? "",
+    comune: studyComune,
+    provincia: studyProvincia,
+    region,
+    commercialOwner: optionalString(input.commercialOwner, 120) ?? "Default User",
+    technicalOwner: optionalString(input.technicalOwner, 120) ?? "Default User",
+    notes: optionalString(input.notes, 4000) ?? "Studio creato direttamente da PQ.",
+    deadline: optionalString(input.deadline, 40) ?? undefined,
+    property: {
+      address,
+      comune: propertyComune,
+      provincia: propertyProvincia,
+      ubicazione: optionalString(propertyInput.ubicazione, 220) ?? address,
+      foglio: optionalString(propertyInput.foglio, 40),
+      particella: optionalString(propertyInput.particella, 60),
+      subalterno: optionalString(propertyInput.subalterno, 40),
+      categoria: optionalString(propertyInput.categoria, 30) ?? "D/7",
+      titolarita: optionalString(propertyInput.titolarita, 160),
+    },
+  };
+}
+
+function requiredString(value: unknown, field: string, maxLength: number) {
+  const normalized = optionalString(value, maxLength);
+  if (!normalized) throw new BadRequestException(`${field} obbligatorio`);
+  return normalized;
+}
+
+function optionalString(value: unknown, maxLength: number) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const normalized = String(value).replace(/\s+/g, " ").trim();
+  return normalized ? normalized.slice(0, maxLength) : null;
+}
+
+function parseDate(value: string, field: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new BadRequestException(`${field} non valido`);
+  return date;
+}
+
+function addDays(date: Date, days: number) {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 }

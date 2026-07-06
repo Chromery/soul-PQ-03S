@@ -2024,6 +2024,69 @@ a.button {
   white-space: normal;
 }
 
+.new-study-modal {
+  width: min(780px, calc(100vw - 48px));
+  max-height: calc(100dvh - 48px);
+  align-content: start;
+  overflow: auto;
+}
+
+.new-study-modal .modal-head {
+  align-items: flex-start;
+}
+
+.new-study-modal .modal-head p {
+  margin: 4px 0 0;
+  color: var(--secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.new-study-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.new-study-form-grid label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.new-study-form-grid label > span {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.new-study-form-grid .wide {
+  grid-column: 1 / -1;
+}
+
+.new-study-form-grid input,
+.new-study-form-grid textarea {
+  width: 100%;
+  min-height: 39px;
+  padding: 9px 10px;
+  border: 1px solid #d8e6f7;
+  border-radius: 7px;
+  color: var(--text);
+  background: #fff;
+  font: inherit;
+}
+
+.new-study-form-grid textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.new-study-form-grid input:focus,
+.new-study-form-grid textarea:focus {
+  border-color: rgba(37, 99, 235, 0.7);
+  outline: 3px solid rgba(37, 99, 235, 0.12);
+}
+
 .button.danger-button,
 .danger-button {
   color: #fff;
@@ -5402,6 +5465,14 @@ a.button {
   .filters-summary {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .new-study-modal {
+    width: min(100%, calc(100vw - 36px));
+  }
+
+  .new-study-form-grid {
+    grid-template-columns: 1fr;
   }
 
   .filters-summary {

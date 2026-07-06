@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Patch, Put } from "@nestjs/common";
+import { Body, Controller, Get, NotFoundException, Param, Patch, Post, Put } from "@nestjs/common";
 import { ReorderStudyPropertiesDto } from "./dto/reorder-study-properties.dto.js";
 import { UpdateStudyDto } from "./dto/update-study.dto.js";
 import { StudiesService } from "./studies.service.js";
@@ -10,6 +10,11 @@ export class StudiesController {
   @Get()
   list() {
     return this.studies.list();
+  }
+
+  @Post()
+  create(@Body() input: unknown) {
+    return this.studies.create(input);
   }
 
   @Get(":id")
