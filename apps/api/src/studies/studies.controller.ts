@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Patch, Post, Put } from "@nestjs/common";
+import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put } from "@nestjs/common";
 import { ReorderStudyPropertiesDto } from "./dto/reorder-study-properties.dto.js";
 import { UpdateStudyDto } from "./dto/update-study.dto.js";
 import { StudiesService } from "./studies.service.js";
@@ -15,6 +15,13 @@ export class StudiesController {
   @Post()
   create(@Body() input: unknown) {
     return this.studies.create(input);
+  }
+
+  @Post(":id/properties")
+  async createProperty(@Param("id") id: string, @Body() input: unknown) {
+    const study = await this.studies.createProperty(id, input);
+    if (!study) throw new NotFoundException("Studio non trovato");
+    return study;
   }
 
   @Get(":id")
@@ -34,6 +41,13 @@ export class StudiesController {
   @Put(":id/properties/order")
   async reorderProperties(@Param("id") id: string, @Body() input: ReorderStudyPropertiesDto) {
     const study = await this.studies.reorderProperties(id, input.propertyIds);
+    if (!study) throw new NotFoundException("Studio non trovato");
+    return study;
+  }
+
+  @Delete(":id/properties")
+  async deleteProperties(@Param("id") id: string, @Body() input: unknown) {
+    const study = await this.studies.deleteProperties(id, input);
     if (!study) throw new NotFoundException("Studio non trovato");
     return study;
   }

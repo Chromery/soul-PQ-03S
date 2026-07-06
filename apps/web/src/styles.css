@@ -2087,6 +2087,18 @@ a.button {
   outline: 3px solid rgba(37, 99, 235, 0.12);
 }
 
+.new-study-form-grid input[readonly] {
+  color: #475569;
+  background: #f8fbff;
+}
+
+.confirm-delete-modal .modal-head p {
+  margin: 4px 0 0;
+  color: var(--secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .button.danger-button,
 .danger-button {
   color: #fff;
@@ -2291,6 +2303,14 @@ a.button {
   gap: 4px;
 }
 
+.property-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .manual-order-indicator {
   display: inline-flex;
   align-items: center;
@@ -2302,6 +2322,18 @@ a.button {
   background: #f3f7fd;
   font-size: 12px;
   font-weight: 750;
+}
+
+.danger-soft-button {
+  color: #991b1b;
+  border-color: #fecaca;
+  background: #fff5f5;
+}
+
+.danger-soft-button:hover:not(:disabled) {
+  color: #fff;
+  border-color: #b91c1c;
+  background: #b91c1c;
 }
 
 .property-selection-toolbar {
@@ -2335,7 +2367,7 @@ a.button {
 
 .property-operational-table th:nth-child(1),
 .property-operational-table td:nth-child(1) {
-  width: 42px;
+  width: 76px;
   text-align: center;
 }
 
@@ -2395,6 +2427,25 @@ a.button {
 
 .property-operational-table tr.active-property-detail td:first-child {
   box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.property-row-selection {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.property-row-delete {
+  width: 26px;
+  height: 26px;
+  color: #b91c1c;
+  opacity: 0;
+}
+
+.property-operational-table tbody tr:hover .property-row-delete,
+.property-row-delete:focus-visible {
+  opacity: 1;
 }
 
 .property-select-cell input {

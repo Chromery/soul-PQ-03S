@@ -12,7 +12,7 @@ PQ ora puo creare uno studio manualmente e puo caricare documenti lato PQ, ma il
 - Download documenti da PQ: `GET /api/properties/:propertyId/documents/:type/download`.
 - Creazione studio da PQ: `POST /api/studies`.
 
-Gli studi creati da PQ partono con ID interno `PQ-*`, un primo immobile `IMM-PQ-*`, `sourceSyncId = "pq-manual"` e campi ERP nulli. Questo permette di lavorare subito in PQ, ma non basta per riallineare automaticamente ERP e PQ.
+Gli studi creati da PQ partono con ID interno `PQ-*`, `sourceSyncId = "pq-manual"` e campi ERP nulli. Gli immobili creati dentro questi studi partono con ID interno `IMM-PQ-*`. Questo permette di lavorare subito in PQ, ma non basta per riallineare automaticamente ERP e PQ.
 
 ## Gap da chiudere
 

@@ -33,17 +33,26 @@ type CreateStudyInput = {
   technicalOwner: string;
   notes: string;
   deadline?: string;
-  property: {
-    address: string;
-    comune: string;
-    provincia: string;
-    ubicazione: string;
-    foglio: string | null;
-    particella: string | null;
-    subalterno: string | null;
-    categoria: string;
-    titolarita: string | null;
-  };
+};
+
+type CreatePropertyInput = {
+  address: string;
+  comune?: string;
+  provincia?: string;
+  ubicazione: string;
+  foglio: string | null;
+  particella: string | null;
+  subalterno: string | null;
+  categoria: string;
+  titolarita: string | null;
+  currentRendita: number;
+  estimatedRendita: number;
+  currentImu: number | null;
+  estimatedImu: number | null;
+};
+
+type DeletePropertiesInput = {
+  propertyIds: string[];
 };
 
 @Injectable()
@@ -95,7 +104,6 @@ export class StudiesService {
     const now = new Date();
     const stamp = now.getTime();
     const studyId = `PQ-${stamp}`;
-    const propertyId = `IMM-PQ-${stamp}-001`;
     const deadline = input.deadline ? parseDate(input.deadline, "deadline") : addDays(now, 30);
 
     await this.prisma.$transaction(async (tx) => {
@@ -136,38 +144,76 @@ export class StudiesService {
           notes: "Studio creato direttamente da PQ.",
         },
       });
-      await tx.property.create({
-        data: {
-          id: propertyId,
-          studyId,
-          address: input.property.address,
-          comune: input.property.comune,
-          provincia: input.property.provincia,
-          ubicazione: input.property.ubicazione,
-          foglio: input.property.foglio,
-          particella: input.property.particella,
-          subalterno: input.property.subalterno,
-          categoria: input.property.categoria,
-          titolarita: input.property.titolarita,
-          currentRendita: 0,
-          estimatedRendita: 0,
-          diffPercent: 0,
-          currentImu: null,
-          estimatedImu: null,
-          imuDiff: 0,
-          displayOrder: 0,
-          outcome: "Neutro",
-          hasStudy: false,
-        },
-      });
+    });
+
+    return this.find(studyId);
+  }
+
+  async createProperty(studyId: string, body: unknown) {
+    const study = await this.prisma.feasibilityStudy.findUnique({
+      where: { id: studyId },
+      select: { id: true, provincia: true, region: true, properties: { select: { id: true, displayOrder: true } } },
+    });
+    if (!study) return null;
+    const input = validateCreatePropertyInput(body);
+    const nextIndex = study.properties.length + 1;
+    const propertyId = `IMM-PQ-${Date.now()}-${String(nextIndex).padStart(3, "0")}`;
+    const displayOrder =
+      study.properties.length === 0
+        ? 0
+        : Math.max(...study.properties.map((property) => property.displayOrder)) + 1;
+    await this.prisma.property.create({
+      data: {
+        id: propertyId,
+        studyId,
+        address: input.address,
+        comune: input.comune ?? "",
+        provincia: input.provincia ?? study.provincia,
+        ubicazione: input.ubicazione,
+        foglio: input.foglio,
+        particella: input.particella,
+        subalterno: input.subalterno,
+        categoria: input.categoria,
+        titolarita: input.titolarita,
+        currentRendita: input.currentRendita,
+        estimatedRendita: input.estimatedRendita,
+        diffPercent: percentageDiff(input.currentRendita, input.estimatedRendita),
+        currentImu: input.currentImu,
+        estimatedImu: input.estimatedImu,
+        imuDiff: (input.estimatedImu ?? 0) - (input.currentImu ?? 0),
+        displayOrder,
+        outcome: "Neutro",
+        hasStudy: false,
+      },
     });
 
     try {
       await this.priceLists.assignForProperty(propertyId);
     } catch (error) {
-      console.error("Price list assignment failed for manually-created study", error);
+      console.error("Price list assignment failed for manually-created property", error);
     }
 
+    await this.refreshStudyTotals(studyId);
+    return this.find(studyId);
+  }
+
+  async deleteProperties(studyId: string, body: unknown) {
+    const study = await this.prisma.feasibilityStudy.findUnique({
+      where: { id: studyId },
+      select: { id: true, properties: { select: { id: true } } },
+    });
+    if (!study) return null;
+    const input = validateDeletePropertiesInput(body);
+    const availableIds = new Set(study.properties.map((property) => property.id));
+    if (input.propertyIds.some((propertyId) => !availableIds.has(propertyId))) {
+      throw new BadRequestException("Uno o piu immobili non appartengono allo studio");
+    }
+
+    await this.prisma.property.deleteMany({
+      where: { studyId, id: { in: input.propertyIds } },
+    });
+    await this.compactPropertyOrder(studyId);
+    await this.refreshStudyTotals(studyId);
     return this.find(studyId);
   }
 
@@ -192,6 +238,52 @@ export class StudiesService {
       ),
     );
     return this.find(id);
+  }
+
+  private async compactPropertyOrder(studyId: string) {
+    const properties = await this.prisma.property.findMany({
+      where: { studyId },
+      select: { id: true },
+      orderBy: [{ displayOrder: "asc" }, { id: "asc" }],
+    });
+    if (properties.length === 0) return;
+    await this.prisma.$transaction(
+      properties.map((property, displayOrder) =>
+        this.prisma.property.update({ where: { id: property.id }, data: { displayOrder } }),
+      ),
+    );
+  }
+
+  private async refreshStudyTotals(studyId: string) {
+    const properties = await this.prisma.property.findMany({
+      where: { studyId },
+      include: { analysisDraft: true },
+    });
+    const originalRendita = sum(properties.map((property) => Number(property.currentRendita)));
+    const totalRendita = sum(
+      properties.map((property) =>
+        property.analysisDraft?.totalEstimatedValue === null || property.analysisDraft?.totalEstimatedValue === undefined
+          ? Number(property.estimatedRendita)
+          : Number(property.analysisDraft.totalEstimatedValue),
+      ),
+    );
+    const catDRendita = sum(
+      properties
+        .filter((property) => property.categoria.trim().toUpperCase().startsWith("D/"))
+        .map((property) => Number(property.currentRendita)),
+    );
+    const currentImu = sum(properties.map((property) => (property.currentImu === null ? 0 : Number(property.currentImu))));
+    const estimatedImu = sum(properties.map((property) => (property.estimatedImu === null ? 0 : Number(property.estimatedImu))));
+    await this.prisma.feasibilityStudy.update({
+      where: { id: studyId },
+      data: {
+        originalRendita,
+        totalRendita,
+        catDRendita,
+        diffRendita: totalRendita - originalRendita,
+        diffImu: estimatedImu - currentImu,
+      },
+    });
   }
 
   private toApiStudy(study: StudyWithRelations) {
@@ -299,18 +391,10 @@ function validateCreateStudyInput(body: unknown): CreateStudyInput {
     throw new BadRequestException("Creazione studio non valida");
   }
   const input = body as Record<string, unknown>;
-  const property = input.property;
-  if (!property || typeof property !== "object" || Array.isArray(property)) {
-    throw new BadRequestException("Immobile iniziale obbligatorio");
-  }
-  const propertyInput = property as Record<string, unknown>;
   const company = requiredString(input.company, "company", 160);
   const studyComune = requiredString(input.comune, "comune", 100);
   const studyProvincia = requiredString(input.provincia, "provincia", 10).toUpperCase();
   const region = requiredString(input.region, "region", 80);
-  const address = requiredString(propertyInput.address, "property.address", 200);
-  const propertyComune = optionalString(propertyInput.comune, 100) ?? studyComune;
-  const propertyProvincia = (optionalString(propertyInput.provincia, 10) ?? studyProvincia).toUpperCase();
 
   return {
     company,
@@ -322,18 +406,44 @@ function validateCreateStudyInput(body: unknown): CreateStudyInput {
     technicalOwner: optionalString(input.technicalOwner, 120) ?? "Default User",
     notes: optionalString(input.notes, 4000) ?? "Studio creato direttamente da PQ.",
     deadline: optionalString(input.deadline, 40) ?? undefined,
-    property: {
-      address,
-      comune: propertyComune,
-      provincia: propertyProvincia,
-      ubicazione: optionalString(propertyInput.ubicazione, 220) ?? address,
-      foglio: optionalString(propertyInput.foglio, 40),
-      particella: optionalString(propertyInput.particella, 60),
-      subalterno: optionalString(propertyInput.subalterno, 40),
-      categoria: optionalString(propertyInput.categoria, 30) ?? "D/7",
-      titolarita: optionalString(propertyInput.titolarita, 160),
-    },
   };
+}
+
+function validateCreatePropertyInput(body: unknown): CreatePropertyInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new BadRequestException("Creazione immobile non valida");
+  }
+  const input = body as Record<string, unknown>;
+  const address = requiredString(input.address, "address", 200);
+  return {
+    address,
+    comune: optionalString(input.comune, 100) ?? undefined,
+    provincia: optionalString(input.provincia, 10)?.toUpperCase(),
+    ubicazione: optionalString(input.ubicazione, 220) ?? address,
+    foglio: optionalString(input.foglio, 40),
+    particella: optionalString(input.particella, 60),
+    subalterno: optionalString(input.subalterno, 40),
+    categoria: optionalString(input.categoria, 30) ?? "D/7",
+    titolarita: optionalString(input.titolarita, 160),
+    currentRendita: optionalNumber(input.currentRendita) ?? 0,
+    estimatedRendita: optionalNumber(input.estimatedRendita) ?? 0,
+    currentImu: optionalNumber(input.currentImu),
+    estimatedImu: optionalNumber(input.estimatedImu),
+  };
+}
+
+function validateDeletePropertiesInput(body: unknown): DeletePropertiesInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new BadRequestException("Eliminazione immobili non valida");
+  }
+  const input = body as Record<string, unknown>;
+  if (!Array.isArray(input.propertyIds)) throw new BadRequestException("propertyIds obbligatorio");
+  const propertyIds = input.propertyIds
+    .map((propertyId) => optionalString(propertyId, 120))
+    .filter((propertyId): propertyId is string => Boolean(propertyId));
+  const uniqueIds = Array.from(new Set(propertyIds));
+  if (uniqueIds.length === 0) throw new BadRequestException("Seleziona almeno un immobile");
+  return { propertyIds: uniqueIds };
 }
 
 function requiredString(value: unknown, field: string, maxLength: number) {
@@ -349,6 +459,13 @@ function optionalString(value: unknown, maxLength: number) {
   return normalized ? normalized.slice(0, maxLength) : null;
 }
 
+function optionalNumber(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const normalized = typeof value === "number" ? value : Number(String(value).replace(",", "."));
+  if (!Number.isFinite(normalized)) throw new BadRequestException("Valore numerico non valido");
+  return normalized;
+}
+
 function parseDate(value: string, field: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) throw new BadRequestException(`${field} non valido`);
@@ -357,4 +474,12 @@ function parseDate(value: string, field: string) {
 
 function addDays(date: Date, days: number) {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function percentageDiff(currentValue: number, nextValue: number) {
+  return currentValue === 0 ? 0 : ((nextValue - currentValue) / currentValue) * 100;
+}
+
+function sum(values: number[]) {
+  return values.reduce((total, value) => total + (Number.isFinite(value) ? value : 0), 0);
 }

@@ -41,6 +41,7 @@ import {
   Send,
   Settings,
   SlidersHorizontal,
+  Trash2,
   TrendingDown,
   TrendingUp,
   Upload,
@@ -58,7 +59,7 @@ import {
 import { openEntriesInForMaps, toForMapsEntries, toForMapsEntry } from "./formaps";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.18";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.19";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -153,15 +154,81 @@ type NewStudyFormState = {
   comune: string;
   provincia: string;
   region: string;
+  deadline: string;
+  notes: string;
+};
+
+type NewPropertyFormState = {
   address: string;
+  comune: string;
+  provincia: string;
+  region: string;
   categoria: string;
   foglio: string;
   particella: string;
   subalterno: string;
   titolarita: string;
-  deadline: string;
-  notes: string;
+  currentRendita: string;
+  estimatedRendita: string;
+  currentImu: string;
+  estimatedImu: string;
 };
+
+type ComuneOption = {
+  name: string;
+  province: string;
+  region: string;
+  label: string;
+  search: string;
+};
+
+type RawComuneRecord = {
+  nome: string;
+  sigla: string;
+  regione?: {
+    nome?: string;
+  };
+};
+
+let comuneOptionsPromise: Promise<ComuneOption[]> | null = null;
+
+async function loadComuneOptions() {
+  if (!comuneOptionsPromise) {
+    comuneOptionsPromise = import("comuni-json/comuni.json").then((module) => {
+      const records = module.default as RawComuneRecord[];
+      return records.map((record) => {
+        const region = normalizeRegionName(record.regione?.nome ?? "");
+        return {
+          name: record.nome,
+          province: record.sigla,
+          region,
+          label: `${record.nome} (${record.sigla}) - ${region}`,
+          search: normalizeComuneSearch(`${record.nome} ${record.sigla} ${region}`),
+        };
+      });
+    });
+  }
+  return comuneOptionsPromise;
+}
+
+function normalizeRegionName(value: string) {
+  return value.split("/")[0].replace(/\s+/g, " ").trim();
+}
+
+function normalizeComuneSearch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function findComuneOption(options: ComuneOption[], value: string) {
+  const normalized = normalizeComuneSearch(value);
+  if (!normalized) return null;
+  return options.find((option) => normalizeComuneSearch(option.name) === normalized || normalizeComuneSearch(option.label) === normalized) ?? null;
+}
 
 type SystemBackupInfo = {
   fileName: string;
@@ -1414,15 +1481,40 @@ function initialNewStudyForm(): NewStudyFormState {
     comune: "",
     provincia: "",
     region: "",
+    deadline: futureDateInput(30),
+    notes: "",
+  };
+}
+
+function initialNewPropertyForm(study: FeasibilityStudy): NewPropertyFormState {
+  return {
     address: "",
+    comune: study.comune,
+    provincia: study.provincia,
+    region: study.region,
     categoria: "D/7",
     foglio: "",
     particella: "",
     subalterno: "",
     titolarita: "",
-    deadline: futureDateInput(30),
-    notes: "",
+    currentRendita: "",
+    estimatedRendita: "",
+    currentImu: "",
+    estimatedImu: "",
   };
+}
+
+function parseOptionalDecimalInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const normalized = Number(trimmed.replace(",", "."));
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
+function hasInvalidDecimalInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return !Number.isFinite(Number(trimmed.replace(",", ".")));
 }
 
 function formatBytes(value: number) {
@@ -2063,17 +2155,6 @@ function App() {
           commercialOwner: "Default User",
           technicalOwner: "Default User",
           notes: form.notes,
-          property: {
-            address: form.address,
-            comune: form.comune,
-            provincia: form.provincia,
-            ubicazione: form.address,
-            foglio: form.foglio,
-            particella: form.particella,
-            subalterno: form.subalterno,
-            categoria: form.categoria,
-            titolarita: form.titolarita,
-          },
         }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -2090,6 +2171,67 @@ function App() {
       return false;
     } finally {
       setNewStudyBusy(false);
+    }
+  }
+
+  async function createPropertyForStudy(studyId: string, form: NewPropertyFormState) {
+    if ([form.currentRendita, form.estimatedRendita, form.currentImu, form.estimatedImu].some(hasInvalidDecimalInput)) {
+      flash("Inserisci valori economici validi.");
+      return false;
+    }
+    const currentRendita = parseOptionalDecimalInput(form.currentRendita);
+    const estimatedRendita = parseOptionalDecimalInput(form.estimatedRendita);
+    const currentImu = parseOptionalDecimalInput(form.currentImu);
+    const estimatedImu = parseOptionalDecimalInput(form.estimatedImu);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/studies/${encodeURIComponent(studyId)}/properties`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: form.address,
+          ubicazione: form.address,
+          comune: form.comune,
+          provincia: form.provincia,
+          foglio: form.foglio,
+          particella: form.particella,
+          subalterno: form.subalterno,
+          categoria: form.categoria,
+          titolarita: form.titolarita,
+          currentRendita: currentRendita ?? 0,
+          estimatedRendita: estimatedRendita ?? 0,
+          currentImu,
+          estimatedImu,
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const updatedStudy = (await response.json()) as FeasibilityStudy;
+      setStudies((current) => current.map((study) => (study.id === updatedStudy.id ? updatedStudy : study)));
+      flash("Immobile aggiunto allo studio.");
+      return true;
+    } catch (error) {
+      console.error(error);
+      flash("Impossibile aggiungere l'immobile.");
+      return false;
+    }
+  }
+
+  async function deletePropertiesFromStudy(studyId: string, propertyIds: string[]) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/studies/${encodeURIComponent(studyId)}/properties`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyIds }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const updatedStudy = (await response.json()) as FeasibilityStudy;
+      setStudies((current) => current.map((study) => (study.id === updatedStudy.id ? updatedStudy : study)));
+      flash(propertyIds.length === 1 ? "Immobile eliminato." : "Immobili eliminati.");
+      return true;
+    } catch (error) {
+      console.error(error);
+      flash("Impossibile eliminare gli immobili selezionati.");
+      return false;
     }
   }
 
@@ -2327,6 +2469,8 @@ function App() {
           onNotice={flash}
           onUpdate={(input) => updateStudy(activeStudy.id, input)}
           onReorder={(propertyIds) => reorderStudyProperties(activeStudy.id, propertyIds)}
+          onCreateProperty={(form) => createPropertyForStudy(activeStudy.id, form)}
+          onDeleteProperties={(propertyIds) => deletePropertiesFromStudy(activeStudy.id, propertyIds)}
           onPropertyEstimateChange={updatePropertyEstimatedValue}
           onOutcomeChange={updatePropertyOutcome}
           presentationFile={presentationFiles[activeStudy.id]}
@@ -2809,6 +2953,92 @@ function App() {
   );
 }
 
+function ComuneAutocomplete({
+  id,
+  value,
+  province,
+  region,
+  onChange,
+  required = false,
+  autoFocus = false,
+}: {
+  id: string;
+  value: string;
+  province: string;
+  region: string;
+  onChange: (selection: { comune: string; provincia: string; region: string }) => void;
+  required?: boolean;
+  autoFocus?: boolean;
+}) {
+  const [options, setOptions] = useState<ComuneOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const listId = `${id}-options`;
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    loadComuneOptions()
+      .then((loadedOptions) => {
+        if (!cancelled) setOptions(loadedOptions);
+      })
+      .catch((error) => {
+        console.error(error);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const match = findComuneOption(options, value);
+    if (match && (province !== match.province || region !== match.region || value !== match.name)) {
+      onChange({ comune: match.name, provincia: match.province, region: match.region });
+    }
+  }, [onChange, options, province, region, value]);
+
+  const suggestions = useMemo(() => {
+    const query = normalizeComuneSearch(value);
+    if (!query) return options.slice(0, 20);
+    return options
+      .filter((option) => option.search.includes(query) || normalizeComuneSearch(option.name).startsWith(query))
+      .slice(0, 24);
+  }, [options, value]);
+
+  function handleInput(nextValue: string) {
+    const match = findComuneOption(options, nextValue);
+    onChange({
+      comune: match?.name ?? nextValue,
+      provincia: match?.province ?? "",
+      region: match?.region ?? "",
+    });
+  }
+
+  return (
+    <label>
+      <span>Comune *</span>
+      <input
+        id={id}
+        autoFocus={autoFocus}
+        required={required}
+        list={listId}
+        value={value}
+        onChange={(event) => handleInput(event.target.value)}
+        placeholder={loading ? "Caricamento comuni..." : "Inizia a digitare il comune"}
+      />
+      <datalist id={listId}>
+        {suggestions.map((option) => (
+          <option key={`${option.name}-${option.province}`} value={option.name}>
+            {option.label}
+          </option>
+        ))}
+      </datalist>
+    </label>
+  );
+}
+
 function NewStudyModal({
   busy,
   onClose,
@@ -2824,6 +3054,15 @@ function NewStudyModal({
     setForm((current) => ({ ...current, [field]: value }));
   }
 
+  function updateComune(selection: { comune: string; provincia: string; region: string }) {
+    setForm((current) => ({
+      ...current,
+      comune: selection.comune,
+      provincia: selection.provincia,
+      region: selection.region,
+    }));
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const success = await onCreate({
@@ -2832,12 +3071,6 @@ function NewStudyModal({
       comune: form.comune.trim(),
       provincia: form.provincia.trim().toUpperCase(),
       region: form.region.trim(),
-      address: form.address.trim(),
-      categoria: form.categoria.trim().toUpperCase() || "D/7",
-      foglio: form.foglio.trim(),
-      particella: form.particella.trim(),
-      subalterno: form.subalterno.trim(),
-      titolarita: form.titolarita.trim(),
       deadline: form.deadline,
       notes: form.notes.trim(),
     });
@@ -2861,7 +3094,7 @@ function NewStudyModal({
         <div className="modal-head">
           <div>
             <h2 id="new-study-title">Nuovo studio</h2>
-            <p>Creazione manuale da PQ con un primo immobile associato.</p>
+            <p>Creazione manuale da PQ, senza immobili iniziali.</p>
           </div>
           <button className="icon-button" type="button" onClick={onClose} disabled={busy} aria-label="Chiudi nuovo studio">
             <X size={16} />
@@ -2880,67 +3113,32 @@ function NewStudyModal({
               required
               value={form.company}
               onChange={(event) => updateField("company", event.target.value)}
-              placeholder="Immobiliare Aurora Srl"
+              placeholder="ACME srl"
             />
           </label>
           <label>
             <span>Partita IVA</span>
             <input value={form.vat} onChange={(event) => updateField("vat", event.target.value)} placeholder="00000000000" />
           </label>
+          <ComuneAutocomplete
+            id="new-study-comune"
+            value={form.comune}
+            province={form.provincia}
+            region={form.region}
+            onChange={updateComune}
+            required
+          />
           <label>
-            <span>Comune *</span>
-            <input required value={form.comune} onChange={(event) => updateField("comune", event.target.value)} placeholder="Bolzano" />
+            <span>Provincia</span>
+            <input required readOnly value={form.provincia} placeholder="Deducibile dal comune" />
           </label>
           <label>
-            <span>Provincia *</span>
-            <input
-              required
-              maxLength={2}
-              value={form.provincia}
-              onChange={(event) => updateField("provincia", event.target.value)}
-              placeholder="BZ"
-            />
-          </label>
-          <label>
-            <span>Regione *</span>
-            <input required value={form.region} onChange={(event) => updateField("region", event.target.value)} placeholder="Trentino-Alto Adige" />
+            <span>Regione</span>
+            <input required readOnly value={form.region} placeholder="Deducibile dal comune" />
           </label>
           <label>
             <span>Scadenza</span>
             <input type="date" value={form.deadline} onChange={(event) => updateField("deadline", event.target.value)} />
-          </label>
-          <label className="wide">
-            <span>Ubicazione immobile *</span>
-            <input
-              required
-              value={form.address}
-              onChange={(event) => updateField("address", event.target.value)}
-              placeholder="Via Roma 1, Bolzano"
-            />
-          </label>
-          <label>
-            <span>Foglio</span>
-            <input value={form.foglio} onChange={(event) => updateField("foglio", event.target.value)} />
-          </label>
-          <label>
-            <span>Particella</span>
-            <input value={form.particella} onChange={(event) => updateField("particella", event.target.value)} />
-          </label>
-          <label>
-            <span>Sub</span>
-            <input value={form.subalterno} onChange={(event) => updateField("subalterno", event.target.value)} />
-          </label>
-          <label>
-            <span>Categoria</span>
-            <input value={form.categoria} onChange={(event) => updateField("categoria", event.target.value)} placeholder="D/7" />
-          </label>
-          <label className="wide">
-            <span>Titolarita</span>
-            <input
-              value={form.titolarita}
-              onChange={(event) => updateField("titolarita", event.target.value)}
-              placeholder="Proprieta per 1/1"
-            />
           </label>
           <label className="wide">
             <span>Note</span>
@@ -2958,6 +3156,216 @@ function NewStudyModal({
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function NewPropertyModal({
+  study,
+  busy,
+  onClose,
+  onCreate,
+}: {
+  study: FeasibilityStudy;
+  busy: boolean;
+  onClose: () => void;
+  onCreate: (form: NewPropertyFormState) => Promise<boolean>;
+}) {
+  const [form, setForm] = useState<NewPropertyFormState>(() => initialNewPropertyForm(study));
+
+  useEffect(() => {
+    setForm(initialNewPropertyForm(study));
+  }, [study.id]);
+
+  function updateField<K extends keyof NewPropertyFormState>(field: K, value: NewPropertyFormState[K]) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateComune(selection: { comune: string; provincia: string; region: string }) {
+    setForm((current) => ({
+      ...current,
+      comune: selection.comune,
+      provincia: selection.provincia,
+      region: selection.region,
+    }));
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const success = await onCreate({
+      address: form.address.trim(),
+      comune: form.comune.trim(),
+      provincia: form.provincia.trim().toUpperCase(),
+      region: form.region.trim(),
+      categoria: form.categoria.trim().toUpperCase() || "D/7",
+      foglio: form.foglio.trim(),
+      particella: form.particella.trim(),
+      subalterno: form.subalterno.trim(),
+      titolarita: form.titolarita.trim(),
+      currentRendita: form.currentRendita.trim(),
+      estimatedRendita: form.estimatedRendita.trim(),
+      currentImu: form.currentImu.trim(),
+      estimatedImu: form.estimatedImu.trim(),
+    });
+    if (success) setForm(initialNewPropertyForm(study));
+  }
+
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) onClose();
+      }}
+    >
+      <form
+        className="editor-modal new-study-modal"
+        aria-labelledby="new-property-title"
+        onSubmit={handleSubmit}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head">
+          <div>
+            <h2 id="new-property-title">Nuovo immobile</h2>
+            <p>{study.company}</p>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} disabled={busy} aria-label="Chiudi nuovo immobile">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="new-study-form-grid">
+          <label className="wide">
+            <span>Ubicazione *</span>
+            <input
+              autoFocus
+              required
+              value={form.address}
+              onChange={(event) => updateField("address", event.target.value)}
+              placeholder="Via Roma 1"
+            />
+          </label>
+          <ComuneAutocomplete
+            id="new-property-comune"
+            value={form.comune}
+            province={form.provincia}
+            region={form.region}
+            onChange={updateComune}
+            required
+          />
+          <label>
+            <span>Provincia</span>
+            <input required readOnly value={form.provincia} placeholder="Deducibile dal comune" />
+          </label>
+          <label>
+            <span>Regione</span>
+            <input required readOnly value={form.region} placeholder="Deducibile dal comune" />
+          </label>
+          <label>
+            <span>Categoria</span>
+            <input value={form.categoria} onChange={(event) => updateField("categoria", event.target.value)} placeholder="D/7" />
+          </label>
+          <label>
+            <span>Foglio</span>
+            <input value={form.foglio} onChange={(event) => updateField("foglio", event.target.value)} />
+          </label>
+          <label>
+            <span>Particella</span>
+            <input value={form.particella} onChange={(event) => updateField("particella", event.target.value)} />
+          </label>
+          <label>
+            <span>Sub</span>
+            <input value={form.subalterno} onChange={(event) => updateField("subalterno", event.target.value)} />
+          </label>
+          <label className="wide">
+            <span>Titolarita</span>
+            <input
+              value={form.titolarita}
+              onChange={(event) => updateField("titolarita", event.target.value)}
+              placeholder="Proprieta per 1/1"
+            />
+          </label>
+          <label>
+            <span>Rendita attuale</span>
+            <input inputMode="decimal" value={form.currentRendita} onChange={(event) => updateField("currentRendita", event.target.value)} />
+          </label>
+          <label>
+            <span>Rendita proposta</span>
+            <input inputMode="decimal" value={form.estimatedRendita} onChange={(event) => updateField("estimatedRendita", event.target.value)} />
+          </label>
+          <label>
+            <span>IMU attuale</span>
+            <input inputMode="decimal" value={form.currentImu} onChange={(event) => updateField("currentImu", event.target.value)} />
+          </label>
+          <label>
+            <span>IMU prevista</span>
+            <input inputMode="decimal" value={form.estimatedImu} onChange={(event) => updateField("estimatedImu", event.target.value)} />
+          </label>
+        </div>
+
+        <div className="modal-actions">
+          <button className="button secondary" type="button" onClick={onClose} disabled={busy}>
+            Annulla
+          </button>
+          <button className="button primary" type="submit" disabled={busy}>
+            <Plus size={15} />
+            {busy ? "Creazione..." : "Aggiungi immobile"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ConfirmDeletePropertiesModal({
+  busy,
+  count,
+  onClose,
+  onConfirm,
+}: {
+  busy: boolean;
+  count: number;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) onClose();
+      }}
+    >
+      <section
+        className="editor-modal confirm-delete-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-properties-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head">
+          <div>
+            <h2 id="delete-properties-title">Elimina {count === 1 ? "immobile" : "immobili"}</h2>
+            <p>Operazione permanente sullo studio corrente.</p>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} disabled={busy} aria-label="Chiudi conferma eliminazione">
+            <X size={16} />
+          </button>
+        </div>
+        <p className="modal-note">
+          Verranno eliminati {count === 1 ? "l'immobile selezionato" : `${count} immobili selezionati`} con documenti,
+          bozze aree e dati collegati. Vuoi continuare?
+        </p>
+        <div className="modal-actions">
+          <button className="button secondary" type="button" onClick={onClose} disabled={busy}>
+            Annulla
+          </button>
+          <button className="button danger-button" type="button" onClick={onConfirm} disabled={busy}>
+            <Trash2 size={15} />
+            {busy ? "Eliminazione..." : "Elimina"}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -4131,6 +4539,8 @@ function StudyDetail({
   onNotice,
   onUpdate,
   onReorder,
+  onCreateProperty,
+  onDeleteProperties,
   onPropertyEstimateChange,
   onOutcomeChange,
   presentationFile,
@@ -4143,6 +4553,8 @@ function StudyDetail({
   onNotice: (message: string) => void;
   onUpdate: (input: StudyUpdate) => Promise<boolean>;
   onReorder: (propertyIds: string[]) => Promise<boolean>;
+  onCreateProperty: (form: NewPropertyFormState) => Promise<boolean>;
+  onDeleteProperties: (propertyIds: string[]) => Promise<boolean>;
   onPropertyEstimateChange: (propertyId: string, estimatedRendita: number) => void;
   onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
   presentationFile?: File;
@@ -4157,12 +4569,18 @@ function StudyDetail({
   const [manualOrder, setManualOrder] = useState<string[]>(() => study.properties.map((property) => property.id));
   const [draggedPropertyId, setDraggedPropertyId] = useState("");
   const [activePropertyId, setActivePropertyId] = useState<string | null>(null);
+  const [newPropertyModalOpen, setNewPropertyModalOpen] = useState(false);
+  const [newPropertyBusy, setNewPropertyBusy] = useState(false);
+  const [deleteConfirmIds, setDeleteConfirmIds] = useState<string[]>([]);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     setSelectedPropertyIds([]);
     setPropertySortKey("manual");
     setManualOrder(study.properties.map((property) => property.id));
     setActivePropertyId(null);
+    setNewPropertyModalOpen(false);
+    setDeleteConfirmIds([]);
   }, [study.id]);
 
   useEffect(() => {
@@ -4303,6 +4721,26 @@ function StudyDetail({
     void onReorder(nextOrder);
   }
 
+  async function handleCreateProperty(form: NewPropertyFormState) {
+    setNewPropertyBusy(true);
+    const success = await onCreateProperty(form);
+    setNewPropertyBusy(false);
+    if (success) setNewPropertyModalOpen(false);
+    return success;
+  }
+
+  async function confirmDeleteProperties() {
+    if (deleteConfirmIds.length === 0 || deleteBusy) return;
+    setDeleteBusy(true);
+    const success = await onDeleteProperties(deleteConfirmIds);
+    setDeleteBusy(false);
+    if (success) {
+      setSelectedPropertyIds((current) => current.filter((propertyId) => !deleteConfirmIds.includes(propertyId)));
+      if (activePropertyId && deleteConfirmIds.includes(activePropertyId)) setActivePropertyId(null);
+      setDeleteConfirmIds([]);
+    }
+  }
+
   return (
     <main className="detail-page">
       <button className="back-link" onClick={onBack}>
@@ -4353,9 +4791,24 @@ function StudyDetail({
             <h2>Immobili dello studio</h2>
             <span>{counts.total} immobili, di cui {counts.catD} in categoria D</span>
           </div>
-          <div className="manual-order-indicator">
-            <GripVertical size={15} />
-            {propertySortKey === "manual" ? "Ordine manuale" : "Trascina per salvare un nuovo ordine"}
+          <div className="property-list-actions">
+            <span className="manual-order-indicator">
+              <GripVertical size={15} />
+              {propertySortKey === "manual" ? "Ordine manuale" : "Trascina per salvare un nuovo ordine"}
+            </span>
+            <button className="button primary compact-button" type="button" onClick={() => setNewPropertyModalOpen(true)}>
+              <Plus size={15} />
+              Aggiungi immobile
+            </button>
+            <button
+              className="button secondary compact-button danger-soft-button"
+              type="button"
+              disabled={selectedProperties.length === 0}
+              onClick={() => setDeleteConfirmIds(selectedProperties.map((property) => property.id))}
+            >
+              <Trash2 size={15} />
+              Elimina selezionati
+            </button>
           </div>
         </div>
 
@@ -4434,13 +4887,27 @@ function StudyDetail({
                     }}
                   >
                     <td className="property-select-cell">
-                      <input
-                        type="checkbox"
-                        checked={selectedPropertyIds.includes(property.id)}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={() => togglePropertySelection(property.id)}
-                        aria-label={`Seleziona ${propertyLocation(property)}`}
-                      />
+                      <div className="property-row-selection">
+                        <input
+                          type="checkbox"
+                          checked={selectedPropertyIds.includes(property.id)}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={() => togglePropertySelection(property.id)}
+                          aria-label={`Seleziona ${propertyLocation(property)}`}
+                        />
+                        <button
+                          className="icon-button property-row-delete"
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setDeleteConfirmIds([property.id]);
+                          }}
+                          aria-label={`Elimina ${propertyLocation(property)}`}
+                          title="Elimina immobile"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </td>
                     <td className="property-drag-cell">
                       <button
@@ -4487,8 +4954,31 @@ function StudyDetail({
               })}
             </tbody>
           </table>
+          {orderedProperties.length === 0 && (
+            <div className="empty-state">
+              <Building2 size={22} />
+              <strong>Nessun immobile nello studio</strong>
+              <span>Aggiungi uno o piu immobili per iniziare analisi e caricamento documenti.</span>
+            </div>
+          )}
         </div>
       </section>
+      {newPropertyModalOpen && (
+        <NewPropertyModal
+          study={study}
+          busy={newPropertyBusy}
+          onClose={() => setNewPropertyModalOpen(false)}
+          onCreate={handleCreateProperty}
+        />
+      )}
+      {deleteConfirmIds.length > 0 && (
+        <ConfirmDeletePropertiesModal
+          busy={deleteBusy}
+          count={deleteConfirmIds.length}
+          onClose={() => setDeleteConfirmIds([])}
+          onConfirm={() => void confirmDeleteProperties()}
+        />
+      )}
       {activeProperty && (
         <PropertyAreaDetail
           property={activeProperty}
