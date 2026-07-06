@@ -14,7 +14,7 @@ async function bootstrap() {
   app.setGlobalPrefix("api");
   app.use(json({ limit: "60mb" }));
   app.use(urlencoded({ extended: true, limit: "60mb" }));
-  app.enableCors({ origin: origins, credentials: true });
+  app.enableCors({ origin: origins, credentials: true, preflightContinue: true });
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,

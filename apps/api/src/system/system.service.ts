@@ -47,6 +47,8 @@ export class SystemService {
       integrations: {
         erpSyncTokenConfigured: Boolean(optionalConfig(this.config.get<string>("ERP_SYNC_TOKEN"))),
         openRouterConfigured: Boolean(optionalConfig(this.config.get<string>("OPENROUTER_API_KEY"))),
+        neuralwattConfigured: Boolean(optionalConfig(this.config.get<string>("NEURALWATT_API_KEY"))),
+        neuralwattModel: optionalConfig(this.config.get<string>("NEURALWATT_MODEL")) ?? "qwen3.6-35b-fast",
         scaleModel: optionalConfig(this.config.get<string>("OPENROUTER_SCALE_MODEL")) ?? "qwen/qwen3.5-flash-02-23",
         visuraModel:
           optionalConfig(this.config.get<string>("OPENROUTER_VISURA_MODEL")) ??

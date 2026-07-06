@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "forMaps Open",
+  "version": "0.3.0",
+  "description": "Compila automaticamente la ricerca particelle in forMaps dai dati aperti da Soul PQ.",
+  "permissions": [
+    "downloads",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.formaps.it/*",
+    "https://*.formaps.it/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "http://0.0.0.0/*",
+    "http://*/*",
+    "https://soul-pq-alpha.rainailab.com/*",
+    "https://soul-pq-alpha-2.iggau.com/*",
+    "https://*.ts.net/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "forMaps Open settings",
+    "default_popup": "settings.html"
+  },
+  "options_page": "settings.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.formaps.it/*",
+        "https://*.formaps.it/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://www.formaps.it/*",
+        "https://*.formaps.it/*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ]
+}

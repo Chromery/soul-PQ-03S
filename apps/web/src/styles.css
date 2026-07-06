@@ -2610,6 +2610,12 @@ a.button {
   gap: 8px;
 }
 
+.settings-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .property-area-empty span {
   max-width: 520px;
   color: var(--secondary);

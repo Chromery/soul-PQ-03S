@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Apri in forMaps</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">forMaps helper</p>
+          <h1>Apri particelle in forMaps</h1>
+          <p>
+            Inserisci i dati catastali, poi usa il pulsante per aprire una nuova scheda
+            forMaps e compilare la ricerca particelle.
+          </p>
+        </div>
+      </header>
+
+      <section class="card notice">
+        <div>
+          <h2>Setup Chrome richiesto una sola volta</h2>
+          <p>
+            Chrome non permette a una pagina esterna di compilare direttamente una scheda
+            su <code>formaps.it</code>. Per avere il pulsante unico, installa l'estensione
+            inclusa qui sotto.
+          </p>
+        </div>
+        <a class="secondary" href="formaps-open-extension.zip">Scarica estensione Chrome</a>
+      </section>
+
+      <section class="card">
+        <div class="section-title">
+          <div>
+            <h2>Dati da aprire</h2>
+            <p>La prima riga contiene i valori di prova richiesti.</p>
+          </div>
+          <button class="secondary" type="button" id="addRow">Aggiungi riga</button>
+        </div>
+
+        <form id="entries" autocomplete="off"></form>
+
+        <div class="options">
+          <label class="check">
+            <input id="openCatPanel" type="checkbox" checked disabled>
+            <span>Il pannello CAT viene aperto automaticamente</span>
+          </label>
+          <p>
+            L'estensione apre subito il tab CAT, compila i dati catastali e lascia a te
+            l'invio finale dopo avere inserito il codice CAPTCHA letto da Qwen. Se provincia
+            o comune non vengono trovati, usa Agrigento/Agrigento e mantiene foglio e particella.
+          </p>
+        </div>
+
+        <div class="actions">
+          <button class="primary" type="button" id="openFormaps">Apri in forMaps</button>
+          <p id="status" role="status"></p>
+        </div>
+      </section>
+
+      <section class="card compact">
+        <h2>Installazione estensione</h2>
+        <ol>
+          <li>Scarica e decomprimi lo zip dell'estensione.</li>
+          <li>Apri <code>chrome://extensions</code> e abilita <strong>Developer mode</strong>.</li>
+          <li>Premi <strong>Load unpacked</strong> e seleziona la cartella <code>extension</code> estratta.</li>
+          <li>Torna su questa pagina e premi <strong>Apri in forMaps</strong>.</li>
+        </ol>
+        <p class="muted">
+          Se forMaps richiede il codice captcha, l'estensione compila i campi, invia
+          l'immagine a Qwen e inserisce il codice letto. Il click su Conferma resta manuale,
+          a meno che l'auto-invio sia abilitato nel popup dell'estensione.
+        </p>
+      </section>
+    </main>
+
+    <template id="entryTemplate">
+      <fieldset class="entry">
+        <label>
+          <span>Provincia catastale</span>
+          <input name="provincia" type="text" required>
+        </label>
+        <label>
+          <span>Comune catastale</span>
+          <input name="comune" type="text" required>
+        </label>
+        <label>
+          <span>Foglio catasto terreni</span>
+          <input name="foglio" type="text" inputmode="numeric" required>
+        </label>
+        <label>
+          <span>Particella</span>
+          <input name="particella" type="text" required>
+        </label>
+        <button class="remove" type="button" title="Rimuovi riga">Rimuovi</button>
+      </fieldset>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>

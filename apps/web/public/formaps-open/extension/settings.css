@@ -1,0 +1,52 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 280px;
+  margin: 0;
+  color: #1f2428;
+  background: #ffffff;
+  font: 13px/1.4 Arial, Helvetica, sans-serif;
+}
+
+main {
+  padding: 14px;
+}
+
+h1 {
+  margin: 0 0 14px;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.row {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.row input {
+  width: 16px;
+  height: 16px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #b8c0c7;
+  border-radius: 6px;
+  font: inherit;
+}
+
+#status {
+  min-height: 18px;
+  margin: 10px 0 0;
+  color: #4f5b63;
+}

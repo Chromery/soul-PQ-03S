@@ -193,6 +193,8 @@ type SystemStatus = {
   integrations: {
     erpSyncTokenConfigured: boolean;
     openRouterConfigured: boolean;
+    neuralwattConfigured: boolean;
+    neuralwattModel: string;
     scaleModel: string;
     visuraModel: string;
     pdfEngine: string;
@@ -3041,12 +3043,25 @@ function SettingsPage({ appVersion, onNotice }: { appVersion: string; onNotice: 
             <SettingsValue label="Ambiente" value={systemStatus?.environment ?? "Non disponibile"} />
             <SettingsValue label="ERP sync token" value={configuredLabel(systemStatus?.integrations.erpSyncTokenConfigured)} />
             <SettingsValue label="OpenRouter/Qwen" value={configuredLabel(systemStatus?.integrations.openRouterConfigured)} />
+            <SettingsValue label="Neuralwatt CAPTCHA" value={configuredLabel(systemStatus?.integrations.neuralwattConfigured)} />
             <SettingsValue label="Auth utenti" value={systemStatus?.integrations.authentication === "not-configured" ? "Non configurata" : "Configurata"} />
             <SettingsValue label="Modello scala" value={systemStatus?.integrations.scaleModel ?? "qwen/qwen3.5-flash-02-23"} />
             <SettingsValue label="Modello visure" value={systemStatus?.integrations.visuraModel ?? "qwen/qwen3.5-flash-02-23"} />
+            <SettingsValue label="Modello CAPTCHA" value={systemStatus?.integrations.neuralwattModel ?? "qwen3.6-35b-fast"} />
             <SettingsValue label="OCR PDF" value={systemStatus?.integrations.pdfEngine ?? "mistral-ocr"} />
             <SettingsValue label="Stato letto" value={systemStatus ? formatDateTime(systemStatus.generatedAt) : "Caricamento"} />
           </div>
+          <div className="settings-inline-actions">
+            <a className="button secondary compact-button" href="/formaps-open/" target="_blank" rel="noreferrer">
+              <ExternalLink size={15} />
+              Helper forMaps
+            </a>
+            <a className="button secondary compact-button" href="/formaps-open/formaps-open-extension.zip" download>
+              <Download size={15} />
+              Scarica estensione
+            </a>
+          </div>
+          <p className="settings-note">L'estensione usa l'endpoint PQ della stessa origine per leggere il CAPTCHA con Neuralwatt/Qwen.</p>
         </div>
 
         <div className="detail-card settings-card">

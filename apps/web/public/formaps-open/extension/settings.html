@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>forMaps Open</title>
+    <link rel="stylesheet" href="settings.css">
+  </head>
+  <body>
+    <main>
+      <h1>forMaps Open</h1>
+
+      <label class="row">
+        <input id="autoSubmitCaptchaSearch" type="checkbox">
+        <span>Conferma automaticamente il CAPTCHA</span>
+      </label>
+
+      <label class="field">
+        <span>Delay prima di Conferma</span>
+        <input id="autoSubmitDelaySeconds" type="number" min="0" max="60" step="1">
+      </label>
+
+      <p id="status" role="status"></p>
+    </main>
+
+    <script src="settings.js"></script>
+  </body>
+</html>

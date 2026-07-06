@@ -121,8 +121,9 @@ export function buildForMapsUrl(entry: ForMapsEntry): string {
       particella: String(entry.particella),
     },
     options: {
-      openCatPanel: false,
+      openCatPanel: true,
       captureCaptcha: true,
+      qwenCaptchaEndpoint: qwenCaptchaEndpoint(),
     },
   });
 
@@ -151,6 +152,14 @@ function toBase64Url(value: unknown): string {
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
+}
+
+function qwenCaptchaEndpoint() {
+  if (typeof window === "undefined") {
+    return "https://soul-pq-alpha.rainailab.com/api/qwen-captcha";
+  }
+
+  return `${window.location.origin}/api/qwen-captcha`;
 }
 
 function normalizeRequired(value: string | number | null | undefined) {

@@ -74,6 +74,10 @@ services:
       OPENROUTER_PDF_ENGINE: ${OPENROUTER_PDF_ENGINE:-mistral-ocr}
       OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-http://localhost:${WEB_PORT:-8080}}
       OPENROUTER_APP_TITLE: ${OPENROUTER_APP_TITLE:-Soul Prospect Qualifier}
+      NEURALWATT_API_KEY: ${NEURALWATT_API_KEY:-}
+      NEURALWATT_API_URL: ${NEURALWATT_API_URL:-https://api.neuralwatt.com/v1/chat/completions}
+      NEURALWATT_MODEL: ${NEURALWATT_MODEL:-qwen3.6-35b-fast}
+      NEURALWATT_CAPTCHA_PROMPT: ${NEURALWATT_CAPTCHA_PROMPT:-}
     ports:
       - "${API_PORT:-3000}:3000"
     volumes:

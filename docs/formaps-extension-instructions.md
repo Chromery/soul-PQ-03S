@@ -4,11 +4,16 @@
 
 Implementare nella piattaforma principale un pulsante che, partendo da una lista di dati catastali, apra una nuova scheda forMaps per ogni particella e lasci all'estensione Chrome `forMaps Open` il compito di compilare automaticamente la UI di forMaps.
 
-La piattaforma principale non deve chiamare il webserver helper. Deve solo generare gli URL forMaps con il payload corretto nel fragment `#formapsOpen=...`.
+La piattaforma principale deve generare gli URL forMaps con il payload corretto nel fragment `#formapsOpen=...`.
+Il proxy CAPTCHA/Qwen non vive piu in un servizio Tailscale separato: e incorporato nell'API PQ come `POST /api/qwen-captcha` e usa `NEURALWATT_API_KEY` dal `.env`.
 
 ## Prerequisito Utente
 
 L'utente deve avere installata l'estensione Chrome `forMaps Open`.
+In PQ alpha l'helper e lo zip dell'estensione sono serviti dalla webapp:
+
+- helper: `/formaps-open/`
+- zip estensione: `/formaps-open/formaps-open-extension.zip`
 
 Senza estensione:
 
@@ -79,8 +84,9 @@ function buildForMapsUrl(entry: ForMapsEntry): string {
       particella: String(entry.particella)
     },
     options: {
-      openCatPanel: false,
-      captureCaptcha: true
+      openCatPanel: true,
+      captureCaptcha: true,
+      qwenCaptchaEndpoint: `${window.location.origin}/api/qwen-captcha`
     }
   });
 
@@ -116,15 +122,18 @@ Non chiamarlo dopo await, timeout, polling o callback non direttamente collegati
 
 `openCatPanel`:
 
-- `false`: comportamento consigliato. L'estensione usa il DOM di forMaps senza aprire visivamente il pannello CAT.
-- `true`: apre la sezione CAT prima della compilazione. Utile per debug o maggiore visibilità.
+- `true`: apre la sezione CAT prima della compilazione. E il default attuale per rendere piu visibile cosa sta facendo l'estensione.
+- `false`: l'estensione usa il DOM di forMaps senza aprire visivamente il pannello CAT.
 
 `captureCaptcha`:
 
-- `true`: quando forMaps mostra il CAPTCHA, l'estensione salva file diagnostici in `Downloads/formaps-open/`.
+- `true`: quando forMaps mostra il CAPTCHA, l'estensione salva file diagnostici in `Downloads/formaps-open/` e invia l'immagine al proxy Qwen se `qwenCaptchaEndpoint` e valido.
 - `false`: disabilita la cattura diagnostica.
 
-L'estensione non risolve automaticamente CAPTCHA.
+`qwenCaptchaEndpoint`:
+
+- in alpha deve essere `https://soul-pq-alpha.rainailab.com/api/qwen-captcha` o lo stesso path sulla origin corrente;
+- l'estensione accetta anche `https://soul-pq-alpha-2.iggau.com/api/qwen-captcha` e fallback locali per sviluppo.
 
 ## Vincoli Browser
 
@@ -141,7 +150,7 @@ L'estensione non risolve automaticamente CAPTCHA.
 4. Cliccare il pulsante "Apri in forMaps".
 5. Verificare che venga aperta una scheda forMaps per ogni particella.
 6. Verificare che l'estensione compili provincia, comune, foglio e particella.
-7. Se compare CAPTCHA, verificare che l'estensione salvi i file in `Downloads/formaps-open/`.
+7. Se compare CAPTCHA, verificare che l'estensione salvi i file in `Downloads/formaps-open/` e compili il codice letto via Neuralwatt/Qwen.
 
 ## Dati Di Test
 
