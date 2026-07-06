@@ -4887,27 +4887,13 @@ function StudyDetail({
                     }}
                   >
                     <td className="property-select-cell">
-                      <div className="property-row-selection">
-                        <input
-                          type="checkbox"
-                          checked={selectedPropertyIds.includes(property.id)}
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={() => togglePropertySelection(property.id)}
-                          aria-label={`Seleziona ${propertyLocation(property)}`}
-                        />
-                        <button
-                          className="icon-button property-row-delete"
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setDeleteConfirmIds([property.id]);
-                          }}
-                          aria-label={`Elimina ${propertyLocation(property)}`}
-                          title="Elimina immobile"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
+                      <input
+                        type="checkbox"
+                        checked={selectedPropertyIds.includes(property.id)}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={() => togglePropertySelection(property.id)}
+                        aria-label={`Seleziona ${propertyLocation(property)}`}
+                      />
                     </td>
                     <td className="property-drag-cell">
                       <button

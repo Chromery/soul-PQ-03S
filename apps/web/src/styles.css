@@ -2367,7 +2367,7 @@ a.button {
 
 .property-operational-table th:nth-child(1),
 .property-operational-table td:nth-child(1) {
-  width: 76px;
+  width: 42px;
   text-align: center;
 }
 
@@ -2427,25 +2427,6 @@ a.button {
 
 .property-operational-table tr.active-property-detail td:first-child {
   box-shadow: inset 3px 0 0 var(--primary);
-}
-
-.property-row-selection {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.property-row-delete {
-  width: 26px;
-  height: 26px;
-  color: #b91c1c;
-  opacity: 0;
-}
-
-.property-operational-table tbody tr:hover .property-row-delete,
-.property-row-delete:focus-visible {
-  opacity: 1;
 }
 
 .property-select-cell input {
