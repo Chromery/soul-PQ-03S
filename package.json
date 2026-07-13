@@ -18,6 +18,8 @@
     "preview": "npm run preview --workspace @soul/web",
     "prezzari:import": "node apps/api/scripts/import-price-lists.mjs",
     "examples:import": "node apps/api/scripts/import-real-examples.mjs",
+    "imu:sync": "npm run imu:sync --workspace @soul/api --",
+    "test:imu": "npm run test:imu --workspace @soul/api",
     "db:generate": "npm run prisma:generate --workspace @soul/api",
     "db:migrate": "npm run db:migrate:dev --workspace @soul/api",
     "db:seed": "npm run db:seed --workspace @soul/api",

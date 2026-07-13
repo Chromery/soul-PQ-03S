@@ -9,6 +9,8 @@ import type {
   PropertyPriceList,
   StudyVersion,
 } from "../generated/prisma/client.js";
+import { ImuService } from "../imu/imu.service.js";
+import type { ImuCalculation } from "../imu/imu.types.js";
 import { PriceListsService } from "../price-lists/price-lists.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { estimatedRenditaFromAnalysisDraft } from "../rendita.js";
@@ -61,6 +63,7 @@ export class StudiesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly priceLists: PriceListsService,
+    private readonly imu: ImuService,
   ) {}
 
   async list() {
@@ -163,6 +166,12 @@ export class StudiesService {
       study.properties.length === 0
         ? 0
         : Math.max(...study.properties.map((property) => property.displayOrder)) + 1;
+    const currentImuCalculation = this.calculateImu(input.currentRendita, input, study.provincia);
+    const estimatedImuCalculation = input.estimatedRendita > 0
+      ? this.calculateImu(input.estimatedRendita, input, study.provincia)
+      : null;
+    const currentImu = input.currentImu ?? calculatedAmount(currentImuCalculation);
+    const estimatedImu = input.estimatedImu ?? calculatedAmount(estimatedImuCalculation);
     await this.prisma.property.create({
       data: {
         id: propertyId,
@@ -179,9 +188,9 @@ export class StudiesService {
         currentRendita: input.currentRendita,
         estimatedRendita: input.estimatedRendita,
         diffPercent: percentageDiff(input.currentRendita, input.estimatedRendita),
-        currentImu: input.currentImu,
-        estimatedImu: input.estimatedImu,
-        imuDiff: (input.estimatedImu ?? 0) - (input.currentImu ?? 0),
+        currentImu,
+        estimatedImu,
+        imuDiff: (estimatedImu ?? 0) - (currentImu ?? 0),
         displayOrder,
         outcome: "Neutro",
         hasStudy: false,
@@ -272,7 +281,14 @@ export class StudiesService {
         .map((property) => Number(property.currentRendita)),
     );
     const currentImu = sum(properties.map((property) => (property.currentImu === null ? 0 : Number(property.currentImu))));
-    const estimatedImu = sum(properties.map((property) => (property.estimatedImu === null ? 0 : Number(property.estimatedImu))));
+    const estimatedImu = sum(
+      properties.map((property) => {
+        const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft)
+          ?? Number(property.estimatedRendita);
+        const calculation = estimatedRendita > 0 ? this.calculateImu(estimatedRendita, property) : null;
+        return calculatedAmount(calculation) ?? (property.estimatedImu === null ? 0 : Number(property.estimatedImu));
+      }),
+    );
     await this.prisma.feasibilityStudy.update({
       where: { id: studyId },
       data: {
@@ -286,14 +302,17 @@ export class StudiesService {
   }
 
   private toApiStudy(study: StudyWithRelations) {
+    const properties = study.properties.map((property) => this.toApiProperty(property));
+    const currentImu = sum(properties.map((property) => property.currentImu ?? 0));
+    const estimatedImu = sum(properties.map((property) => property.estimatedImu ?? 0));
     return {
       ...study,
       diffRendita: Number(study.diffRendita),
-      diffImu: Number(study.diffImu),
+      diffImu: estimatedImu - currentImu,
       originalRendita: Number(study.originalRendita),
       totalRendita: Number(study.totalRendita),
       catDRendita: Number(study.catDRendita),
-      properties: study.properties.map((property) => this.toApiProperty(property)),
+      properties,
     };
   }
 
@@ -302,6 +321,15 @@ export class StudiesService {
     const visura = property.documents.find((document) => document.type === DocumentType.VISURA);
     const currentRendita = Number(property.currentRendita);
     const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft) ?? Number(property.estimatedRendita);
+    const currentImuCalculation = this.calculateImu(currentRendita, property);
+    const estimatedImuCalculation = estimatedRendita > 0 || property.hasStudy
+      ? this.calculateImu(estimatedRendita, property)
+      : null;
+    const currentImu = property.currentImu === null
+      ? calculatedAmount(currentImuCalculation)
+      : Number(property.currentImu);
+    const estimatedImu = calculatedAmount(estimatedImuCalculation)
+      ?? (property.estimatedImu === null ? null : Number(property.estimatedImu));
     return {
       id: property.id,
       address: property.address,
@@ -316,9 +344,10 @@ export class StudiesService {
       currentRendita,
       estimatedRendita,
       diffPercent: currentRendita === 0 ? 0 : ((estimatedRendita - currentRendita) / currentRendita) * 100,
-      currentImu: property.currentImu === null ? null : Number(property.currentImu),
-      estimatedImu: property.estimatedImu === null ? null : Number(property.estimatedImu),
-      imuDiff: Number(property.imuDiff),
+      currentImu,
+      estimatedImu,
+      imuDiff: estimatedImu === null || currentImu === null ? 0 : estimatedImu - currentImu,
+      imuCalculation: estimatedImuCalculation,
       displayOrder: property.displayOrder,
       outcome: normalizePropertyOutcome(property.outcome),
       hasStudy: property.hasStudy,
@@ -357,6 +386,19 @@ export class StudiesService {
           downloadUrl: `/api/price-lists/${encodeURIComponent(match.priceList.id)}/download`,
         })),
     };
+  }
+
+  private calculateImu(
+    rendita: number,
+    property: Pick<Property, "categoria" | "comune" | "provincia"> | Pick<CreatePropertyInput, "categoria" | "comune" | "provincia">,
+    fallbackProvince?: string,
+  ) {
+    return this.imu.calculate({
+      rendita,
+      categoria: property.categoria,
+      comune: property.comune ?? "",
+      provincia: property.provincia ?? fallbackProvince,
+    });
   }
 }
 
@@ -478,4 +520,8 @@ function percentageDiff(currentValue: number, nextValue: number) {
 
 function sum(values: number[]) {
   return values.reduce((total, value) => total + (Number.isFinite(value) ? value : 0), 0);
+}
+
+function calculatedAmount(calculation: ImuCalculation | null) {
+  return calculation?.status === "calculated" ? calculation.amount : null;
 }

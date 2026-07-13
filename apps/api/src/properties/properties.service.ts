@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import { Prisma } from "../generated/prisma/client.js";
 import { DocumentType } from "../generated/prisma/enums.js";
 import { DocumentStorageService } from "../erp-sync/document-storage.service.js";
+import { ImuService } from "../imu/imu.service.js";
+import type { ImuCalculation } from "../imu/imu.types.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { estimatedRenditaFromAnalysisDraft, estimatedRenditaFromDraftPayload } from "../rendita.js";
 
@@ -46,6 +48,7 @@ export class PropertiesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: DocumentStorageService,
+    private readonly imu: ImuService,
   ) {}
 
   async getDraft(propertyId: string) {
@@ -80,6 +83,14 @@ export class PropertiesService {
     const savedAt = new Date(payload.savedAt);
     const aiScaleDetectedAt = payload.aiScaleDetectedAt ? new Date(payload.aiScaleDetectedAt) : null;
     const totalEstimatedRendita = estimatedRenditaFromDraftPayload(payload);
+    const currentImuCalculation = this.calculateImu(Number(property.currentRendita), property);
+    const estimatedImuCalculation = totalEstimatedRendita === null
+      ? null
+      : this.calculateImu(totalEstimatedRendita, property);
+    const currentImu = property.currentImu === null
+      ? calculatedAmount(currentImuCalculation)
+      : Number(property.currentImu);
+    const estimatedImu = estimatedImuCalculation === null ? null : calculatedAmount(estimatedImuCalculation);
     const data = {
       documentSource: (payload.document === null ? Prisma.JsonNull : payload.document) as Prisma.InputJsonValue,
       payload: payload as unknown as Prisma.InputJsonValue,
@@ -119,14 +130,21 @@ export class PropertiesService {
             : {
                 estimatedRendita: totalEstimatedRendita,
                 diffPercent: percentageDiff(Number(property.currentRendita), totalEstimatedRendita),
+                currentImu,
+                estimatedImu: estimatedImu ?? undefined,
+                imuDiff: estimatedImu === null || currentImu === null ? undefined : estimatedImu - currentImu,
                 hasStudy: true,
               }),
         },
       });
       return savedDraft;
     });
-    await this.refreshStudyRenditaTotals(property.studyId);
-    return draft.payload;
+    await this.refreshStudyTotals(property.studyId);
+    return {
+      ...payload,
+      estimatedImu,
+      imuCalculation: estimatedImuCalculation,
+    };
   }
 
   async updateProperty(propertyId: string, body: unknown) {
@@ -215,7 +233,7 @@ export class PropertiesService {
     return property;
   }
 
-  private async refreshStudyRenditaTotals(studyId: string) {
+  private async refreshStudyTotals(studyId: string) {
     const properties = await this.prisma.property.findMany({
       where: { studyId },
       include: { analysisDraft: true },
@@ -229,6 +247,20 @@ export class PropertiesService {
         .filter((property) => property.categoria.trim().toUpperCase().startsWith("D/"))
         .map((property) => Number(property.currentRendita)),
     );
+    const currentImu = sum(
+      properties.map((property) => {
+        if (property.currentImu !== null) return Number(property.currentImu);
+        return calculatedAmount(this.calculateImu(Number(property.currentRendita), property)) ?? 0;
+      }),
+    );
+    const estimatedImu = sum(
+      properties.map((property) => {
+        const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft)
+          ?? Number(property.estimatedRendita);
+        return calculatedAmount(this.calculateImu(estimatedRendita, property))
+          ?? (property.estimatedImu === null ? 0 : Number(property.estimatedImu));
+      }),
+    );
     await this.prisma.feasibilityStudy.update({
       where: { id: studyId },
       data: {
@@ -236,7 +268,20 @@ export class PropertiesService {
         totalRendita,
         catDRendita,
         diffRendita: totalRendita - originalRendita,
+        diffImu: estimatedImu - currentImu,
       },
+    });
+  }
+
+  private calculateImu(
+    rendita: number,
+    property: { categoria: string; comune: string; provincia: string | null },
+  ) {
+    return this.imu.calculate({
+      rendita,
+      categoria: property.categoria,
+      comune: property.comune,
+      provincia: property.provincia,
     });
   }
 
@@ -326,6 +371,10 @@ function percentageDiff(current: number, estimated: number) {
 
 function sum(values: number[]) {
   return values.reduce((total, value) => total + value, 0);
+}
+
+function calculatedAmount(calculation: ImuCalculation | null) {
+  return calculation?.status === "calculated" ? calculation.amount : null;
 }
 
 function validateOptionalScaleDenominator(value: unknown, field: string) {

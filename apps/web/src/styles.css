@@ -2485,6 +2485,23 @@ a.button {
   font-size: 11px;
 }
 
+.imu-estimate {
+  display: grid;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.imu-estimate a {
+  color: var(--primary-dark);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.imu-estimate a:hover {
+  text-decoration: underline;
+}
+
 .property-area-detail {
   margin: 16px -18px -18px;
   padding: 16px 18px 18px;

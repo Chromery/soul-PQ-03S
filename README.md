@@ -27,6 +27,7 @@ Implemented:
 - Area calculation from selected mask pixels, sheet size, and scale.
 - Assignment of `destinazione d'uso` to selected areas.
 - Server-persisted editor drafts, including masks and calibration settings, with a local fallback when the API is unavailable.
+- Calcolo IMU previsto da rendita e aliquote comunali 2026, con fallback 2025 e provenienza della delibera.
 - Collapsible editor panels with an anchored plan workspace and independently scrolling controls.
 - CSV export actions.
 - Database-loaded studies with a demonstration data fallback for frontend-only development.
@@ -108,6 +109,7 @@ Drafts for uploaded PDFs retain the selection analysis but require the operator 
 More detail is documented in:
 
 - [Smart Selection for Planimetria Areas](docs/smart-selection.md)
+- [Calcolo IMU e aggiornamento aliquote](docs/calcolo-imu.md)
 
 ## Smart Selection Summary
 

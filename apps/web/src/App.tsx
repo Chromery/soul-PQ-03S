@@ -82,6 +82,26 @@ type PriceListItem = {
   downloadUrl: string;
 };
 
+type PropertyImuCalculation =
+  | {
+      status: "calculated";
+      amount: number;
+      taxableBase: number;
+      cadastralMultiplier: number;
+      ratePercent: number;
+      rateYear: number;
+      usedFallback: boolean;
+      rateKind: "group_d" | "rural_instrumental" | "other_buildings";
+      actNumber: string;
+      actDate: string;
+      sourceUrl: string;
+    }
+  | {
+      status: "unavailable";
+      reason: "invalid_input" | "municipality_not_found" | "unsupported_document" | "rate_not_found";
+      targetYear: number;
+    };
+
 type PropertyItem = {
   id: string;
   address: string;
@@ -99,6 +119,7 @@ type PropertyItem = {
   currentImu?: number | null;
   estimatedImu?: number | null;
   imuDiff: number;
+  imuCalculation?: PropertyImuCalculation;
   displayOrder?: number;
   outcome: PropertyOutcome;
   hasStudy: boolean;
@@ -356,6 +377,8 @@ type PlanAreaDraft = {
   totalArea?: number;
   totalEstimatedAmount?: number;
   totalEstimatedRendita?: number;
+  estimatedImu?: number | null;
+  imuCalculation?: PropertyImuCalculation | null;
   selections: PlanAreaDraftSelection[];
 };
 
@@ -1964,7 +1987,12 @@ function normalizePropertyOutcome(value: string): PropertyOutcome {
   return "Neutro";
 }
 
-function propertyWithEstimatedValue(property: PropertyItem, estimatedRendita: number): PropertyItem {
+function propertyWithEstimatedValue(
+  property: PropertyItem,
+  estimatedRendita: number,
+  estimatedImu?: number | null,
+  imuCalculation?: PropertyImuCalculation | null,
+): PropertyItem {
   const diffPercent =
     property.currentRendita === 0
       ? 0
@@ -1972,6 +2000,15 @@ function propertyWithEstimatedValue(property: PropertyItem, estimatedRendita: nu
   return {
     ...property,
     estimatedRendita,
+    ...(estimatedImu === undefined
+      ? {}
+      : {
+          estimatedImu,
+          imuDiff: estimatedImu === null || property.currentImu === null || property.currentImu === undefined
+            ? 0
+            : estimatedImu - property.currentImu,
+        }),
+    ...(imuCalculation ? { imuCalculation } : {}),
     diffPercent,
     hasStudy: true,
   };
@@ -1980,11 +2017,14 @@ function propertyWithEstimatedValue(property: PropertyItem, estimatedRendita: nu
 function recalculateStudyRenditaTotals(study: FeasibilityStudy): FeasibilityStudy {
   const originalRendita = study.properties.reduce((sum, property) => sum + property.currentRendita, 0);
   const totalRendita = study.properties.reduce((sum, property) => sum + property.estimatedRendita, 0);
+  const currentImu = study.properties.reduce((sum, property) => sum + (property.currentImu ?? 0), 0);
+  const estimatedImu = study.properties.reduce((sum, property) => sum + (property.estimatedImu ?? 0), 0);
   return {
     ...study,
     originalRendita,
     totalRendita,
     diffRendita: totalRendita - originalRendita,
+    diffImu: estimatedImu - currentImu,
   };
 }
 
@@ -2240,8 +2280,17 @@ function App() {
     );
   }
 
-  function updatePropertyEstimatedValue(propertyId: string, estimatedRendita: number) {
-    updatePropertyInStudies(propertyId, (property) => propertyWithEstimatedValue(property, estimatedRendita), true);
+  function updatePropertyEstimatedValue(
+    propertyId: string,
+    estimatedRendita: number,
+    estimatedImu?: number | null,
+    imuCalculation?: PropertyImuCalculation | null,
+  ) {
+    updatePropertyInStudies(
+      propertyId,
+      (property) => propertyWithEstimatedValue(property, estimatedRendita, estimatedImu, imuCalculation),
+      true,
+    );
   }
 
   async function createStudyFromPq(form: NewStudyFormState) {
@@ -4681,7 +4730,12 @@ function StudyDetail({
   onReorder: (propertyIds: string[]) => Promise<boolean>;
   onCreateProperty: (form: NewPropertyFormState) => Promise<boolean>;
   onDeleteProperties: (propertyIds: string[]) => Promise<boolean>;
-  onPropertyEstimateChange: (propertyId: string, estimatedRendita: number) => void;
+  onPropertyEstimateChange: (
+    propertyId: string,
+    estimatedRendita: number,
+    estimatedImu?: number | null,
+    imuCalculation?: PropertyImuCalculation | null,
+  ) => void;
   onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
   presentationFile?: File;
   onPresentationUpload: (file: File) => void;
@@ -5058,9 +5112,7 @@ function StudyDetail({
                       <MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} favorableDirection="down" />
                     </td>
                     <td>{property.currentImu === null || property.currentImu === undefined ? "In attesa ERP" : formatEuro(property.currentImu)}</td>
-                    <td>
-                      {formatEstimatedValue(property.estimatedImu)}
-                    </td>
+                    <td><ImuEstimate property={property} /></td>
                     <td>
                       <MoneyPercentStack amount={propertyImuDiffAmount(property)} percent={imuPercent} />
                     </td>
@@ -5109,7 +5161,12 @@ function StudyDetail({
             setActiveAreaDraft(draft, source, error);
             const estimatedRendita = planAreaEstimatedRenditaFromDraft(draft);
             if (estimatedRendita !== null) {
-              onPropertyEstimateChange(activeProperty.id, estimatedRendita);
+              onPropertyEstimateChange(
+                activeProperty.id,
+                estimatedRendita,
+                draft.estimatedImu,
+                draft.imuCalculation,
+              );
             }
           }}
           onOpenEditor={() => onOpenEditor(activeProperty)}
@@ -5409,8 +5466,9 @@ function PropertyAreaDetail({
         body: JSON.stringify(nextDraft),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      onDraftSaved(nextDraft, "database", false);
-      setEditableDraft(clonePlanAreaDraft(nextDraft));
+      const savedDraft = (await response.json()) as PlanAreaDraft;
+      onDraftSaved(savedDraft, "database", false);
+      setEditableDraft(clonePlanAreaDraft(savedDraft));
       setDirty(false);
       onMissing("Lista aree salvata.");
     } catch (error) {
@@ -5776,6 +5834,24 @@ function MoneyPercentStack({
     <div className="money-percent-stack">
       <strong>{formatEuro(amount)}</strong>
       {percent !== null && <Delta value={percent} suffix="%" favorableDirection={favorableDirection} />}
+    </div>
+  );
+}
+
+function ImuEstimate({ property }: { property: PropertyItem }) {
+  const calculation = property.imuCalculation;
+  if (property.estimatedImu === null || property.estimatedImu === undefined) {
+    return <span className="delta muted">Non calcolabile</span>;
+  }
+  if (!calculation || calculation.status !== "calculated") return <>{formatEuro(property.estimatedImu)}</>;
+  const rateLabel = calculation.ratePercent.toLocaleString("it-IT", { maximumFractionDigits: 3 });
+  const sourceLabel = `${rateLabel}% · ${calculation.rateYear}${calculation.usedFallback ? " fallback" : ""}`;
+  return (
+    <div className="imu-estimate">
+      <strong>{formatEuro(property.estimatedImu)}</strong>
+      <a href={calculation.sourceUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+        {sourceLabel}
+      </a>
     </div>
   );
 }

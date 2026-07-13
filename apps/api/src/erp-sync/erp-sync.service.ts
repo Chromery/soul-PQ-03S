@@ -3,8 +3,11 @@ import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import { DocumentType } from "../generated/prisma/enums.js";
 import type { FeasibilityStudy, PlanAnalysisDraft, Property, PropertyDocument, StudyVersion } from "../generated/prisma/client.js";
+import { ImuService } from "../imu/imu.service.js";
+import type { ImuCalculation } from "../imu/imu.types.js";
 import { PriceListsService } from "../price-lists/price-lists.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { estimatedRenditaFromAnalysisDraft } from "../rendita.js";
 import { ScaleExtractionService } from "../scale-extraction/scale-extraction.service.js";
 import { VisuraExtractionService } from "../visura-extraction/visura-extraction.service.js";
 import { DocumentStorageService } from "./document-storage.service.js";
@@ -66,6 +69,7 @@ export class ErpSyncService {
     private readonly scaleExtraction: ScaleExtractionService,
     private readonly visuraExtraction: VisuraExtractionService,
     private readonly priceLists: PriceListsService,
+    private readonly imu: ImuService,
     config: ConfigService,
   ) {
     this.defaultTechnicalOwner = config.get<string>("DEFAULT_TECHNICAL_OWNER", "Responsabile tecnico Soul");
@@ -403,8 +407,27 @@ export class ErpSyncService {
       ...study.properties.flatMap((property) => (property.analysisDraft ? [property.analysisDraft.updatedAt] : [])),
     ]);
     const now = new Date();
-    const currentImuTotal = sum(study.properties.map((property) => decimalAsNumber(property.currentImu)));
-    const estimatedImuTotal = sum(study.properties.map((property) => decimalAsNumber(property.estimatedImu)));
+    const calculatedProperties = study.properties.map((property) => {
+      const currentRendita = Number(property.currentRendita);
+      const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft)
+        ?? Number(property.estimatedRendita);
+      const currentCalculation = this.calculateImu(currentRendita, property);
+      const estimatedCalculation = estimatedRendita > 0 || property.hasStudy
+        ? this.calculateImu(estimatedRendita, property)
+        : null;
+      return {
+        property,
+        estimatedRendita,
+        currentImu: property.currentImu === null
+          ? calculatedAmount(currentCalculation)
+          : Number(property.currentImu),
+        estimatedImu: calculatedAmount(estimatedCalculation)
+          ?? (property.estimatedImu === null ? null : Number(property.estimatedImu)),
+        estimatedCalculation,
+      };
+    });
+    const currentImuTotal = sum(calculatedProperties.map((item) => item.currentImu ?? 0));
+    const estimatedImuTotal = sum(calculatedProperties.map((item) => item.estimatedImu ?? 0));
     return {
       studio_erp_id: study.id,
       company_erp_id: study.companyErpId,
@@ -425,12 +448,12 @@ export class ErpSyncService {
         differenza_rendita: decimalToString(study.diffRendita),
         imu_attuale_totale: currentImuTotal.toFixed(2),
         imu_prevista_totale: estimatedImuTotal.toFixed(2),
-        differenza_imu: decimalToString(study.diffImu),
+        differenza_imu: (estimatedImuTotal - currentImuTotal).toFixed(2),
         rendita_categoria_d: decimalToString(study.catDRendita),
         numero_immobili: study.properties.length,
         numero_immobili_categoria_d: study.properties.filter((property) => isCategoryD(property.categoria)).length,
       },
-      immobili: study.properties.map((property) => ({
+      immobili: calculatedProperties.map(({ property, estimatedRendita, currentImu, estimatedImu, estimatedCalculation }) => ({
         immobile_erp_id: property.id,
         foglio: property.foglio,
         particella: property.particella,
@@ -441,9 +464,10 @@ export class ErpSyncService {
         categoria: property.categoria,
         titolarita: property.titolarita,
         rendita_attuale: decimalToString(property.currentRendita),
-        rendita_proposta: decimalToString(property.estimatedRendita),
-        imu_attuale: property.currentImu === null ? null : decimalToString(property.currentImu),
-        imu_prevista: property.estimatedImu === null ? null : decimalToString(property.estimatedImu),
+        rendita_proposta: estimatedRendita.toFixed(2),
+        imu_attuale: currentImu === null ? null : currentImu.toFixed(2),
+        imu_prevista: estimatedImu === null ? null : estimatedImu.toFixed(2),
+        calcolo_imu: estimatedCalculation,
         scala: property.scaleDenominator,
         formato_foglio: property.sheetSize,
         origine_scala: property.scaleSource,
@@ -464,6 +488,18 @@ export class ErpSyncService {
         })),
       })),
     };
+  }
+
+  private calculateImu(
+    rendita: number,
+    property: Pick<Property, "categoria" | "comune" | "provincia">,
+  ) {
+    return this.imu.calculate({
+      rendita,
+      categoria: property.categoria,
+      comune: property.comune,
+      provincia: property.provincia,
+    });
   }
 }
 
@@ -610,6 +646,10 @@ function decimalAsNumber(value: unknown) {
   if (value === null || value === undefined) return 0;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function calculatedAmount(calculation: ImuCalculation | null) {
+  return calculation?.status === "calculated" ? calculation.amount : null;
 }
 
 function maxDate(values: Date[]) {

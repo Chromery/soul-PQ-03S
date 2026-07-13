@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { HealthController } from "./health.controller.js";
 import { ErpSyncModule } from "./erp-sync/erp-sync.module.js";
 import { FormapsCaptchaModule } from "./formaps-captcha/formaps-captcha.module.js";
+import { ImuModule } from "./imu/imu.module.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { PriceListsModule } from "./price-lists/price-lists.module.js";
 import { PropertiesModule } from "./properties/properties.module.js";
@@ -21,6 +22,7 @@ process.env.DATABASE_URL ??= localDatabaseUrl();
   imports: [
     ConfigModule.forRoot({ envFilePath: rootEnvFile, isGlobal: true }),
     PrismaModule,
+    ImuModule,
     StudiesModule,
     PropertiesModule,
     PriceListsModule,

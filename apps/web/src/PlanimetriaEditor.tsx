@@ -288,6 +288,7 @@ type SavedDraft = {
   totalArea?: number;
   totalEstimatedAmount?: number;
   totalEstimatedRendita?: number;
+  estimatedImu?: number | null;
   selections: SavedSelection[];
 };
 
@@ -431,7 +432,7 @@ type PlanimetriaEditorProps = {
   property: EditorProperty;
   onBack: () => void;
   onDirtyChange?: (dirty: boolean) => void;
-  onDraftSaved?: (propertyId: string, estimatedRendita: number) => void;
+  onDraftSaved?: (propertyId: string, estimatedRendita: number, estimatedImu?: number | null) => void;
   onDocumentSaved?: (propertyId: string, fileName: string, downloadUrl: string) => void;
 };
 
@@ -1986,9 +1987,10 @@ export default function PlanimetriaEditor({
         },
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const savedDraft = (await response.json()) as SavedDraft;
       setSavedAt(savedTime);
       setDirty(false);
-      onDraftSaved?.(property.id, totals.rendita);
+      onDraftSaved?.(property.id, totals.rendita, savedDraft.estimatedImu);
       setStatus("Bozza salvata nel database");
     } catch (error) {
       console.error(error);
