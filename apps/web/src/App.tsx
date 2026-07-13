@@ -355,6 +355,7 @@ type PlanAreaDraft = {
   customUsageLabel?: string;
   totalArea?: number;
   totalEstimatedAmount?: number;
+  totalEstimatedRendita?: number;
   selections: PlanAreaDraftSelection[];
 };
 
@@ -1448,6 +1449,8 @@ const planAreaSheetSizes: Record<PlanAreaSheetSize, { widthMm: number; heightMm:
   A4: { widthMm: 297, heightMm: 210 },
 };
 
+const PLAN_AREA_FRUITFULNESS_RATE = 0.02;
+
 const PLAN_AREA_DRAFT_KEY_PREFIX = "soul-planimetria-draft:";
 
 const euroFormatter = new Intl.NumberFormat("it-IT", {
@@ -1686,6 +1689,19 @@ function planAreaEffectiveAmount(selection: PlanAreaDraftSelection, draft: PlanA
     : computedAmount;
 }
 
+function planAreaEstimatedRenditaFromAmount(amount: number) {
+  return amount * PLAN_AREA_FRUITFULNESS_RATE;
+}
+
+function planAreaEstimatedRenditaFromDraft(draft: PlanAreaDraft) {
+  if (typeof draft.totalEstimatedRendita === "number" && Number.isFinite(draft.totalEstimatedRendita)) {
+    return draft.totalEstimatedRendita;
+  }
+  return typeof draft.totalEstimatedAmount === "number" && Number.isFinite(draft.totalEstimatedAmount)
+    ? planAreaEstimatedRenditaFromAmount(draft.totalEstimatedAmount)
+    : null;
+}
+
 function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft): PlanAreaDraft {
   const totals = draft.selections.reduce(
     (acc, selection) => {
@@ -1699,6 +1715,7 @@ function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft): PlanAreaDraft {
     ...draft,
     totalArea: totals.area,
     totalEstimatedAmount: totals.amount,
+    totalEstimatedRendita: planAreaEstimatedRenditaFromAmount(totals.amount),
   };
 }
 
@@ -1960,6 +1977,17 @@ function propertyWithEstimatedValue(property: PropertyItem, estimatedRendita: nu
   };
 }
 
+function recalculateStudyRenditaTotals(study: FeasibilityStudy): FeasibilityStudy {
+  const originalRendita = study.properties.reduce((sum, property) => sum + property.currentRendita, 0);
+  const totalRendita = study.properties.reduce((sum, property) => sum + property.estimatedRendita, 0);
+  return {
+    ...study,
+    originalRendita,
+    totalRendita,
+    diffRendita: totalRendita - originalRendita,
+  };
+}
+
 function getSortValue(study: FeasibilityStudy, sortKey: SortKey) {
   switch (sortKey) {
     case "id":
@@ -2192,7 +2220,11 @@ function App() {
     }
   }
 
-  function updatePropertyInStudies(propertyId: string, updater: (property: PropertyItem) => PropertyItem) {
+  function updatePropertyInStudies(
+    propertyId: string,
+    updater: (property: PropertyItem) => PropertyItem,
+    recalculateRenditaTotals = false,
+  ) {
     setStudies((current) =>
       current.map((study) => {
         let changed = false;
@@ -2201,13 +2233,15 @@ function App() {
           changed = true;
           return updater(property);
         });
-        return changed ? { ...study, properties } : study;
+        if (!changed) return study;
+        const updatedStudy = { ...study, properties };
+        return recalculateRenditaTotals ? recalculateStudyRenditaTotals(updatedStudy) : updatedStudy;
       }),
     );
   }
 
   function updatePropertyEstimatedValue(propertyId: string, estimatedRendita: number) {
-    updatePropertyInStudies(propertyId, (property) => propertyWithEstimatedValue(property, estimatedRendita));
+    updatePropertyInStudies(propertyId, (property) => propertyWithEstimatedValue(property, estimatedRendita), true);
   }
 
   async function createStudyFromPq(form: NewStudyFormState) {
@@ -4219,7 +4253,7 @@ function StudyRows({
           </div>
         </td>
         <td>
-          <MoneyPercentStack amount={studyRenditaDiffAmount(study)} percent={studyRenditaDiffPercent(study)} />
+          <MoneyPercentStack amount={studyRenditaDiffAmount(study)} percent={studyRenditaDiffPercent(study)} favorableDirection="down" />
         </td>
         <td>
           <MoneyPercentStack amount={study.diffImu} percent={studyImuDiffPercent(study)} />
@@ -4383,7 +4417,11 @@ function StudyRows({
                           </span>
                           <span>
                             <em>Differenza rendita</em>
-                            <b>{property.hasStudy ? formatPercent(property.diffPercent) : "Non disponibile"}</b>
+                            {property.hasStudy ? (
+                              <Delta value={property.diffPercent} suffix="%" favorableDirection="down" />
+                            ) : (
+                              <b>Non disponibile</b>
+                            )}
                           </span>
                           <span>
                             <em>Esito</em>
@@ -4497,7 +4535,7 @@ function PropertyRow({
       <td>{formatEuro(property.currentRendita)}</td>
       <td>{property.estimatedRendita ? formatEuro(property.estimatedRendita) : "Da stimare"}</td>
       <td>
-        <MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} />
+        <MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} favorableDirection="down" />
       </td>
       <td>
         {onOutcomeChange ? (
@@ -5017,7 +5055,7 @@ function StudyDetail({
                       {formatEstimatedValue(property.estimatedRendita)}
                     </td>
                     <td>
-                      <MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} />
+                      <MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} favorableDirection="down" />
                     </td>
                     <td>{property.currentImu === null || property.currentImu === undefined ? "In attesa ERP" : formatEuro(property.currentImu)}</td>
                     <td>
@@ -5069,8 +5107,9 @@ function StudyDetail({
           draftState={activeAreaDraftState}
           onDraftSaved={(draft, source, error) => {
             setActiveAreaDraft(draft, source, error);
-            if (typeof draft.totalEstimatedAmount === "number" && Number.isFinite(draft.totalEstimatedAmount)) {
-              onPropertyEstimateChange(activeProperty.id, draft.totalEstimatedAmount);
+            const estimatedRendita = planAreaEstimatedRenditaFromDraft(draft);
+            if (estimatedRendita !== null) {
+              onPropertyEstimateChange(activeProperty.id, estimatedRendita);
             }
           }}
           onOpenEditor={() => onOpenEditor(activeProperty)}
@@ -5101,7 +5140,7 @@ function StudyDetail({
           icon={study.diffRendita >= 0 ? <TrendingUp size={22} /> : <TrendingDown size={22} />}
           label="Differenza rendita"
           value={formatPercent(study.diffRendita)}
-          positive={study.diffRendita >= 0}
+          positive={study.diffRendita <= 0}
         />
         <DetailMetric
           icon={<Euro size={22} />}
@@ -5223,9 +5262,10 @@ function PropertyAreaDetail({
         (acc, row) => {
           acc.area += row.area;
           acc.amount += row.amount;
+          acc.rendita += planAreaEstimatedRenditaFromAmount(row.amount);
           return acc;
         },
-        { area: 0, amount: 0 },
+        { area: 0, amount: 0, rendita: 0 },
       ),
     [rows],
   );
@@ -5346,7 +5386,7 @@ function PropertyAreaDetail({
           selection.amountOverride = Math.abs(value - row.calculatedAmount) < 0.005 ? null : value;
         }),
       input,
-      "Inserisci una stima valida.",
+      "Inserisci un valore valido.",
     );
   }
 
@@ -5512,7 +5552,7 @@ function PropertyAreaDetail({
           <div className="property-area-empty">
             <FileText size={24} />
             <strong>Nessuna lista aree salvata</strong>
-            <span>Salva una bozza dall'editor planimetrie per vedere qui superfici, valori e stime.</span>
+            <span>Salva una bozza dall'editor planimetrie per vedere qui superfici, valori e nuova rendita.</span>
             <button className="button primary compact-button" type="button" onClick={onOpenEditor}>
               <File size={14} />
               Apri editor planimetria
@@ -5523,7 +5563,8 @@ function PropertyAreaDetail({
             <div className="property-area-summary">
               <SummaryStat label="Aree tracciate" value={rows.length.toString()} />
               <SummaryStat label="Area totale" value={formatM2(totals.area)} />
-              <SummaryStat label="Stima prototipo" value={formatEuro(totals.amount)} />
+              <SummaryStat label="Valore totale" value={formatEuro(totals.amount)} />
+              <SummaryStat label="Nuova rendita" value={formatEuro(totals.rendita)} />
               <SummaryStat label="Scala e foglio" value={`${draft.sheetSize} 1:${draft.scaleDenominator}`} />
               <SummaryStat label="Origine scala" value={planScaleSourceLabel(draft.scaleSource)} />
               <SummaryStat
@@ -5558,8 +5599,8 @@ function PropertyAreaDetail({
                     <th>Pagina</th>
                     <th>Tipologia</th>
                     <th>Superficie</th>
+                    <th>€/m2</th>
                     <th>Valore</th>
-                    <th>Stima</th>
                     <th>Origine</th>
                   </tr>
                 </thead>
@@ -5724,15 +5765,17 @@ function PropertySortHeader({
 function MoneyPercentStack({
   amount,
   percent,
+  favorableDirection = "up",
 }: {
   amount: number | null;
   percent: number | null;
+  favorableDirection?: "up" | "down";
 }) {
   if (amount === null) return <span className="delta muted">Da stimare</span>;
   return (
     <div className="money-percent-stack">
       <strong>{formatEuro(amount)}</strong>
-      {percent !== null && <Delta value={percent} suffix="%" />}
+      {percent !== null && <Delta value={percent} suffix="%" favorableDirection={favorableDirection} />}
     </div>
   );
 }
@@ -5817,15 +5860,17 @@ function Delta({
   suffix,
   currency,
   muted = false,
+  favorableDirection = "up",
 }: {
   value: number;
   suffix?: string;
   currency?: boolean;
   muted?: boolean;
+  favorableDirection?: "up" | "down";
 }) {
   if (muted) return <span className="delta muted">-</span>;
 
-  const positive = value >= 0;
+  const positive = favorableDirection === "down" ? value <= 0 : value >= 0;
   const label = currency ? formatEuro(value) : `${formatPercent(value).replace("%", "")}${suffix ?? ""}`;
 
   return <span className={`delta ${positive ? "positive" : "negative"}`}>{label}</span>;

@@ -3,6 +3,7 @@ import { Prisma } from "../generated/prisma/client.js";
 import { DocumentType } from "../generated/prisma/enums.js";
 import { DocumentStorageService } from "../erp-sync/document-storage.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { estimatedRenditaFromAnalysisDraft, estimatedRenditaFromDraftPayload } from "../rendita.js";
 
 type DraftPayload = {
   version: number;
@@ -19,6 +20,7 @@ type DraftPayload = {
   aiScaleDetectedAt?: string | null;
   totalArea?: number;
   totalEstimatedAmount?: number;
+  totalEstimatedRendita?: number;
   selections: unknown[];
 };
 
@@ -77,6 +79,7 @@ export class PropertiesService {
     });
     const savedAt = new Date(payload.savedAt);
     const aiScaleDetectedAt = payload.aiScaleDetectedAt ? new Date(payload.aiScaleDetectedAt) : null;
+    const totalEstimatedRendita = estimatedRenditaFromDraftPayload(payload);
     const data = {
       documentSource: (payload.document === null ? Prisma.JsonNull : payload.document) as Prisma.InputJsonValue,
       payload: payload as unknown as Prisma.InputJsonValue,
@@ -89,7 +92,7 @@ export class PropertiesService {
       aiScaleConfidence: payload.aiScaleConfidence,
       aiScaleDetectedAt,
       totalArea: payload.totalArea,
-      totalEstimatedValue: payload.totalEstimatedAmount,
+      totalEstimatedValue: totalEstimatedRendita ?? undefined,
       savedAt,
       studyVersionId: latestVersion?.id,
     };
@@ -111,10 +114,18 @@ export class PropertiesService {
           aiSheetSize: payload.aiSheetSize,
           aiScaleConfidence: payload.aiScaleConfidence,
           aiScaleDetectedAt,
+          ...(totalEstimatedRendita === null
+            ? {}
+            : {
+                estimatedRendita: totalEstimatedRendita,
+                diffPercent: percentageDiff(Number(property.currentRendita), totalEstimatedRendita),
+                hasStudy: true,
+              }),
         },
       });
       return savedDraft;
     });
+    await this.refreshStudyRenditaTotals(property.studyId);
     return draft.payload;
   }
 
@@ -204,6 +215,31 @@ export class PropertiesService {
     return property;
   }
 
+  private async refreshStudyRenditaTotals(studyId: string) {
+    const properties = await this.prisma.property.findMany({
+      where: { studyId },
+      include: { analysisDraft: true },
+    });
+    const originalRendita = sum(properties.map((property) => Number(property.currentRendita)));
+    const totalRendita = sum(
+      properties.map((property) => estimatedRenditaFromAnalysisDraft(property.analysisDraft) ?? Number(property.estimatedRendita)),
+    );
+    const catDRendita = sum(
+      properties
+        .filter((property) => property.categoria.trim().toUpperCase().startsWith("D/"))
+        .map((property) => Number(property.currentRendita)),
+    );
+    await this.prisma.feasibilityStudy.update({
+      where: { id: studyId },
+      data: {
+        originalRendita,
+        totalRendita,
+        catDRendita,
+        diffRendita: totalRendita - originalRendita,
+      },
+    });
+  }
+
   private validatePayload(propertyId: string, body: unknown): NormalizedDraftPayload {
     if (!body || typeof body !== "object") throw new BadRequestException("Bozza non valida");
     const payload = body as Partial<DraftPayload>;
@@ -282,6 +318,14 @@ function normalizeScaleSource(value: unknown): ScaleSource {
 function validatePropertyOutcome(value: unknown) {
   if (value === "Positivo" || value === "Negativo" || value === "Neutro") return value;
   throw new BadRequestException("Esito immobile non valido");
+}
+
+function percentageDiff(current: number, estimated: number) {
+  return current === 0 ? 0 : ((estimated - current) / current) * 100;
+}
+
+function sum(values: number[]) {
+  return values.reduce((total, value) => total + value, 0);
 }
 
 function validateOptionalScaleDenominator(value: unknown, field: string) {

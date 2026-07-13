@@ -11,6 +11,7 @@ import type {
 } from "../generated/prisma/client.js";
 import { PriceListsService } from "../price-lists/price-lists.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { estimatedRenditaFromAnalysisDraft } from "../rendita.js";
 import type { UpdateStudyDto } from "./dto/update-study.dto.js";
 
 type PropertyWithDocuments = Property & {
@@ -262,9 +263,7 @@ export class StudiesService {
     const originalRendita = sum(properties.map((property) => Number(property.currentRendita)));
     const totalRendita = sum(
       properties.map((property) =>
-        property.analysisDraft?.totalEstimatedValue === null || property.analysisDraft?.totalEstimatedValue === undefined
-          ? Number(property.estimatedRendita)
-          : Number(property.analysisDraft.totalEstimatedValue),
+        estimatedRenditaFromAnalysisDraft(property.analysisDraft) ?? Number(property.estimatedRendita),
       ),
     );
     const catDRendita = sum(
@@ -302,10 +301,7 @@ export class StudiesService {
     const planimetria = property.documents.find((document) => document.type === DocumentType.PLANIMETRIA);
     const visura = property.documents.find((document) => document.type === DocumentType.VISURA);
     const currentRendita = Number(property.currentRendita);
-    const estimatedRendita =
-      property.analysisDraft?.totalEstimatedValue === null || property.analysisDraft?.totalEstimatedValue === undefined
-        ? Number(property.estimatedRendita)
-        : Number(property.analysisDraft.totalEstimatedValue);
+    const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft) ?? Number(property.estimatedRendita);
     return {
       id: property.id,
       address: property.address,

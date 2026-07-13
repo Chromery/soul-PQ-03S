@@ -287,6 +287,7 @@ type SavedDraft = {
   calibration?: SavedCalibration | null;
   totalArea?: number;
   totalEstimatedAmount?: number;
+  totalEstimatedRendita?: number;
   selections: SavedSelection[];
 };
 
@@ -430,7 +431,7 @@ type PlanimetriaEditorProps = {
   property: EditorProperty;
   onBack: () => void;
   onDirtyChange?: (dirty: boolean) => void;
-  onDraftSaved?: (propertyId: string, totalEstimatedAmount: number) => void;
+  onDraftSaved?: (propertyId: string, estimatedRendita: number) => void;
   onDocumentSaved?: (propertyId: string, fileName: string, downloadUrl: string) => void;
 };
 
@@ -468,6 +469,7 @@ const USAGES: UsageDefinition[] = [
 const CUSTOM_USAGE_ID: UsageId = "custom";
 const FIXED_USAGES = USAGES.filter((usage) => usage.id !== CUSTOM_USAGE_ID);
 const CUSTOM_USAGE_COLORS = ["#0891b2", "#0e7490", "#0f766e", "#2563eb", "#9333ea", "#be123c", "#ca8a04"];
+const FRUITFULNESS_RATE = 0.02;
 
 const DRAFT_KEY_PREFIX = "soul-planimetria-draft:";
 const AREA_TUNING_TRIALS_KEY_PREFIX = "soul-area-tuning-trials:";
@@ -783,6 +785,10 @@ function effectiveSelectionAmount(selection: Pick<AreaSelection, "amountOverride
   return typeof selection.amountOverride === "number" && Number.isFinite(selection.amountOverride)
     ? selection.amountOverride
     : calculatedAmount;
+}
+
+function estimatedRenditaFromAmount(amount: number) {
+  return amount * FRUITFULNESS_RATE;
 }
 
 function propertyLocation(property: EditorProperty) {
@@ -1140,9 +1146,10 @@ export default function PlanimetriaEditor({
       (acc, area) => {
         acc.area += area.area;
         acc.amount += area.amount;
+        acc.rendita += estimatedRenditaFromAmount(area.amount);
         return acc;
       },
-      { area: 0, amount: 0 },
+      { area: 0, amount: 0, rendita: 0 },
     );
   }, [selectedAreas]);
 
@@ -1955,6 +1962,7 @@ export default function PlanimetriaEditor({
       calibration,
       totalArea: totals.area,
       totalEstimatedAmount: totals.amount,
+      totalEstimatedRendita: totals.rendita,
       selections: selectionsToSave,
     };
 
@@ -1980,14 +1988,14 @@ export default function PlanimetriaEditor({
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       setSavedAt(savedTime);
       setDirty(false);
-      onDraftSaved?.(property.id, totals.amount);
+      onDraftSaved?.(property.id, totals.rendita);
       setStatus("Bozza salvata nel database");
     } catch (error) {
       console.error(error);
       if (localSaved) {
         setSavedAt(savedTime);
         setDirty(false);
-        onDraftSaved?.(property.id, totals.amount);
+        onDraftSaved?.(property.id, totals.rendita);
         setStatus("Bozza salvata localmente; database non disponibile");
       } else {
         setStatus("Salvataggio non riuscito");
@@ -4323,7 +4331,7 @@ export default function PlanimetriaEditor({
       if (!selection || selection.amountOverride === null || selection.amountOverride === undefined) continue;
       recordUndoState();
       selection.amountOverride = null;
-      setStatus("Override stima rimosso");
+      setStatus("Override valore rimosso");
       markDirty();
       bumpRevision();
       return;
@@ -6418,8 +6426,8 @@ export default function PlanimetriaEditor({
                           <th>Tipologia</th>
                           <th>Nome custom</th>
                           <th>Superficie</th>
+                          <th>€/m2</th>
                           <th>Valore</th>
-                          <th>Stima</th>
                           <th>Pixel</th>
                           <th>Colore</th>
                           <th>Opacita</th>
@@ -6829,9 +6837,14 @@ export default function PlanimetriaEditor({
                   <strong>{formatM2(totals.area)}</strong>
                 </div>
                 <div>
-                  <span>Stima prototipo aree</span>
+                  <span>Valore totale aree</span>
                   <strong>{moneyFormatter.format(totals.amount)}</strong>
                   <small>Valori da validare</small>
+                </div>
+                <div>
+                  <span>Nuova rendita</span>
+                  <strong>{moneyFormatter.format(totals.rendita)}</strong>
+                  <small>Saggio di fruttuosita 2%</small>
                 </div>
               </div>
             )}
@@ -7070,7 +7083,7 @@ export default function PlanimetriaEditor({
                                   </dd>
                                 </div>
                                 <div>
-                                  <dt>Valore</dt>
+                                  <dt>€/m2</dt>
                                   <dd>
                                     <input
                                       key={`${selection.id}-${selection.rate}`}
@@ -7095,7 +7108,7 @@ export default function PlanimetriaEditor({
                                   </dd>
                                 </div>
                                 <div>
-                                  <dt>Stima</dt>
+                                  <dt>Valore</dt>
                                   <dd className="area-override-cell">
                                     <strong>{moneyFormatter.format(amount)}</strong>
                                     {amountOverridden && <span className="manual-override-badge">Manuale</span>}

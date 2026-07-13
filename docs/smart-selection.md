@@ -184,7 +184,13 @@ Each selected mask has a `destinazione d'uso`. The current frontend uses local c
 For each area:
 
 ```text
-estimatedAmount = selectedAreaM2 * usageRate
+estimatedValue = selectedAreaM2 * usageRate
+```
+
+The proposed cadastral rent then applies the `0.02` saggio di fruttuosita:
+
+```text
+newRendita = sum(estimatedValue) * 0.02
 ```
 
 The editor displays:
@@ -192,9 +198,10 @@ The editor displays:
 - area in square meters
 - selected destination usage
 - coefficient
-- estimated contribution
+- estimated value
 - total selected area
 - total estimated value
+- new rendita
 - usage breakdown
 
 These coefficients are placeholders in the frontend and should later come from backend configuration or ERP-derived business rules.
