@@ -33,10 +33,10 @@ Il contenuto è uno snapshot: modifiche successive allo studio non cambiano una 
 
 Il template e il renderer derivano dal deck `Chromery/soul-slides` al commit `a8201f2`. L'export è ibrido e mantiene viewport `1600x900`:
 
-- pagine 1, 2, 6 e 7: PDF nativo Chromium, per testo e grafica vettoriali;
+- pagine 1, 2 e 6: PDF nativo Chromium, per testo e grafica vettoriali;
 - pagine 3 e 4: JPEG a DPR 2 e qualità 93, per conservare fedelmente proporzioni e margini del layout web;
 - pagina 5: PNG a DPR 2, per massimizzare la leggibilità di tabelle, cifre e grafico.
 
 Le pagine vengono ricomposte con `pdf-lib` mantenendo il formato 16:9. Ogni acquisizione usa `?export=1`, attende l'elemento `#assets-ready` e altri due frame di rendering. La risoluzione cresce tramite `deviceScaleFactor`, senza cambiare la viewport e quindi senza alterare i valori CSS `clamp()`.
 
-Le immagini del template sono incorporate come data URL: pagina HTML e PDF non dipendono da CDN o asset esterni.
+Le immagini e il font variabile Inter del template sono incorporati come data URL: pagina HTML e PDF usano gli stessi asset e non dipendono da CDN o font installati sul dispositivo.

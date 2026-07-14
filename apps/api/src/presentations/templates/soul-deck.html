@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Soul S.r.l. - Rideterminazione rendita catastale</title>
   <style>
+    @font-face {
+      font-family: "Soul Inter";
+      src: url("__ASSET_INTER__") format("woff2-variations");
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: block;
+    }
+
     :root {
       --ink: #172129;
       --muted: #61717b;
@@ -17,7 +25,7 @@
       --mint: #bfe4df;
       --warm: #f1eee8;
       --shadow: 0 28px 70px rgba(17, 28, 35, 0.18);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: "Soul Inter", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
     * {
@@ -599,128 +607,6 @@
       width: clamp(10rem, 16cqw, 16rem);
     }
 
-    .considered-slide {
-      background:
-        linear-gradient(135deg, rgba(191, 228, 223, 0.48), transparent 42%),
-        linear-gradient(180deg, #fbfcfb, #eef4f2);
-    }
-
-    .considered-slide .slide-inner {
-      display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto;
-      gap: 1.25rem;
-      padding: 4.2% 5%;
-    }
-
-    .considered-header {
-      display: flex;
-      align-items: end;
-      justify-content: space-between;
-      gap: 2rem;
-    }
-
-    .considered-header h2 {
-      margin: 0;
-      font-size: clamp(2.1rem, 3.8cqw, 4rem);
-    }
-
-    .considered-count {
-      flex: none;
-      padding: 0.55rem 0.8rem;
-      border-left: 4px solid var(--cyan);
-      color: var(--ink);
-      background: rgba(255, 255, 255, 0.76);
-      font-size: clamp(0.82rem, 1cqw, 1.05rem);
-      font-weight: 820;
-    }
-
-    .considered-grid {
-      min-height: 0;
-      display: grid;
-      grid-template-columns: repeat(var(--considered-columns, 2), minmax(0, 1fr));
-      align-content: start;
-      gap: 0.62rem;
-    }
-
-    .considered-item {
-      min-width: 0;
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
-      align-items: center;
-      gap: 0.65rem;
-      min-height: 3.35rem;
-      padding: 0.58rem 0.72rem;
-      border: 1px solid rgba(23, 33, 41, 0.1);
-      background: rgba(255, 255, 255, 0.86);
-      box-shadow: 0 10px 26px rgba(28, 48, 56, 0.06);
-    }
-
-    .considered-index {
-      width: 1.75rem;
-      height: 1.75rem;
-      display: grid;
-      place-items: center;
-      border-radius: 999px;
-      color: var(--white);
-      background: var(--cyan);
-      font-size: clamp(0.68rem, 0.78cqw, 0.82rem);
-      font-weight: 850;
-    }
-
-    .considered-copy {
-      min-width: 0;
-      display: grid;
-      gap: 0.18rem;
-    }
-
-    .considered-copy strong {
-      overflow: hidden;
-      color: var(--ink);
-      font-size: clamp(0.76rem, 0.96cqw, 1rem);
-      line-height: 1.12;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .considered-copy span {
-      overflow: hidden;
-      color: var(--muted);
-      font-size: clamp(0.62rem, 0.76cqw, 0.8rem);
-      line-height: 1.12;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .considered-category {
-      min-width: 2.8rem;
-      padding: 0.34rem 0.45rem;
-      color: var(--blue);
-      background: rgba(22, 118, 180, 0.1);
-      font-size: clamp(0.64rem, 0.76cqw, 0.8rem);
-      font-weight: 850;
-      text-align: center;
-    }
-
-    .considered-footer {
-      display: flex;
-      justify-content: space-between;
-      gap: 2rem;
-      padding-top: 0.8rem;
-      border-top: 1px solid rgba(23, 33, 41, 0.13);
-      color: var(--muted);
-      font-size: clamp(0.67rem, 0.8cqw, 0.84rem);
-      font-weight: 650;
-    }
-
-    .considered-grid.is-dense {
-      gap: 0.38rem;
-    }
-
-    .considered-grid.is-dense .considered-item {
-      min-height: 2.55rem;
-      padding: 0.4rem 0.5rem;
-    }
-
     .tables-slide {
       background:
         linear-gradient(90deg, rgba(191, 228, 223, 0.36), transparent 36%),
@@ -1289,23 +1175,6 @@
         </div>
       </article>
 
-      <article class="slide considered-slide" data-slide>
-        <div class="slide-inner">
-          <header class="considered-header">
-            <div>
-              <p class="eyebrow">Perimetro della proposta</p>
-              <h2>Immobili considerati</h2>
-            </div>
-            <div class="considered-count" id="consideredCount"></div>
-          </header>
-          <div class="considered-grid" id="consideredItems"></div>
-          <footer class="considered-footer">
-            <span id="studyReference"></span>
-            <span id="generatedAt"></span>
-          </footer>
-        </div>
-      </article>
-
       <article class="slide closing" data-slide>
         <div class="photo-bg scrim" style="background-image:url('__ASSET_HANDSHAKE__')"></div>
         <div class="slide-inner">
@@ -1409,7 +1278,7 @@
       const detailItems = items.slice(0, detailLimit);
 
       economicTableNote.textContent = items.length > detailLimit
-        ? `Dettaglio dei primi ${detailLimit} immobili. La penultima pagina riporta l'elenco completo di ${items.length} immobili.`
+        ? `Dettaglio dei primi ${detailLimit} immobili su ${items.length} selezionati.`
         : `${items.length} ${items.length === 1 ? "immobile selezionato" : "immobili selezionati"}.`;
 
       propertyRows.innerHTML = detailItems.map((item) => {
@@ -1492,29 +1361,6 @@
 
     function renderDeckMetadata(data) {
       document.getElementById("clientName").textContent = data.studio.company;
-      document.getElementById("studyReference").textContent = `Studio ${data.studio.id} · ${data.studio.company}`;
-      document.getElementById("generatedAt").textContent = `Generata il ${new Intl.DateTimeFormat("it-IT", {
-        dateStyle: "long",
-        timeStyle: "short"
-      }).format(new Date(data.generatedAt))}`;
-    }
-
-    function renderConsideredList(items) {
-      const container = document.getElementById("consideredItems");
-      const columns = items.length <= 8 ? 2 : items.length <= 18 ? 3 : items.length <= 32 ? 4 : 5;
-      container.style.setProperty("--considered-columns", columns);
-      container.classList.toggle("is-dense", items.length > 12);
-      document.getElementById("consideredCount").textContent = `${items.length} ${items.length === 1 ? "immobile" : "immobili"}`;
-      container.innerHTML = items.map((item, index) => `
-        <div class="considered-item">
-          <span class="considered-index">${index + 1}</span>
-          <div class="considered-copy">
-            <strong>${escapeHtml(item.indirizzo || item.id)}</strong>
-            <span>${escapeHtml(item.comune)} · ${escapeHtml(item.foglioParticellaSub)} · ${escapeHtml(item.id)}</span>
-          </div>
-          <span class="considered-category">${escapeHtml(item.categoria)}</span>
-        </div>
-      `).join("");
     }
 
     function showSlide(index) {
@@ -1606,7 +1452,6 @@
 
     renderDeckMetadata(window.soulDeckData);
     renderTables(window.soulDeckData.immobili);
-    renderConsideredList(window.soulDeckData.immobili);
     showSlide(slideFromHash());
     markAssetsReady();
   </script>

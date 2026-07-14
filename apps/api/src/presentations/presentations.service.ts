@@ -22,6 +22,7 @@ const HYBRID_SLIDES = [
   { number: 5, format: "png" },
 ] as const;
 const ASSET_URLS = {
+  __ASSET_INTER__: { url: new URL("../../../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2", import.meta.url), contentType: "font/woff2" },
   __ASSET_LOGO__: { url: new URL("./templates/assets/soul-logo.svg", import.meta.url), contentType: "image/svg+xml" },
   __ASSET_COVER__: { url: new URL("./templates/assets/soul-exterior-mountain-facade.jpg", import.meta.url), contentType: "image/jpeg" },
   __ASSET_RECEPTION__: { url: new URL("./templates/assets/soul-reception.png", import.meta.url), contentType: "image/png" },
