@@ -1,0 +1,1614 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Soul S.r.l. - Rideterminazione rendita catastale</title>
+  <style>
+    :root {
+      --ink: #172129;
+      --muted: #61717b;
+      --line: rgba(23, 33, 41, 0.13);
+      --paper: #f7f9f8;
+      --white: #ffffff;
+      --cyan: #16a6ce;
+      --blue: #1676b4;
+      --green: #4a9b77;
+      --mint: #bfe4df;
+      --warm: #f1eee8;
+      --shadow: 0 28px 70px rgba(17, 28, 35, 0.18);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: #101820;
+      color: var(--ink);
+    }
+
+    body {
+      overflow: hidden;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .deck-shell {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 18% 20%, rgba(22, 166, 206, 0.18), transparent 28%),
+        linear-gradient(135deg, #101820, #18242d 54%, #0d141a);
+      overflow: hidden;
+    }
+
+    .deck {
+      position: relative;
+      width: min(100vw, calc(100vh * 16 / 9));
+      height: min(100vh, calc(100vw * 9 / 16));
+      overflow: hidden;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 40px 100px rgba(0, 0, 0, 0.38);
+      background: var(--paper);
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: none;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--paper);
+      isolation: isolate;
+    }
+
+    .slide.is-active {
+      display: block;
+    }
+
+    .slide-inner {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      height: 100%;
+      padding: 5.1% 5.8%;
+    }
+
+    .photo-bg,
+    .photo-panel,
+    .photo-strip {
+      position: absolute;
+      background-position: center;
+      background-size: cover;
+      background-repeat: no-repeat;
+    }
+
+    .photo-bg {
+      inset: 0;
+      z-index: 0;
+    }
+
+    .scrim::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(105deg, rgba(11, 24, 31, 0.8), rgba(11, 24, 31, 0.34) 47%, rgba(11, 24, 31, 0.1));
+      z-index: 1;
+    }
+
+    .soft-scrim::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(247, 249, 248, 0.98) 0 42%, rgba(247, 249, 248, 0.73) 57%, rgba(247, 249, 248, 0.08)),
+        linear-gradient(180deg, rgba(247, 249, 248, 0.12), rgba(247, 249, 248, 0.65));
+      z-index: 1;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.62em;
+      color: var(--cyan);
+      font-weight: 750;
+      letter-spacing: 0;
+      line-height: 1;
+    }
+
+    .brand.word {
+      font-size: clamp(2rem, 5.2cqw, 5rem);
+    }
+
+    .brand.small {
+      font-size: clamp(1.05rem, 1.45cqw, 1.45rem);
+      color: var(--ink);
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 1.08em;
+      height: 1.08em;
+      display: inline-block;
+    }
+
+    .brand-mark i {
+      position: absolute;
+      display: block;
+      width: 0.2em;
+      height: 0.2em;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
+    .brand-mark i:nth-child(1) { left: 0.03em; top: 0.72em; width: 0.28em; height: 0.28em; }
+    .brand-mark i:nth-child(2) { left: 0.30em; top: 0.64em; width: 0.23em; height: 0.23em; }
+    .brand-mark i:nth-child(3) { left: 0.58em; top: 0.55em; width: 0.2em; height: 0.2em; }
+    .brand-mark i:nth-child(4) { left: 0.76em; top: 0.30em; width: 0.18em; height: 0.18em; }
+    .brand-mark i:nth-child(5) { left: 0.68em; top: 0.04em; width: 0.24em; height: 0.24em; }
+    .brand-mark i:nth-child(6) { left: 0.39em; top: 0.02em; width: 0.2em; height: 0.2em; }
+    .brand-mark i:nth-child(7) { left: 0.15em; top: 0.12em; width: 0.16em; height: 0.16em; }
+    .brand-mark i:nth-child(8) { left: 0.18em; top: 0.42em; width: 0.16em; height: 0.16em; }
+
+    .logo-stack {
+      display: inline-grid;
+      justify-items: start;
+      gap: 0.72rem;
+    }
+
+    .soul-logo {
+      display: block;
+      width: clamp(11rem, 18cqw, 18rem);
+      height: auto;
+    }
+
+    .division-line {
+      color: rgba(255, 255, 255, 0.9);
+      font-size: clamp(0.86rem, 1.08cqw, 1.1rem);
+      font-weight: 680;
+      line-height: 1;
+      letter-spacing: 0.02em;
+    }
+
+    .eyebrow {
+      margin: 0 0 1.15em;
+      color: var(--cyan);
+      font-size: clamp(0.8rem, 1.05cqw, 1.05rem);
+      font-weight: 750;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      max-width: 12.8ch;
+      margin-bottom: 0.35em;
+      color: var(--white);
+      font-size: clamp(2.85rem, 5.75cqw, 5.9rem);
+      line-height: 0.96;
+      letter-spacing: 0;
+      font-weight: 790;
+    }
+
+    h2 {
+      color: var(--ink);
+      font-size: clamp(2.4rem, 4.7cqw, 4.9rem);
+      line-height: 0.96;
+      letter-spacing: 0;
+      font-weight: 790;
+    }
+
+    h3 {
+      color: var(--ink);
+      font-size: clamp(1.22rem, 1.58cqw, 1.72rem);
+      line-height: 1.08;
+      letter-spacing: 0;
+      font-weight: 760;
+    }
+
+    .lead {
+      max-width: 42ch;
+      color: var(--muted);
+      font-size: clamp(1.05rem, 1.45cqw, 1.55rem);
+      line-height: 1.32;
+    }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.7em;
+      padding: 0.62em 0.9em;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 999px;
+      color: rgba(255, 255, 255, 0.9);
+      font-size: clamp(0.82rem, 1.05cqw, 1.05rem);
+      font-weight: 680;
+      background: rgba(16, 24, 32, 0.2);
+      backdrop-filter: blur(14px);
+    }
+
+    .kicker::before {
+      content: "";
+      width: 0.58em;
+      height: 0.58em;
+      border-radius: 999px;
+      background: var(--cyan);
+      box-shadow: 0 0 0 0.34em rgba(22, 166, 206, 0.16);
+    }
+
+    .cover {
+      color: var(--white);
+    }
+
+    .cover .slide-inner {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      align-content: stretch;
+    }
+
+    .cover-top {
+      display: flex;
+      justify-content: flex-start;
+      align-items: flex-start;
+      gap: 2rem;
+    }
+
+    .cover .soul-logo {
+      width: clamp(12.8rem, 20cqw, 20rem);
+    }
+
+    .cover-title {
+      align-self: center;
+      max-width: 62%;
+      padding-bottom: 3.5%;
+    }
+
+    .cover-title p {
+      max-width: 34ch;
+      margin: 0;
+      color: rgba(255, 255, 255, 0.78);
+      font-size: clamp(1.1rem, 1.52cqw, 1.6rem);
+      line-height: 1.35;
+    }
+
+    .cover-client {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 0.22rem;
+      margin-top: 1.5rem;
+      padding: 0.72rem 1rem 0.78rem;
+      border-left: 4px solid var(--cyan);
+      background: rgba(16, 24, 32, 0.32);
+      backdrop-filter: blur(10px);
+    }
+
+    .cover-client span {
+      color: rgba(255, 255, 255, 0.68);
+      font-size: clamp(0.68rem, 0.82cqw, 0.88rem);
+      font-weight: 760;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .cover-client strong {
+      color: var(--white);
+      font-size: clamp(1.05rem, 1.38cqw, 1.46rem);
+      line-height: 1.15;
+    }
+
+    .cover-ribbon {
+      position: absolute;
+      right: -12%;
+      bottom: -20%;
+      z-index: 1;
+      width: 72%;
+      height: 44%;
+      transform: skewX(-18deg) rotate(-5deg);
+      background: linear-gradient(120deg, rgba(22, 166, 206, 0.9), rgba(74, 155, 119, 0.7));
+      opacity: 0.88;
+    }
+
+    .cover-ribbon.secondary {
+      right: 26%;
+      bottom: -27%;
+      width: 44%;
+      height: 36%;
+      background: rgba(255, 255, 255, 0.92);
+      opacity: 1;
+    }
+
+    .quote-layout {
+      display: grid;
+      grid-template-columns: 1fr 0.83fr;
+      gap: 4.8%;
+      align-items: stretch;
+      height: 100%;
+    }
+
+    .quote-photo {
+      position: relative;
+      overflow: hidden;
+      border-radius: 0;
+      box-shadow: var(--shadow);
+    }
+
+    .quote-photo .photo-panel {
+      inset: 0;
+    }
+
+    .quote-block {
+      align-self: center;
+      padding-right: 2%;
+    }
+
+    .quote-mark {
+      color: var(--cyan);
+      font-size: clamp(4rem, 7cqw, 7rem);
+      line-height: 0.6;
+      font-weight: 800;
+    }
+
+    blockquote {
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(1.45rem, 2.38cqw, 2.55rem);
+      line-height: 1.16;
+      font-weight: 650;
+    }
+
+    .quote-credit {
+      margin-top: 2.4rem;
+      padding-top: 1.3rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: clamp(0.9rem, 1.15cqw, 1.15rem);
+      line-height: 1.35;
+    }
+
+    .quote-credit strong {
+      display: block;
+      color: var(--ink);
+      font-weight: 760;
+    }
+
+    .split-service {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 5.4%;
+      align-items: center;
+      height: 100%;
+    }
+
+    .service-copy {
+      max-width: 48rem;
+    }
+
+    .service-copy .lead {
+      margin-bottom: 2.4rem;
+      color: var(--cyan);
+      font-weight: 560;
+    }
+
+    .body-copy {
+      color: var(--ink);
+      font-size: clamp(1rem, 1.28cqw, 1.34rem);
+      line-height: 1.46;
+    }
+
+    .body-copy strong {
+      color: var(--cyan);
+      font-weight: 790;
+    }
+
+    .metric-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+      margin-top: 2.1rem;
+    }
+
+    .metric {
+      border-top: 3px solid var(--cyan);
+      padding-top: 0.95rem;
+    }
+
+    .metric b {
+      display: block;
+      color: var(--ink);
+      font-size: clamp(2.1rem, 3.3cqw, 3.35rem);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .metric span {
+      display: block;
+      margin-top: 0.45rem;
+      color: var(--muted);
+      font-size: clamp(0.8rem, 0.94cqw, 1rem);
+      line-height: 1.25;
+    }
+
+    .service-photo {
+      position: relative;
+      height: 100%;
+      min-height: 0;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    .service-photo .photo-panel {
+      inset: 0;
+    }
+
+    .service-photo::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0 0;
+      height: 34%;
+      background: linear-gradient(0deg, rgba(23, 33, 41, 0.42), transparent);
+    }
+
+    .process-slide .photo-strip {
+      inset: 0 auto 0 0;
+      width: 42%;
+      background-position: center;
+    }
+
+    .process-slide .photo-strip::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(247, 249, 248, 0.08), rgba(247, 249, 248, 0.82));
+    }
+
+    .process-layout {
+      display: grid;
+      grid-template-columns: 0.85fr 1.15fr;
+      gap: 5.2%;
+      height: 100%;
+      align-items: center;
+    }
+
+    .process-title {
+      align-self: center;
+      padding-bottom: 0;
+    }
+
+    .process-title h2 {
+      max-width: 9ch;
+      margin-bottom: 0.5em;
+    }
+
+    .process-title .lead {
+      max-width: 22ch;
+      color: #2f3d45;
+      font-weight: 560;
+    }
+
+    .steps {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .step {
+      position: relative;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 1.2rem;
+      align-items: start;
+      padding: 1.35rem 1.4rem;
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      box-shadow: 0 18px 44px rgba(29, 43, 50, 0.08);
+    }
+
+    .step-number {
+      display: grid;
+      place-items: center;
+      width: clamp(3.2rem, 4cqw, 4.1rem);
+      aspect-ratio: 1;
+      border-radius: 999px;
+      background: var(--ink);
+      color: var(--white);
+      font-size: clamp(1.4rem, 2.2cqw, 2.35rem);
+      font-weight: 790;
+      line-height: 1;
+    }
+
+    .step h3 {
+      margin-bottom: 0.38rem;
+      color: var(--cyan);
+    }
+
+    .step p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: clamp(0.9rem, 1.07cqw, 1.13rem);
+      line-height: 1.36;
+    }
+
+    .closing .slide-inner {
+      display: grid;
+      align-content: space-between;
+      color: var(--white);
+    }
+
+    .closing .photo-bg {
+      background-position: center;
+    }
+
+    .closing .scrim::after {
+      background:
+        linear-gradient(105deg, rgba(11, 24, 31, 0.72), rgba(11, 24, 31, 0.22) 62%, rgba(11, 24, 31, 0)),
+        linear-gradient(0deg, rgba(11, 24, 31, 0.42), rgba(11, 24, 31, 0));
+    }
+
+    .objective {
+      max-width: 44rem;
+      padding: 1.75rem 0 0;
+    }
+
+    .objective p {
+      margin-bottom: 0.65rem;
+      color: rgba(255, 255, 255, 0.74);
+      font-size: clamp(1.28rem, 2.08cqw, 2.15rem);
+      line-height: 1.22;
+      font-weight: 520;
+    }
+
+    .objective p:first-child {
+      color: var(--white);
+      font-weight: 690;
+    }
+
+    .contact-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 3rem;
+      color: rgba(255, 255, 255, 0.82);
+    }
+
+    .contact {
+      font-size: clamp(0.88rem, 1.13cqw, 1.15rem);
+      line-height: 1.35;
+    }
+
+    .contact strong {
+      display: block;
+      color: var(--white);
+      font-size: 1.15em;
+      margin-bottom: 0.15rem;
+    }
+
+    .closing .soul-logo {
+      width: clamp(10rem, 16cqw, 16rem);
+    }
+
+    .considered-slide {
+      background:
+        linear-gradient(135deg, rgba(191, 228, 223, 0.48), transparent 42%),
+        linear-gradient(180deg, #fbfcfb, #eef4f2);
+    }
+
+    .considered-slide .slide-inner {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: 1.25rem;
+      padding: 4.2% 5%;
+    }
+
+    .considered-header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 2rem;
+    }
+
+    .considered-header h2 {
+      margin: 0;
+      font-size: clamp(2.1rem, 3.8cqw, 4rem);
+    }
+
+    .considered-count {
+      flex: none;
+      padding: 0.55rem 0.8rem;
+      border-left: 4px solid var(--cyan);
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.76);
+      font-size: clamp(0.82rem, 1cqw, 1.05rem);
+      font-weight: 820;
+    }
+
+    .considered-grid {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: repeat(var(--considered-columns, 2), minmax(0, 1fr));
+      align-content: start;
+      gap: 0.62rem;
+    }
+
+    .considered-item {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 0.65rem;
+      min-height: 3.35rem;
+      padding: 0.58rem 0.72rem;
+      border: 1px solid rgba(23, 33, 41, 0.1);
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 10px 26px rgba(28, 48, 56, 0.06);
+    }
+
+    .considered-index {
+      width: 1.75rem;
+      height: 1.75rem;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      color: var(--white);
+      background: var(--cyan);
+      font-size: clamp(0.68rem, 0.78cqw, 0.82rem);
+      font-weight: 850;
+    }
+
+    .considered-copy {
+      min-width: 0;
+      display: grid;
+      gap: 0.18rem;
+    }
+
+    .considered-copy strong {
+      overflow: hidden;
+      color: var(--ink);
+      font-size: clamp(0.76rem, 0.96cqw, 1rem);
+      line-height: 1.12;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .considered-copy span {
+      overflow: hidden;
+      color: var(--muted);
+      font-size: clamp(0.62rem, 0.76cqw, 0.8rem);
+      line-height: 1.12;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .considered-category {
+      min-width: 2.8rem;
+      padding: 0.34rem 0.45rem;
+      color: var(--blue);
+      background: rgba(22, 118, 180, 0.1);
+      font-size: clamp(0.64rem, 0.76cqw, 0.8rem);
+      font-weight: 850;
+      text-align: center;
+    }
+
+    .considered-footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 2rem;
+      padding-top: 0.8rem;
+      border-top: 1px solid rgba(23, 33, 41, 0.13);
+      color: var(--muted);
+      font-size: clamp(0.67rem, 0.8cqw, 0.84rem);
+      font-weight: 650;
+    }
+
+    .considered-grid.is-dense {
+      gap: 0.38rem;
+    }
+
+    .considered-grid.is-dense .considered-item {
+      min-height: 2.55rem;
+      padding: 0.4rem 0.5rem;
+    }
+
+    .tables-slide {
+      background:
+        linear-gradient(90deg, rgba(191, 228, 223, 0.36), transparent 36%),
+        linear-gradient(180deg, #fbfcfb, #eef4f2);
+    }
+
+    .tables-slide .slide-inner {
+      padding: 3.7% 3.9%;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 1.25rem;
+    }
+
+    .tables-header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 2rem;
+    }
+
+    .tables-header h2 {
+      max-width: 13.5ch;
+      margin-bottom: 0;
+      font-size: clamp(2.2rem, 3.8cqw, 4rem);
+    }
+
+    .table-note {
+      max-width: 30ch;
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(0.82rem, 0.98cqw, 1.02rem);
+      line-height: 1.35;
+      text-align: right;
+    }
+
+    .table-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(18rem, 0.78fr);
+      gap: 1.15rem;
+      min-height: 0;
+    }
+
+    .table-box {
+      min-width: 0;
+      background: rgba(255, 255, 255, 0.84);
+      border: 1px solid rgba(23, 33, 41, 0.1);
+      box-shadow: 0 16px 42px rgba(28, 48, 56, 0.08);
+      overflow: hidden;
+    }
+
+    .table-box.summary {
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .table-title {
+      padding: 0.78rem 0.95rem;
+      background: var(--ink);
+      color: var(--white);
+      font-weight: 780;
+      font-size: clamp(0.75rem, 0.88cqw, 0.96rem);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid rgba(23, 33, 41, 0.1);
+      padding: 0.56rem 0.58rem;
+      text-align: left;
+      vertical-align: middle;
+      color: var(--ink);
+      font-size: clamp(0.58rem, 0.69cqw, 0.78rem);
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+    }
+
+    th {
+      background: #dff1ef;
+      color: #20313a;
+      font-weight: 780;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    td.num,
+    th.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .main-table th:nth-child(1) { width: 14%; }
+    .main-table th:nth-child(2) { width: 9%; }
+    .main-table th:nth-child(3) { width: 15%; }
+    .main-table th:nth-child(4) { width: 14%; }
+    .main-table th:nth-child(5) { width: 6%; }
+    .main-table th:nth-child(6),
+    .main-table th:nth-child(7),
+    .main-table th:nth-child(8),
+    .main-table th:nth-child(9) { width: 10.5%; }
+    .main-table th:nth-child(10) { width: 7%; }
+
+    .main-table tfoot td {
+      background: #eef4f2;
+      border-bottom: 0;
+      font-weight: 820;
+    }
+
+    .summary-table td,
+    .summary-table th {
+      padding: 0.46rem 0.64rem;
+      font-size: clamp(0.72rem, 0.86cqw, 0.98rem);
+    }
+
+    .summary-table th {
+      width: 58%;
+      text-transform: none;
+      letter-spacing: 0;
+      background: rgba(22, 166, 206, 0.1);
+      color: var(--ink);
+    }
+
+    .summary-table tr.section th,
+    .summary-table tr.section td {
+      background: var(--cyan);
+      color: var(--white);
+      font-weight: 790;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .benefit-table {
+      margin-top: auto;
+      border-top: 1px solid rgba(23, 33, 41, 0.1);
+    }
+
+    .benefit-table th {
+      width: 45%;
+      background: #eef4f2;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .economic-chart {
+      align-self: end;
+      border-top: 1px solid rgba(23, 33, 41, 0.1);
+      padding: 0.62rem 0.9rem 0.58rem;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.45), rgba(224, 241, 239, 0.62));
+    }
+
+    .chart-head {
+      display: grid;
+      gap: 0.3rem;
+      margin-bottom: 0.38rem;
+    }
+
+    .chart-head h3 {
+      margin-bottom: 0;
+      font-size: clamp(0.78rem, 0.92cqw, 0.98rem);
+      line-height: 1;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .chart-head span {
+      justify-self: start;
+      padding: 0.32rem 0.55rem 0.36rem;
+      border-left: 4px solid var(--green);
+      background: rgba(74, 155, 119, 0.12);
+      color: var(--green);
+      font-size: clamp(0.86rem, 1.01cqw, 1.08rem);
+      font-weight: 850;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .chart-head span.is-negative {
+      border-left-color: #c45555;
+      color: #a43f3f;
+      background: rgba(196, 85, 85, 0.12);
+    }
+
+    .chart-bars {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(5.4rem, 5.9rem));
+      justify-content: center;
+      align-items: end;
+      gap: 0.2rem;
+      min-height: 3.9rem;
+      padding: 0.15rem 0.3rem 0;
+    }
+
+    .chart-item {
+      display: grid;
+      grid-template-rows: 2.55rem auto;
+      gap: 0.22rem;
+      align-items: end;
+      min-width: 0;
+    }
+
+    .chart-bar-wrap {
+      position: relative;
+      height: 2.55rem;
+      border-bottom: 1px solid rgba(23, 33, 41, 0.22);
+    }
+
+    .chart-bar {
+      position: absolute;
+      left: 50%;
+      bottom: 0;
+      width: min(3.25rem, 70%);
+      min-height: 0.5rem;
+      transform: translateX(-50%);
+      background: linear-gradient(180deg, var(--cyan), var(--blue));
+    }
+
+    .chart-item.is-after .chart-bar {
+      background: linear-gradient(180deg, var(--green), #2d7c64);
+    }
+
+    .chart-item.is-after.is-negative .chart-bar {
+      background: linear-gradient(180deg, #d8786e, #a43f3f);
+    }
+
+    .chart-label {
+      min-width: 0;
+      color: var(--muted);
+      font-size: clamp(0.52rem, 0.62cqw, 0.7rem);
+      line-height: 1.05;
+      text-align: center;
+      font-weight: 650;
+      white-space: normal;
+    }
+
+    .chart-label strong {
+      display: block;
+      margin-right: 0;
+      color: var(--ink);
+      font-size: 1.1em;
+      font-weight: 830;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bar-track {
+      height: 0.56rem;
+      border-radius: 999px;
+      background: rgba(23, 33, 41, 0.1);
+      overflow: hidden;
+    }
+
+    .bar {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--cyan), var(--green));
+    }
+
+    .nav-arrow {
+      position: fixed;
+      top: 50%;
+      z-index: 10;
+      width: 3rem;
+      aspect-ratio: 1;
+      transform: translateY(-50%);
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 999px;
+      background: rgba(16, 24, 32, 0.44);
+      color: rgba(255, 255, 255, 0.9);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-size: 2rem;
+      line-height: 1;
+      backdrop-filter: blur(12px);
+      transition: opacity 160ms ease, transform 160ms ease, background 160ms ease;
+    }
+
+    .nav-arrow:hover {
+      background: rgba(22, 166, 206, 0.78);
+    }
+
+    .nav-arrow:active {
+      transform: translateY(-50%) scale(0.96);
+    }
+
+    .nav-arrow[disabled] {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .export-mode .nav-arrow {
+      display: none !important;
+    }
+
+    .export-mode .service-slide .slide-inner {
+      padding-bottom: 7%;
+    }
+
+    .export-mode .service-slide .service-copy .lead {
+      margin-bottom: 1.2rem;
+    }
+
+    .export-mode .service-slide .body-copy {
+      font-size: clamp(0.94rem, 1.16cqw, 1.2rem);
+      line-height: 1.32;
+    }
+
+    .export-mode .service-slide .metric-row {
+      margin-top: 0.85rem;
+    }
+
+    .nav-prev {
+      left: max(1rem, calc((100vw - min(100vw, 100vh * 16 / 9)) / 2 + 1rem));
+    }
+
+    .nav-next {
+      right: max(1rem, calc((100vw - min(100vw, 100vh * 16 / 9)) / 2 + 1rem));
+    }
+
+    @media (max-aspect-ratio: 16 / 9) {
+      .nav-prev { left: 0.55rem; }
+      .nav-next { right: 0.55rem; }
+    }
+
+    @media (max-width: 900px) {
+      .quote-layout,
+      .split-service,
+      .process-layout,
+      .table-grid {
+        gap: 3%;
+      }
+
+      .step {
+        padding: 1rem;
+      }
+
+      .main-table th,
+      .main-table td {
+        padding: 0.42rem;
+      }
+    }
+
+    @page {
+      size: 16in 9in;
+      margin: 0;
+    }
+
+    @media print {
+      html,
+      body {
+        width: 16in;
+        height: auto;
+        background: white;
+      }
+
+      body {
+        overflow: visible;
+      }
+
+      .deck-shell {
+        display: block;
+        width: 16in;
+        min-height: 0;
+        background: white;
+      }
+
+      .deck {
+        display: block;
+        width: 16in;
+        height: auto;
+        box-shadow: none;
+        overflow: visible;
+      }
+
+      .slide,
+      .slide.is-active {
+        position: relative;
+        display: block !important;
+        width: 16in;
+        height: 9in;
+        page-break-after: always;
+        break-after: page;
+      }
+
+      .slide:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
+
+      .nav-arrow {
+        display: none !important;
+      }
+
+      * {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck-shell">
+    <section class="deck" aria-label="Presentazione Soul - rideterminazione rendita catastale">
+      <article class="slide cover is-active" data-slide>
+        <div class="photo-bg scrim" style="background-image:url('__ASSET_COVER__')"></div>
+        <div class="cover-ribbon"></div>
+        <div class="cover-ribbon secondary"></div>
+        <div class="slide-inner">
+          <div class="cover-top">
+            <div class="logo-stack" aria-label="Soul - Divisione Real Estate">
+              <img class="soul-logo" src="__ASSET_LOGO__" alt="Soul">
+              <div class="division-line">Divisione Real Estate</div>
+            </div>
+          </div>
+          <div class="cover-title">
+            <h1>Rideterminazione rendita catastale</h1>
+            <p>Il vostro partner per ottimizzare i vostri immobili e il corretto pagamento delle imposte municipali.</p>
+            <div class="cover-client">
+              <span>Proposta per</span>
+              <strong id="clientName"></strong>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="slide" data-slide>
+        <div class="slide-inner quote-layout">
+          <div class="quote-photo">
+            <div class="photo-panel" style="background-image:url('__ASSET_RECEPTION__')"></div>
+          </div>
+          <div class="quote-block">
+            <div class="quote-mark" aria-hidden="true">"</div>
+            <blockquote>
+              Le più grandi imprese sono formate dalle migliori persone. Tutti lo dicono ma io lo credo fermamente.
+            </blockquote>
+            <p class="body-copy" style="margin-top:1.8rem">
+              Le persone che fanno parte del team, con motivazione, professionalità e impegno hanno permesso a Soul di raggiungere e superare gli obiettivi prefissati di anno in anno, mantenendo un trend di costante crescita.
+            </p>
+            <div class="quote-credit">
+              <strong>Dott. Ruggero Lopriore</strong>
+              Amministratore di Soul
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="slide service-slide" data-slide>
+        <div class="slide-inner split-service">
+          <div class="service-copy">
+            <p class="eyebrow">Riduzione della</p>
+            <h2>Rendita catastale</h2>
+            <p class="lead">Una corretta valutazione del valore catastale per un corretto pagamento delle imposte municipali.</p>
+            <p class="body-copy">
+              Soul fornisce assistenza per la determinazione o rideterminazione del corretto valore catastale degli immobili, al fine di un corretto e ragionevole pagamento delle imposte municipali gravanti sugli stessi.
+            </p>
+            <p class="body-copy">
+              Spesso la pubblica amministrazione attribuisce agli immobili una rendita catastale molto elevata: Soul è in grado di dimostrare che il reale valore catastale sia effettivamente inferiore, <strong>riducendo tra il 15% e il 40% le relative imposte.</strong>
+            </p>
+            <div class="metric-row" aria-label="Intervallo di riduzione stimato">
+              <div class="metric">
+                <b>15%</b>
+                <span>riduzione minima tipica delle relative imposte</span>
+              </div>
+              <div class="metric">
+                <b>40%</b>
+                <span>riduzione massima riscontrabile nei casi idonei</span>
+              </div>
+            </div>
+          </div>
+          <div class="service-photo" aria-hidden="true">
+            <div class="photo-panel" style="background-image:url('__ASSET_ATRIUM__')"></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="slide process-slide" data-slide>
+        <div class="photo-strip" style="background-image:url('__ASSET_WORKSPACE__')"></div>
+        <div class="slide-inner process-layout">
+          <div class="process-title">
+            <p class="eyebrow">Metodo</p>
+            <h2>La nostra attività in 3 fasi</h2>
+            <p class="lead">Analisi, attività tecnica e risultato finale sono organizzati in un percorso tracciabile.</p>
+          </div>
+          <div class="steps">
+            <section class="step">
+              <div class="step-number">1</div>
+              <div>
+                <h3>Studio preliminare</h3>
+                <p>Analizzando visura catastale e planimetria, daremo evidenza degli immobili interessati a possibile intervento con indicazione del potenziale abbattimento.</p>
+              </div>
+            </section>
+            <section class="step">
+              <div class="step-number">2</div>
+              <div>
+                <h3>Esecuzione attività</h3>
+                <p>Alla firma del contratto, verranno avviate le attività tecniche, peritali e tributarie volte a ottimizzare le rendite catastali.</p>
+              </div>
+            </section>
+            <section class="step">
+              <div class="step-number">3</div>
+              <div>
+                <h3>Risultato</h3>
+                <p>Al termine delle attività e una volta raggiunta la ridefinizione definitiva della rendita, attraverso accertamento, mediazione o sentenza passata in giudicato, maturerà il beneficio per la proprietà e la nostra consulenza.</p>
+              </div>
+            </section>
+          </div>
+        </div>
+      </article>
+
+      <article class="slide tables-slide" data-slide>
+        <div class="slide-inner">
+          <header class="tables-header">
+            <div>
+              <p class="eyebrow">Simulazione economica</p>
+              <h2>Rideterminazione rendita catastale</h2>
+            </div>
+            <p class="table-note" id="economicTableNote"></p>
+          </header>
+          <div class="table-grid">
+            <section class="table-box">
+              <div class="table-title">Dettaglio immobili selezionati</div>
+              <table class="main-table" aria-label="Rideterminazione rendita catastale - immobili categoria D">
+                <thead>
+                  <tr>
+                    <th>Società</th>
+                    <th>Comune</th>
+                    <th>Indirizzo</th>
+                    <th>Foglio - Particella - Sub</th>
+                    <th>Cat.</th>
+                    <th class="num">R.C. attuale</th>
+                    <th class="num">R.C. attribuibile</th>
+                    <th class="num">Diff. rendita</th>
+                    <th class="num">Diff. IMU</th>
+                    <th class="num">% rid.</th>
+                  </tr>
+                </thead>
+                <tbody id="propertyRows"></tbody>
+                <tfoot>
+                  <tr id="propertyTotals"></tr>
+                </tfoot>
+              </table>
+            </section>
+
+            <section class="table-box summary">
+              <div>
+                <div class="table-title">Sintesi rideterminazione</div>
+                <table class="summary-table" aria-label="Sintesi rideterminazione rendita catastale">
+                  <tbody id="summaryRows"></tbody>
+                </table>
+              </div>
+              <div class="economic-chart" aria-label="Grafico confronto IMU">
+                <div class="chart-head">
+                  <h3>Confronto IMU annua</h3>
+                  <span id="chartSaving"></span>
+                </div>
+                <div class="chart-bars" id="savingsChart"></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </article>
+
+      <article class="slide considered-slide" data-slide>
+        <div class="slide-inner">
+          <header class="considered-header">
+            <div>
+              <p class="eyebrow">Perimetro della proposta</p>
+              <h2>Immobili considerati</h2>
+            </div>
+            <div class="considered-count" id="consideredCount"></div>
+          </header>
+          <div class="considered-grid" id="consideredItems"></div>
+          <footer class="considered-footer">
+            <span id="studyReference"></span>
+            <span id="generatedAt"></span>
+          </footer>
+        </div>
+      </article>
+
+      <article class="slide closing" data-slide>
+        <div class="photo-bg scrim" style="background-image:url('__ASSET_HANDSHAKE__')"></div>
+        <div class="slide-inner">
+          <div class="objective">
+            <p>L'obiettivo di Soul è volto a massimizzare il risparmio per il cliente.</p>
+            <p>Le attività di consulenza per le quali sia prevista riserva di legge verranno espletate da professionisti abilitati.</p>
+          </div>
+          <div class="contact-row">
+            <div class="contact">
+              <strong>Soul S.r.l.</strong>
+              Bolzano<br>
+              Via Altmann 9<br>
+              T +39 0471 1886875<br>
+              P.IVA IT02770870216<br>
+              Cap. Soc. 100.000 € i.v.<br>
+              info@soul.it<br>
+              www.soul.it
+            </div>
+            <img class="soul-logo" src="__ASSET_LOGO__" alt="Soul">
+          </div>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <button class="nav-arrow nav-prev" type="button" aria-label="Slide precedente">&#8249;</button>
+  <button class="nav-arrow nav-next" type="button" aria-label="Slide successiva">&#8250;</button>
+
+  <script>
+    if (new URLSearchParams(location.search).has("export")) {
+      document.documentElement.classList.add("export-mode");
+    }
+
+    window.soulDeckData = __SOUL_DECK_DATA__;
+
+    const slides = Array.from(document.querySelectorAll("[data-slide]"));
+    const prevButton = document.querySelector(".nav-prev");
+    const nextButton = document.querySelector(".nav-next");
+    let currentSlide = 0;
+
+    function formatEuro(value) {
+      if (!Number.isFinite(value)) return "n.d.";
+      return new Intl.NumberFormat("it-IT", {
+        style: "currency",
+        currency: "EUR",
+        maximumFractionDigits: 0
+      }).format(value);
+    }
+
+    function formatPercent(value) {
+      if (!Number.isFinite(value)) return "n.d.";
+      return new Intl.NumberFormat("it-IT", {
+        style: "percent",
+        maximumFractionDigits: 1
+      }).format(value);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function safePercent(numerator, denominator) {
+      return Number.isFinite(numerator) && Number.isFinite(denominator) && denominator !== 0
+        ? numerator / denominator
+        : null;
+    }
+
+    function totals(items) {
+      return items.reduce((acc, item) => {
+        acc.renditaAttuale += item.renditaAttuale;
+        acc.renditaAttribuibile += item.renditaAttribuibile;
+        if (Number.isFinite(item.imuAttuale) && Number.isFinite(item.imuOttenibile)) {
+          acc.imuAttuale += item.imuAttuale;
+          acc.imuOttenibile += item.imuOttenibile;
+          acc.imuComplete += 1;
+        }
+        return acc;
+      }, { renditaAttuale: 0, renditaAttribuibile: 0, imuAttuale: 0, imuOttenibile: 0, imuComplete: 0 });
+    }
+
+    function renderTables(items) {
+      const propertyRows = document.getElementById("propertyRows");
+      const propertyTotals = document.getElementById("propertyTotals");
+      const summaryRows = document.getElementById("summaryRows");
+      const savingsChart = document.getElementById("savingsChart");
+      const chartSaving = document.getElementById("chartSaving");
+      const economicTableNote = document.getElementById("economicTableNote");
+      const total = totals(items);
+      const diffRendita = total.renditaAttuale - total.renditaAttribuibile;
+      const hasImuTotals = total.imuComplete > 0;
+      const diffImu = hasImuTotals ? total.imuAttuale - total.imuOttenibile : null;
+      const hasImuSaving = Number.isFinite(diffImu) && diffImu >= 0;
+      const reduction = safePercent(diffRendita, total.renditaAttuale);
+      const valorizzazioneAsset = hasImuSaving ? diffImu * 12 : null;
+      const detailLimit = 8;
+      const detailItems = items.slice(0, detailLimit);
+
+      economicTableNote.textContent = items.length > detailLimit
+        ? `Dettaglio dei primi ${detailLimit} immobili. La penultima pagina riporta l'elenco completo di ${items.length} immobili.`
+        : `${items.length} ${items.length === 1 ? "immobile selezionato" : "immobili selezionati"}.`;
+
+      propertyRows.innerHTML = detailItems.map((item) => {
+        const rowDiffRendita = item.renditaAttuale - item.renditaAttribuibile;
+        const rowDiffImu = Number.isFinite(item.imuAttuale) && Number.isFinite(item.imuOttenibile)
+          ? item.imuAttuale - item.imuOttenibile
+          : null;
+        const rowReduction = safePercent(rowDiffRendita, item.renditaAttuale);
+
+        return `
+          <tr>
+            <td>${escapeHtml(item.societa)}</td>
+            <td>${escapeHtml(item.comune)}</td>
+            <td>${escapeHtml(item.indirizzo)}</td>
+            <td>${escapeHtml(item.foglioParticellaSub)}</td>
+            <td>${escapeHtml(item.categoria)}</td>
+            <td class="num">${formatEuro(item.renditaAttuale)}</td>
+            <td class="num">${formatEuro(item.renditaAttribuibile)}</td>
+            <td class="num">${formatEuro(rowDiffRendita)}</td>
+            <td class="num">${formatEuro(rowDiffImu)}</td>
+            <td class="num">${formatPercent(rowReduction)}</td>
+          </tr>
+        `;
+      }).join("");
+
+      propertyTotals.innerHTML = `
+        <td colspan="5">Totale portafoglio</td>
+        <td class="num">${formatEuro(total.renditaAttuale)}</td>
+        <td class="num">${formatEuro(total.renditaAttribuibile)}</td>
+        <td class="num">${formatEuro(diffRendita)}</td>
+        <td class="num">${formatEuro(diffImu)}</td>
+        <td class="num">${formatPercent(reduction)}</td>
+      `;
+
+      summaryRows.innerHTML = `
+        <tr class="section"><th colspan="2">Rideterminazione rendita catastale immobili</th></tr>
+        <tr><th>Rendita catastale attuale</th><td class="num">${formatEuro(total.renditaAttuale)}</td></tr>
+        <tr><th>Rendita catastale attribuibile</th><td class="num">${formatEuro(total.renditaAttribuibile)}</td></tr>
+        <tr><th>Differenza rendita</th><td class="num">${formatEuro(diffRendita)}</td></tr>
+        <tr class="section"><th colspan="2">IMU prevista</th></tr>
+        <tr><th>Valore attuale IMU${total.imuComplete < items.length ? " (dati disponibili)" : ""}</th><td class="num">${formatEuro(hasImuTotals ? total.imuAttuale : null)}</td></tr>
+        <tr><th>Valore ottenibile IMU${total.imuComplete < items.length ? " (dati disponibili)" : ""}</th><td class="num">${formatEuro(hasImuTotals ? total.imuOttenibile : null)}</td></tr>
+        <tr class="section"><th colspan="2">${hasImuSaving ? "Risparmio IMU previsto" : "Variazione IMU prevista"}</th></tr>
+        <tr><th>${hasImuSaving ? "Risparmio 1° anno" : "Variazione 1° anno"}</th><td class="num">${formatEuro(diffImu)}</td></tr>
+        <tr><th>Valorizzazione asset immobiliare</th><td class="num">${formatEuro(valorizzazioneAsset)}</td></tr>
+      `;
+
+      if (!hasImuTotals) {
+        chartSaving.textContent = "Dati IMU non disponibili";
+        savingsChart.innerHTML = "";
+        return;
+      }
+
+      const chartItems = [
+        { label: "IMU attuale", value: total.imuAttuale, className: "is-before" },
+        { label: "IMU ottenibile", value: total.imuOttenibile, className: `is-after${hasImuSaving ? "" : " is-negative"}` }
+      ];
+      const maxChartValue = Math.max(...chartItems.map((item) => item.value));
+      const imuReduction = safePercent(diffImu, total.imuAttuale);
+      const coverage = total.imuComplete < items.length ? ` · ${total.imuComplete}/${items.length} immobili` : "";
+      const chartLabel = hasImuSaving ? "Risparmio annuo" : "Incremento annuo";
+      chartSaving.classList.toggle("is-negative", !hasImuSaving);
+      chartSaving.textContent = `${chartLabel} ${formatEuro(Math.abs(diffImu))} (${formatPercent(Math.abs(imuReduction))})${coverage}`;
+      savingsChart.innerHTML = chartItems.map((item) => {
+        const height = maxChartValue > 0 ? Math.max(8, Math.round((item.value / maxChartValue) * 100)) : 8;
+
+        return `
+          <div class="chart-item ${item.className}">
+            <div class="chart-bar-wrap">
+              <span class="chart-bar" style="height:${height}%"></span>
+            </div>
+            <div class="chart-label">
+              <strong>${formatEuro(item.value)}</strong>
+              ${item.label}
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderDeckMetadata(data) {
+      document.getElementById("clientName").textContent = data.studio.company;
+      document.getElementById("studyReference").textContent = `Studio ${data.studio.id} · ${data.studio.company}`;
+      document.getElementById("generatedAt").textContent = `Generata il ${new Intl.DateTimeFormat("it-IT", {
+        dateStyle: "long",
+        timeStyle: "short"
+      }).format(new Date(data.generatedAt))}`;
+    }
+
+    function renderConsideredList(items) {
+      const container = document.getElementById("consideredItems");
+      const columns = items.length <= 8 ? 2 : items.length <= 18 ? 3 : items.length <= 32 ? 4 : 5;
+      container.style.setProperty("--considered-columns", columns);
+      container.classList.toggle("is-dense", items.length > 12);
+      document.getElementById("consideredCount").textContent = `${items.length} ${items.length === 1 ? "immobile" : "immobili"}`;
+      container.innerHTML = items.map((item, index) => `
+        <div class="considered-item">
+          <span class="considered-index">${index + 1}</span>
+          <div class="considered-copy">
+            <strong>${escapeHtml(item.indirizzo || item.id)}</strong>
+            <span>${escapeHtml(item.comune)} · ${escapeHtml(item.foglioParticellaSub)} · ${escapeHtml(item.id)}</span>
+          </div>
+          <span class="considered-category">${escapeHtml(item.categoria)}</span>
+        </div>
+      `).join("");
+    }
+
+    function showSlide(index) {
+      currentSlide = Math.max(0, Math.min(index, slides.length - 1));
+      slides.forEach((slide, slideIndex) => {
+        slide.classList.toggle("is-active", slideIndex === currentSlide);
+      });
+      prevButton.disabled = currentSlide === 0;
+      nextButton.disabled = currentSlide === slides.length - 1;
+
+      const hash = `#slide-${currentSlide + 1}`;
+      if (location.hash !== hash) {
+        history.replaceState(null, "", hash);
+      }
+    }
+
+    function nextSlide() {
+      showSlide(currentSlide + 1);
+    }
+
+    function previousSlide() {
+      showSlide(currentSlide - 1);
+    }
+
+    function backgroundUrls() {
+      return Array.from(document.querySelectorAll("*")).flatMap((element) => {
+        const image = getComputedStyle(element).backgroundImage;
+        return Array.from(image.matchAll(/url\((?:"|')?(.*?)(?:"|')?\)/g), (match) => match[1]);
+      });
+    }
+
+    function loadImage(src) {
+      return new Promise((resolve) => {
+        const image = new Image();
+        image.onload = resolve;
+        image.onerror = resolve;
+        image.src = src;
+        if (image.complete) resolve();
+      });
+    }
+
+    async function markAssetsReady() {
+      const imageSources = Array.from(document.images, (image) => image.currentSrc || image.src);
+      await Promise.all([...imageSources, ...backgroundUrls()].filter(Boolean).map(loadImage));
+
+      if (document.fonts && document.fonts.ready) {
+        await document.fonts.ready;
+      }
+
+      const ready = document.createElement("div");
+      ready.id = "assets-ready";
+      ready.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;";
+      document.body.appendChild(ready);
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === " ") {
+        event.preventDefault();
+        nextSlide();
+      }
+
+      if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        previousSlide();
+      }
+    });
+
+    prevButton.addEventListener("click", previousSlide);
+    nextButton.addEventListener("click", nextSlide);
+
+    let touchStartX = 0;
+    document.addEventListener("touchstart", (event) => {
+      touchStartX = event.changedTouches[0].clientX;
+    }, { passive: true });
+
+    document.addEventListener("touchend", (event) => {
+      const delta = event.changedTouches[0].clientX - touchStartX;
+      if (Math.abs(delta) > 48) {
+        delta < 0 ? nextSlide() : previousSlide();
+      }
+    }, { passive: true });
+
+    function slideFromHash() {
+      const match = location.hash.match(/(?:slide-)?(\d+)/);
+      return match ? Number(match[1]) - 1 : 0;
+    }
+
+    window.addEventListener("hashchange", () => showSlide(slideFromHash()));
+
+    renderDeckMetadata(window.soulDeckData);
+    renderTables(window.soulDeckData.immobili);
+    renderConsideredList(window.soulDeckData.immobili);
+    showSlide(slideFromHash());
+    markAssetsReady();
+  </script>
+</body>
+</html>

@@ -78,6 +78,7 @@ services:
       NEURALWATT_API_URL: ${NEURALWATT_API_URL:-https://api.neuralwatt.com/v1/chat/completions}
       NEURALWATT_MODEL: ${NEURALWATT_MODEL:-qwen3.6-35b-fast}
       NEURALWATT_CAPTCHA_PROMPT: ${NEURALWATT_CAPTCHA_PROMPT:-}
+      CHROMIUM_EXECUTABLE_PATH: ${CHROMIUM_EXECUTABLE_PATH:-/usr/bin/chromium}
     ports:
       - "${API_PORT:-3000}:3000"
     volumes:

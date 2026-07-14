@@ -61,6 +61,19 @@ model FeasibilityStudy {
   updatedAt          DateTime       @updatedAt
   properties         Property[]
   versions           StudyVersion[]
+  presentations      PresentationDeck[]
+}
+
+model PresentationDeck {
+  id          String           @id @default(cuid())
+  studyId     String
+  propertyIds Json
+  snapshot    Json
+  fileName    String
+  createdAt   DateTime         @default(now())
+  study       FeasibilityStudy @relation(fields: [studyId], references: [id], onDelete: Cascade)
+
+  @@index([studyId, createdAt])
 }
 
 model StudyVersion {

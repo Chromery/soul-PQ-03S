@@ -16,6 +16,7 @@ import {
   CircleHelp,
   Clock3,
   ClipboardList,
+  Copy,
   Download,
   Euro,
   ExternalLink,
@@ -60,7 +61,7 @@ import {
 import { openEntriesInForMaps, toForMapsEntries, toForMapsEntry } from "./formaps";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.44.20";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.45.0";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -149,6 +150,17 @@ type FeasibilityStudy = {
   notes: string;
   erpUrl: string;
   properties: PropertyItem[];
+};
+
+type PresentationDeck = {
+  id: string;
+  studyId: string;
+  propertyIds: string[];
+  propertyCount: number;
+  fileName: string;
+  createdAt: string;
+  htmlUrl: string;
+  pdfUrl: string;
 };
 
 type StudyUpdate = Partial<Pick<FeasibilityStudy, "status" | "notes">>;
@@ -2062,7 +2074,6 @@ function App() {
   const [sidePanelCollapsed, setSidePanelCollapsed] = useState(() => {
     return window.localStorage.getItem("soul-summary-panel-collapsed") === "true";
   });
-  const [presentationFiles, setPresentationFiles] = useState<Record<string, File>>({});
   const [editorDirty, setEditorDirty] = useState(false);
   const [newStudyModalOpen, setNewStudyModalOpen] = useState(false);
   const [newStudyBusy, setNewStudyBusy] = useState(false);
@@ -2430,11 +2441,6 @@ function App() {
     }
   }
 
-  function attachPresentation(studyId: string, file: File) {
-    setPresentationFiles((current) => ({ ...current, [studyId]: file }));
-    flash("Presentazione caricata per la sessione corrente.");
-  }
-
   function downloadCsv(filename: string, headers: string[], rows: Array<Array<string | number>>) {
     const csv = [headers, ...rows]
       .map((row) =>
@@ -2612,8 +2618,6 @@ function App() {
           onDeleteProperties={(propertyIds) => deletePropertiesFromStudy(activeStudy.id, propertyIds)}
           onPropertyEstimateChange={updatePropertyEstimatedValue}
           onOutcomeChange={updatePropertyOutcome}
-          presentationFile={presentationFiles[activeStudy.id]}
-          onPresentationUpload={(file) => attachPresentation(activeStudy.id, file)}
           onOpenEditor={(property) =>
             navigate({ view: "editor", studyId: activeStudy.id, propertyId: property.id })
           }
@@ -2978,8 +2982,6 @@ function App() {
                       onUpdate={(input) => updateStudy(study.id, input)}
                       onOutcomeChange={updatePropertyOutcome}
                       onNotice={flash}
-                      presentationFile={presentationFiles[study.id]}
-                      onPresentationUpload={(file) => attachPresentation(study.id, file)}
                     />
                   ))}
                 </tbody>
@@ -4191,8 +4193,6 @@ function StudyRows({
   onUpdate,
   onOutcomeChange,
   onNotice,
-  presentationFile,
-  onPresentationUpload,
 }: {
   study: FeasibilityStudy;
   expanded: boolean;
@@ -4206,8 +4206,6 @@ function StudyRows({
   onUpdate: (input: StudyUpdate) => Promise<boolean>;
   onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
   onNotice: (message: string) => void;
-  presentationFile?: File;
-  onPresentationUpload: (file: File) => void;
 }) {
   const counts = getCounts(study);
   const [savingStatus, setSavingStatus] = useState(false);
@@ -4378,9 +4376,7 @@ function StudyRows({
                   </div>
                   <div className="summary-actions">
                     <PresentationAction
-                      studyId={study.id}
-                      file={presentationFile}
-                      onUpload={onPresentationUpload}
+                      study={study}
                       onNotice={onNotice}
                     />
                     <a className="button secondary" href={study.erpUrl} target="_blank" rel="noreferrer">
@@ -4607,88 +4603,284 @@ function PropertyRow({
 }
 
 function PresentationAction({
-  studyId,
-  file,
-  onUpload,
+  study,
   onNotice,
 }: {
-  studyId: string;
-  file?: File;
-  onUpload: (file: File) => void;
+  study: FeasibilityStudy;
   onNotice: (message: string) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const uploadInput = useRef<HTMLInputElement>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedPropertyIds, setSelectedPropertyIds] = useState<string[]>(() => defaultPresentationPropertyIds(study));
+  const [latestDeck, setLatestDeck] = useState<PresentationDeck | null>(null);
+  const [generatedDeck, setGeneratedDeck] = useState<PresentationDeck | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  function generatePresentation() {
-    setMenuOpen(false);
-    onNotice("La generazione sarà disponibile con il servizio documentale.");
-  }
+  useEffect(() => {
+    const abortController = new AbortController();
+    fetch(`${API_BASE_URL}/studies/${encodeURIComponent(study.id)}/presentations`, {
+      signal: abortController.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<PresentationDeck[]>;
+      })
+      .then((decks) => setLatestDeck(Array.isArray(decks) ? decks[0] ?? null : null))
+      .catch((error) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.error("Impossibile caricare le presentazioni dello studio", error);
+        }
+      });
+    return () => abortController.abort();
+  }, [study.id]);
 
-  function promptUpload() {
-    setMenuOpen(false);
-    uploadInput.current?.click();
-  }
-
-  function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
-    const selectedFile = event.target.files?.[0];
-    if (!selectedFile) return;
-    onUpload(selectedFile);
-    event.target.value = "";
-  }
-
-  function downloadPresentation() {
-    if (!file) {
-      generatePresentation();
-      return;
+  useEffect(() => {
+    if (!modalOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) setModalOpen(false);
     }
-    const url = URL.createObjectURL(file);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [busy, modalOpen]);
+
+  function openGenerator() {
+    setMenuOpen(false);
+    setSelectedPropertyIds(defaultPresentationPropertyIds(study));
+    setGeneratedDeck(null);
+    setModalOpen(true);
+  }
+
+  function toggleProperty(propertyId: string) {
+    setSelectedPropertyIds((current) => current.includes(propertyId)
+      ? current.filter((id) => id !== propertyId)
+      : [...current, propertyId]);
+  }
+
+  async function generatePresentation() {
+    if (selectedPropertyIds.length === 0 || busy) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/studies/${encodeURIComponent(study.id)}/presentations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyIds: selectedPropertyIds }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { message?: string | string[] } | null;
+        const message = Array.isArray(payload?.message) ? payload.message.join(". ") : payload?.message;
+        throw new Error(message || `HTTP ${response.status}`);
+      }
+      const deck = (await response.json()) as PresentationDeck;
+      setGeneratedDeck(deck);
+      setLatestDeck(deck);
+      onNotice("Presentazione generata e salvata.");
+    } catch (error) {
+      console.error(error);
+      onNotice(error instanceof Error ? error.message : "Impossibile generare la presentazione.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function downloadPdf(deck: PresentationDeck) {
     const link = document.createElement("a");
-    link.href = url;
-    link.download = file.name || `${studyId}-presentazione.pptx`;
+    link.href = deck.pdfUrl;
     link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    onNotice("Download presentazione avviato.");
+    onNotice("Generazione PDF avviata: il primo download può richiedere qualche secondo.");
+  }
+
+  async function copyDeckLink(deck: PresentationDeck) {
+    const url = new URL(deck.htmlUrl, window.location.origin).toString();
+    try {
+      await copyText(url);
+      onNotice("Link HTML copiato.");
+    } catch {
+      onNotice("Impossibile copiare il link: apri la presentazione e copia l'indirizzo dal browser.");
+    }
   }
 
   return (
-    <div className="split-action">
-      <button className="button secondary split-primary" type="button" onClick={file ? downloadPresentation : generatePresentation}>
-        <Presentation size={16} />
-        {file ? "Download presentazione" : "Genera presentazione"}
-      </button>
-      <button
-        className="button secondary split-toggle"
-        type="button"
-        aria-label="Altre azioni presentazione"
-        aria-expanded={menuOpen}
-        onClick={() => setMenuOpen((open) => !open)}
-      >
-        <ChevronDown size={15} />
-      </button>
-      {menuOpen && (
-        <div className="split-menu">
-          {file && (
-            <button type="button" onClick={generatePresentation}>
-              <Presentation size={15} />
-              Genera presentazione
+    <>
+      <div className="split-action">
+        <button
+          className="button secondary split-primary"
+          type="button"
+          disabled={study.properties.length === 0}
+          title={study.properties.length === 0 ? "Aggiungi almeno un immobile allo studio" : undefined}
+          onClick={openGenerator}
+        >
+          <Presentation size={16} />
+          Genera presentazione
+        </button>
+        <button
+          className="button secondary split-toggle"
+          type="button"
+          disabled={!latestDeck}
+          aria-label="Apri o scarica l'ultima presentazione"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          <ChevronDown size={15} />
+        </button>
+        {menuOpen && latestDeck && (
+          <div className="split-menu">
+            <button type="button" onClick={() => window.open(latestDeck.htmlUrl, "_blank", "noopener,noreferrer")}>
+              <ExternalLink size={15} />
+              Apri ultima versione HTML
             </button>
-          )}
-          <button type="button" onClick={promptUpload}>
-            <Upload size={15} />
-            Carica presentazione
-          </button>
+            <button type="button" onClick={() => downloadPdf(latestDeck)}>
+              <Download size={15} />
+              Scarica ultima versione PDF
+            </button>
+            <button type="button" onClick={() => void copyDeckLink(latestDeck)}>
+              <Copy size={15} />
+              Copia link HTML
+            </button>
+          </div>
+        )}
+      </div>
+
+      {modalOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !busy) setModalOpen(false);
+          }}
+        >
+          <section
+            className="editor-modal presentation-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`presentation-title-${study.id}`}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="modal-head">
+              <div>
+                <h2 id={`presentation-title-${study.id}`}>Genera presentazione cliente</h2>
+                <p>{study.company} · {study.id}</p>
+              </div>
+              <button className="icon-button" type="button" disabled={busy} onClick={() => setModalOpen(false)} aria-label="Chiudi">
+                <X size={16} />
+              </button>
+            </div>
+
+            <p className="modal-note">
+              Seleziona gli immobili da includere. La versione generata resta uno snapshot consultabile tramite link e scaricabile in PDF.
+            </p>
+
+            <div className="presentation-selection-toolbar">
+              <strong>{selectedPropertyIds.length}/{study.properties.length} selezionati</strong>
+              <div>
+                <button type="button" onClick={() => setSelectedPropertyIds(study.properties.map((property) => property.id))}>Tutti</button>
+                <button type="button" onClick={() => setSelectedPropertyIds(study.properties.filter((property) => property.outcome === "Positivo").map((property) => property.id))}>Solo positivi</button>
+                <button type="button" onClick={() => setSelectedPropertyIds([])}>Nessuno</button>
+              </div>
+            </div>
+
+            <div className="presentation-property-list">
+              {study.properties.map((property) => {
+                const incomplete = presentationPropertyHasIncompleteData(property);
+                return (
+                  <label key={property.id} className={selectedPropertyIds.includes(property.id) ? "selected" : ""}>
+                    <input
+                      type="checkbox"
+                      checked={selectedPropertyIds.includes(property.id)}
+                      onChange={() => toggleProperty(property.id)}
+                    />
+                    <div>
+                      <strong>{propertyLocation(property)}</strong>
+                      <span>
+                        {property.id} · {property.categoria} · {cadastralPropertyReference(property)}
+                      </span>
+                      <small>
+                        Rendita {formatEuro(property.currentRendita)} → {formatEstimatedValue(property.estimatedRendita)} · IMU {property.currentImu == null ? "n.d." : formatEuro(property.currentImu)} → {property.estimatedImu == null ? "n.d." : formatEuro(property.estimatedImu)}
+                      </small>
+                    </div>
+                    <span className={`presentation-data-state ${incomplete ? "warning" : "ready"}`}>
+                      {incomplete ? "Dati incompleti" : property.outcome}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+
+            {generatedDeck && (
+              <div className="presentation-ready-card">
+                <div>
+                  <CheckCircle2 size={19} />
+                  <span>
+                    <strong>Presentazione pronta</strong>
+                    {generatedDeck.propertyCount} immobili · {formatDateTime(generatedDeck.createdAt)}
+                  </span>
+                </div>
+                <div>
+                  <a className="button secondary" href={generatedDeck.htmlUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink size={15} />
+                    Apri HTML
+                  </a>
+                  <button className="button secondary" type="button" onClick={() => downloadPdf(generatedDeck)}>
+                    <Download size={15} />
+                    Scarica PDF
+                  </button>
+                  <button className="button secondary" type="button" onClick={() => void copyDeckLink(generatedDeck)}>
+                    <Copy size={15} />
+                    Copia link
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="modal-actions presentation-modal-actions">
+              <button className="button secondary" type="button" onClick={() => setModalOpen(false)} disabled={busy}>
+                Chiudi
+              </button>
+              <button className="button primary" type="button" disabled={busy || selectedPropertyIds.length === 0} onClick={() => void generatePresentation()}>
+                <Presentation size={15} />
+                {busy ? "Generazione..." : generatedDeck ? "Genera nuova versione" : "Genera presentazione"}
+              </button>
+            </div>
+          </section>
         </div>
       )}
-      <input
-        ref={uploadInput}
-        type="file"
-        accept=".ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        hidden
-        onChange={handleUpload}
-      />
-    </div>
+    </>
   );
+}
+
+function defaultPresentationPropertyIds(study: FeasibilityStudy) {
+  const positiveIds = study.properties
+    .filter((property) => property.outcome === "Positivo")
+    .map((property) => property.id);
+  return positiveIds.length > 0 ? positiveIds : study.properties.map((property) => property.id);
+}
+
+function presentationPropertyHasIncompleteData(property: PropertyItem) {
+  return property.estimatedRendita <= 0 || property.currentImu == null || property.estimatedImu == null;
+}
+
+function cadastralPropertyReference(property: PropertyItem) {
+  const values = [
+    property.foglio ? `Fg. ${property.foglio}` : null,
+    property.particella ? `Part. ${property.particella}` : null,
+    property.subalterno ? `Sub. ${property.subalterno}` : null,
+  ].filter(Boolean);
+  return values.length > 0 ? values.join(" · ") : "dati catastali non disponibili";
+}
+
+async function copyText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("Clipboard non disponibile");
 }
 
 function StudyDetail({
@@ -4703,8 +4895,6 @@ function StudyDetail({
   onDeleteProperties,
   onPropertyEstimateChange,
   onOutcomeChange,
-  presentationFile,
-  onPresentationUpload,
 }: {
   study: FeasibilityStudy;
   onBack: () => void;
@@ -4722,8 +4912,6 @@ function StudyDetail({
     imuCalculation?: PropertyImuCalculation | null,
   ) => void;
   onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
-  presentationFile?: File;
-  onPresentationUpload: (file: File) => void;
 }) {
   const counts = getCounts(study);
   const positiveShare = Math.round((counts.positive / Math.max(counts.total, 1)) * 100);
@@ -4932,9 +5120,7 @@ function StudyDetail({
         </div>
         <div className="detail-actions">
           <PresentationAction
-            studyId={study.id}
-            file={presentationFile}
-            onUpload={onPresentationUpload}
+            study={study}
             onNotice={onNotice}
           />
           <button className="button secondary" onClick={onExport}>

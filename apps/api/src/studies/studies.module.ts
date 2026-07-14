@@ -7,5 +7,6 @@ import { StudiesService } from "./studies.service.js";
   imports: [PriceListsModule],
   controllers: [StudiesController],
   providers: [StudiesService],
+  exports: [StudiesService],
 })
 export class StudiesModule {}

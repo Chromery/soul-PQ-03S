@@ -8,6 +8,7 @@ import { FormapsCaptchaModule } from "./formaps-captcha/formaps-captcha.module.j
 import { ImuModule } from "./imu/imu.module.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { PriceListsModule } from "./price-lists/price-lists.module.js";
+import { PresentationsModule } from "./presentations/presentations.module.js";
 import { PropertiesModule } from "./properties/properties.module.js";
 import { ScaleExtractionModule } from "./scale-extraction/scale-extraction.module.js";
 import { StudiesModule } from "./studies/studies.module.js";
@@ -26,6 +27,7 @@ process.env.DATABASE_URL ??= localDatabaseUrl();
     StudiesModule,
     PropertiesModule,
     PriceListsModule,
+    PresentationsModule,
     ErpSyncModule,
     FormapsCaptchaModule,
     ScaleExtractionModule,

@@ -2042,6 +2042,194 @@ a.button {
   font-weight: 700;
 }
 
+.presentation-modal {
+  width: min(960px, calc(100vw - 48px));
+  max-height: calc(100dvh - 48px);
+  align-content: start;
+  overflow: auto;
+}
+
+.presentation-modal .modal-head {
+  align-items: flex-start;
+}
+
+.presentation-modal .modal-head p {
+  margin: 4px 0 0;
+  color: var(--secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.presentation-selection-toolbar {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 7px 9px 7px 12px;
+  border: 1px solid #d8e6f7;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.presentation-selection-toolbar > strong {
+  color: #173154;
+  font-size: 13px;
+}
+
+.presentation-selection-toolbar > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.presentation-selection-toolbar button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid #cfe0f5;
+  border-radius: 6px;
+  color: #24527f;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.presentation-selection-toolbar button:hover {
+  border-color: #91bdf0;
+  background: #eef6ff;
+}
+
+.presentation-property-list {
+  max-height: min(48dvh, 470px);
+  display: grid;
+  gap: 7px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.presentation-property-list > label {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 11px;
+  border: 1px solid #dbe5f0;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.presentation-property-list > label:hover,
+.presentation-property-list > label.selected {
+  border-color: #8fc2ff;
+  background: #f7fbff;
+}
+
+.presentation-property-list input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--primary);
+}
+
+.presentation-property-list label > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.presentation-property-list label > div strong,
+.presentation-property-list label > div span,
+.presentation-property-list label > div small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presentation-property-list label > div strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.presentation-property-list label > div span {
+  color: #526172;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.presentation-property-list label > div small {
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.presentation-data-state {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.presentation-data-state.ready {
+  color: #137052;
+  background: #e3f7ef;
+}
+
+.presentation-data-state.warning {
+  color: #8a4b08;
+  background: #fff2d9;
+}
+
+.presentation-ready-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #a7dfcb;
+  border-radius: 8px;
+  background: #f0fbf7;
+}
+
+.presentation-ready-card > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.presentation-ready-card > div:first-child {
+  color: #137052;
+}
+
+.presentation-ready-card > div:first-child span {
+  display: grid;
+  gap: 2px;
+  color: #526172;
+  font-size: 12px;
+}
+
+.presentation-ready-card > div:first-child strong {
+  color: #155d48;
+  font-size: 13px;
+}
+
+.presentation-ready-card .button {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.presentation-modal-actions {
+  align-items: center;
+  padding-top: 2px;
+}
+
 .new-study-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5708,6 +5896,28 @@ a.button {
 
   .new-study-modal {
     width: min(100%, calc(100vw - 36px));
+  }
+
+  .presentation-modal {
+    width: min(100%, calc(100vw - 36px));
+  }
+
+  .presentation-selection-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .presentation-selection-toolbar > div {
+    justify-content: flex-start;
+  }
+
+  .presentation-property-list > label {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .presentation-data-state {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .new-study-form-grid {
