@@ -130,7 +130,6 @@ export class PropertiesService {
             : {
                 estimatedRendita: totalEstimatedRendita,
                 diffPercent: percentageDiff(Number(property.currentRendita), totalEstimatedRendita),
-                currentImu,
                 estimatedImu: estimatedImu ?? undefined,
                 imuDiff: estimatedImu === null || currentImu === null ? undefined : estimatedImu - currentImu,
                 hasStudy: true,

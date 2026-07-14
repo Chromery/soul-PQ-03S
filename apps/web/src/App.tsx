@@ -48,6 +48,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import type { ImuValueSource, PropertyImuCalculation } from "./imu";
 import {
   DEFAULT_EDITOR_PREFERENCES,
   type EditorPreferences,
@@ -82,26 +83,6 @@ type PriceListItem = {
   downloadUrl: string;
 };
 
-type PropertyImuCalculation =
-  | {
-      status: "calculated";
-      amount: number;
-      taxableBase: number;
-      cadastralMultiplier: number;
-      ratePercent: number;
-      rateYear: number;
-      usedFallback: boolean;
-      rateKind: "group_d" | "rural_instrumental" | "other_buildings";
-      actNumber: string;
-      actDate: string;
-      sourceUrl: string;
-    }
-  | {
-      status: "unavailable";
-      reason: "invalid_input" | "municipality_not_found" | "unsupported_document" | "rate_not_found";
-      targetYear: number;
-    };
-
 type PropertyItem = {
   id: string;
   address: string;
@@ -120,6 +101,9 @@ type PropertyItem = {
   estimatedImu?: number | null;
   imuDiff: number;
   imuCalculation?: PropertyImuCalculation;
+  currentImuCalculation?: PropertyImuCalculation | null;
+  currentImuSource?: ImuValueSource;
+  estimatedImuSource?: ImuValueSource;
   displayOrder?: number;
   outcome: PropertyOutcome;
   hasStudy: boolean;
@@ -2004,6 +1988,7 @@ function propertyWithEstimatedValue(
       ? {}
       : {
           estimatedImu,
+          estimatedImuSource: imuCalculation?.status === "calculated" ? "calculated" as const : property.estimatedImuSource,
           imuDiff: estimatedImu === null || property.currentImu === null || property.currentImu === undefined
             ? 0
             : estimatedImu - property.currentImu,
@@ -5601,6 +5586,8 @@ function PropertyAreaDetail({
           </details>
         )}
 
+        <ImuCalculationBreakdown property={property} />
+
         {!draft && draftState.loading ? (
           <div className="property-area-empty">
             <FileText size={22} />
@@ -5845,15 +5832,159 @@ function ImuEstimate({ property }: { property: PropertyItem }) {
   }
   if (!calculation || calculation.status !== "calculated") return <>{formatEuro(property.estimatedImu)}</>;
   const rateLabel = calculation.ratePercent.toLocaleString("it-IT", { maximumFractionDigits: 3 });
-  const sourceLabel = `${rateLabel}% · ${calculation.rateYear}${calculation.usedFallback ? " fallback" : ""}`;
+  const sourceLabel = `Formula · ${rateLabel}% · ${calculation.rateYear}${calculation.usedFallback ? " fallback" : ""}`;
   return (
     <div className="imu-estimate">
       <strong>{formatEuro(property.estimatedImu)}</strong>
-      <a href={calculation.sourceUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+      <a
+        href={calculation.sourceUrl}
+        target="_blank"
+        rel="noreferrer"
+        title={imuFormulaText(property.estimatedRendita, calculation)}
+        onClick={(event) => event.stopPropagation()}
+      >
         {sourceLabel}
       </a>
     </div>
   );
+}
+
+function ImuCalculationBreakdown({ property }: { property: PropertyItem }) {
+  const calculation = property.imuCalculation;
+  const currentCalculation = property.currentImuCalculation;
+  const currentImuSource = property.currentImuSource
+    ?? (property.currentImu === null || property.currentImu === undefined ? "unavailable" : "stored");
+  return (
+    <section className="imu-calculation-card" aria-labelledby={`imu-calculation-${property.id}`}>
+      <div className="imu-calculation-head">
+        <div>
+          <span>Trasparenza del calcolo</span>
+          <h3 id={`imu-calculation-${property.id}`}>Calcolo IMU prevista</h3>
+        </div>
+        {calculation?.status === "calculated" && (
+          <strong className="imu-calculation-total">{formatEuro(calculation.amount)}</strong>
+        )}
+      </div>
+
+      {calculation?.status === "calculated" ? (
+        <>
+          <ImuFormulaSteps rendita={property.estimatedRendita} calculation={calculation} />
+          <div className="imu-calculation-source">
+            <div>
+              <span>Aliquota applicata</span>
+              <strong>
+                {formatImuRate(calculation.ratePercent)} · {imuRateKindLabel(calculation.rateKind)}
+              </strong>
+              <small>
+                {calculation.municipality} ({calculation.province}) · anno {calculation.rateYear}
+                {calculation.usedFallback ? " · fallback perché non è disponibile il 2026" : ""}
+              </small>
+            </div>
+            <div>
+              <span>Fonte</span>
+              <strong>
+                Delibera{calculation.actNumber ? ` n. ${calculation.actNumber}` : ""}
+                {calculation.actDate ? ` del ${calculation.actDate}` : ""}
+              </strong>
+              <small>
+                {calculation.publicationDate ? `Pubblicata il ${calculation.publicationDate} · ` : ""}
+                codice catastale {calculation.cadastralCode}
+              </small>
+            </div>
+            <a href={calculation.sourceUrl} target="_blank" rel="noreferrer">
+              <ExternalLink size={14} />
+              Apri la delibera sorgente
+            </a>
+          </div>
+          <p className="imu-calculation-assumption">
+            Stima annuale ordinaria su quota imponibile 100%. Non applica mesi o quote di possesso, detrazioni o agevolazioni soggettive.
+          </p>
+        </>
+      ) : (
+        <div className="imu-calculation-unavailable">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>Formula automatica non disponibile</strong>
+            <span>{imuUnavailableReason(calculation?.reason)}</span>
+            {property.estimatedImu !== null && property.estimatedImu !== undefined && (
+              <small>L’IMU prevista mostrata, {formatEuro(property.estimatedImu)}, è un dato registrato e non ricalcolato da PQ.</small>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="imu-current-source">
+        <div>
+          <span>IMU attuale</span>
+          <strong>{property.currentImu === null || property.currentImu === undefined ? "Non disponibile" : formatEuro(property.currentImu)}</strong>
+        </div>
+        <p>
+          {currentImuSource === "calculated"
+            ? "Calcolata da PQ dalla rendita attuale perché il dato registrato non era disponibile."
+            : currentImuSource === "stored"
+              ? "Dato registrato nell’ERP o inserito manualmente: PQ non lo ha ricalcolato."
+              : "Né il dato registrato né un’aliquota calcolabile sono disponibili."}
+        </p>
+        {currentImuSource === "calculated" && currentCalculation?.status === "calculated" && (
+          <details>
+            <summary>Mostra formula IMU attuale</summary>
+            <ImuFormulaSteps rendita={property.currentRendita} calculation={currentCalculation} compact />
+          </details>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ImuFormulaSteps({
+  rendita,
+  calculation,
+  compact = false,
+}: {
+  rendita: number;
+  calculation: Extract<PropertyImuCalculation, { status: "calculated" }>;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`imu-formula-steps ${compact ? "compact" : ""}`}>
+      <div>
+        <span>1. Base imponibile</span>
+        <code>
+          {formatEuro(rendita)} × 1,05 × {calculation.cadastralMultiplier} = {formatEuro(calculation.taxableBase)}
+        </code>
+        {!compact && <small>Rendita × rivalutazione del 5% × moltiplicatore della categoria catastale.</small>}
+      </div>
+      <div>
+        <span>2. Imposta annua</span>
+        <code>
+          {formatEuro(calculation.taxableBase)} × {formatImuRate(calculation.ratePercent)} = {formatEuro(calculation.amount)}
+        </code>
+        {!compact && <small>Base imponibile × aliquota comunale selezionata dalla delibera.</small>}
+      </div>
+    </div>
+  );
+}
+
+function formatImuRate(value: number) {
+  return `${value.toLocaleString("it-IT", { minimumFractionDigits: 0, maximumFractionDigits: 3 })}%`;
+}
+
+function imuRateKindLabel(kind: Extract<PropertyImuCalculation, { status: "calculated" }>["rateKind"]) {
+  if (kind === "group_d") return "gruppo catastale D";
+  if (kind === "rural_instrumental") return "fabbricato rurale strumentale";
+  return "altri fabbricati";
+}
+
+function imuUnavailableReason(reason?: Extract<PropertyImuCalculation, { status: "unavailable" }>["reason"]) {
+  if (reason === "municipality_not_found") return "Non è stata trovata una delibera 2026 o 2025 per comune e provincia.";
+  if (reason === "unsupported_document") return "La fonte è una delibera IMI/IMIS a formato libero e richiede una regola provinciale strutturata.";
+  if (reason === "rate_not_found") return "La delibera non contiene un’aliquota ordinaria compatibile con la categoria catastale.";
+  return "I dati catastali necessari al calcolo sono incompleti o non validi.";
+}
+
+function imuFormulaText(rendita: number, calculation: Extract<PropertyImuCalculation, { status: "calculated" }>) {
+  return `${formatEuro(rendita)} × 1,05 × ${calculation.cadastralMultiplier} = ${formatEuro(calculation.taxableBase)}; `
+    + `${formatEuro(calculation.taxableBase)} × ${formatImuRate(calculation.ratePercent)} = ${formatEuro(calculation.amount)}`;
 }
 
 function StatusBadge({ status }: { status: StudyStatus }) {

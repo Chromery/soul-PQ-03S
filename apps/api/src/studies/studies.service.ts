@@ -330,6 +330,16 @@ export class StudiesService {
       : Number(property.currentImu);
     const estimatedImu = calculatedAmount(estimatedImuCalculation)
       ?? (property.estimatedImu === null ? null : Number(property.estimatedImu));
+    const currentImuSource = property.currentImu !== null
+      ? "stored"
+      : currentImuCalculation.status === "calculated"
+        ? "calculated"
+        : "unavailable";
+    const estimatedImuSource = estimatedImuCalculation?.status === "calculated"
+      ? "calculated"
+      : property.estimatedImu !== null
+        ? "stored"
+        : "unavailable";
     return {
       id: property.id,
       address: property.address,
@@ -348,6 +358,9 @@ export class StudiesService {
       estimatedImu,
       imuDiff: estimatedImu === null || currentImu === null ? 0 : estimatedImu - currentImu,
       imuCalculation: estimatedImuCalculation,
+      currentImuCalculation: currentImuSource === "calculated" ? currentImuCalculation : null,
+      currentImuSource,
+      estimatedImuSource,
       displayOrder: property.displayOrder,
       outcome: normalizePropertyOutcome(property.outcome),
       hasStudy: property.hasStudy,

@@ -2502,6 +2502,184 @@ a.button {
   text-decoration: underline;
 }
 
+.imu-calculation-card {
+  margin: 14px 0;
+  padding: 16px;
+  border: 1px solid #cddff5;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #f7fbff 0%, #fff 58%);
+  box-shadow: 0 10px 26px rgba(15, 55, 96, 0.06);
+}
+
+.imu-calculation-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 13px;
+}
+
+.imu-calculation-head span,
+.imu-calculation-source span,
+.imu-current-source span,
+.imu-formula-steps span {
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.imu-calculation-head h3 {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: 17px;
+}
+
+.imu-calculation-total {
+  color: var(--primary-dark);
+  font-size: 22px;
+}
+
+.imu-formula-steps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.imu-formula-steps > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #dce9f8;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.imu-formula-steps code {
+  overflow-wrap: anywhere;
+  color: #0b3a70;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.imu-formula-steps small,
+.imu-calculation-source small,
+.imu-calculation-unavailable small {
+  color: var(--secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.imu-formula-steps.compact {
+  margin-top: 10px;
+}
+
+.imu-calculation-source {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #e4edf7;
+  border-radius: 9px;
+  background: #f9fbfe;
+}
+
+.imu-calculation-source > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.imu-calculation-source strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.imu-calculation-source a {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid #bcd3ee;
+  border-radius: 7px;
+  color: var(--primary-dark);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.imu-calculation-source a:hover {
+  border-color: var(--primary);
+}
+
+.imu-calculation-assumption {
+  margin: 10px 2px 0;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.imu-current-source {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 16px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #dce7f3;
+}
+
+.imu-current-source > div {
+  display: grid;
+  gap: 2px;
+}
+
+.imu-current-source > p {
+  margin: 0;
+  color: #526175;
+  font-size: 12px;
+}
+
+.imu-current-source details {
+  grid-column: 1 / -1;
+}
+
+.imu-current-source summary {
+  color: var(--primary-dark);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.imu-calculation-unavailable {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #f3d6a2;
+  border-radius: 9px;
+  color: #8a4b08;
+  background: #fffaf0;
+}
+
+.imu-calculation-unavailable > div {
+  display: grid;
+  gap: 3px;
+}
+
+.imu-calculation-unavailable span {
+  font-size: 12px;
+}
+
 .property-area-detail {
   margin: 16px -18px -18px;
   padding: 16px 18px 18px;
@@ -5464,6 +5642,15 @@ a.button {
     display: inline;
   }
 
+  .imu-formula-steps,
+  .imu-calculation-source {
+    grid-template-columns: 1fr;
+  }
+
+  .imu-calculation-source a {
+    justify-self: start;
+  }
+
   .brand img {
     width: 138px;
   }
@@ -5588,6 +5775,15 @@ a.button {
 
   .global-search {
     max-width: none;
+  }
+
+  .imu-calculation-head,
+  .imu-current-source {
+    grid-template-columns: 1fr;
+  }
+
+  .imu-calculation-head {
+    display: grid;
   }
 
   .toast {

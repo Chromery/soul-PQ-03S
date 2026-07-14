@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { DEFAULT_EDITOR_PREFERENCES, readEditorPreferences } from "./editorPreferences";
 import { openEntriesInForMaps, toForMapsEntry } from "./formaps";
+import type { PropertyImuCalculation } from "./imu";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
@@ -289,6 +290,7 @@ type SavedDraft = {
   totalEstimatedAmount?: number;
   totalEstimatedRendita?: number;
   estimatedImu?: number | null;
+  imuCalculation?: PropertyImuCalculation | null;
   selections: SavedSelection[];
 };
 
@@ -432,7 +434,12 @@ type PlanimetriaEditorProps = {
   property: EditorProperty;
   onBack: () => void;
   onDirtyChange?: (dirty: boolean) => void;
-  onDraftSaved?: (propertyId: string, estimatedRendita: number, estimatedImu?: number | null) => void;
+  onDraftSaved?: (
+    propertyId: string,
+    estimatedRendita: number,
+    estimatedImu?: number | null,
+    imuCalculation?: PropertyImuCalculation | null,
+  ) => void;
   onDocumentSaved?: (propertyId: string, fileName: string, downloadUrl: string) => void;
 };
 
@@ -1990,7 +1997,7 @@ export default function PlanimetriaEditor({
       const savedDraft = (await response.json()) as SavedDraft;
       setSavedAt(savedTime);
       setDirty(false);
-      onDraftSaved?.(property.id, totals.rendita, savedDraft.estimatedImu);
+      onDraftSaved?.(property.id, totals.rendita, savedDraft.estimatedImu, savedDraft.imuCalculation);
       setStatus("Bozza salvata nel database");
     } catch (error) {
       console.error(error);
