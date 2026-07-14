@@ -1,9 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type { Browser } from "playwright-core";
+import { PDFDocument } from "pdf-lib";
+import type { Browser, Page } from "playwright-core";
 import { chromium } from "playwright-core";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { StudiesService } from "../studies/studies.service.js";
@@ -13,6 +16,11 @@ import type {
 } from "./presentations.types.js";
 
 const TEMPLATE_URL = new URL("./templates/soul-deck.html", import.meta.url);
+const HYBRID_SLIDES = [
+  { number: 3, format: "jpeg", quality: 93 },
+  { number: 4, format: "jpeg", quality: 93 },
+  { number: 5, format: "png" },
+] as const;
 const ASSET_URLS = {
   __ASSET_LOGO__: { url: new URL("./templates/assets/soul-logo.svg", import.meta.url), contentType: "image/svg+xml" },
   __ASSET_COVER__: { url: new URL("./templates/assets/soul-exterior-mountain-facade.jpg", import.meta.url), contentType: "image/jpeg" },
@@ -113,23 +121,21 @@ export class PresentationsService implements OnModuleDestroy {
     const cached = this.pdfCache.get(id);
     if (cached) return { pdf: cached, fileName: deck.fileName };
 
-    const html = await this.renderSnapshot(deck.snapshot as unknown as PresentationSnapshot);
-    const browser = await this.browser();
-    const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
+    const snapshot = deck.snapshot as unknown as PresentationSnapshot;
+    const html = await this.renderSnapshot(snapshot);
+    const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "soul-pq-slides-export-"));
+    const htmlPath = path.join(temporaryDirectory, "deck.html");
+    const nativePdfPath = path.join(temporaryDirectory, "native.pdf");
     try {
-      await page.setContent(html, { waitUntil: "load", timeout: 30_000 });
-      await page.waitForSelector("#assets-ready", { state: "attached", timeout: 30_000 });
-      await page.emulateMedia({ media: "print" });
-      const pdf = await page.pdf({
-        printBackground: true,
-        preferCSSPageSize: true,
-        displayHeaderFooter: false,
-        tagged: false,
-      });
+      await writeFile(htmlPath, html, "utf8");
+      const browser = await this.browser();
+      await createNativePdf(browser, htmlPath, nativePdfPath);
+      const captures = await captureHybridSlides(browser, htmlPath, temporaryDirectory);
+      const pdf = await composeHybridPdf(nativePdfPath, captures, snapshot);
       this.cachePdf(id, pdf);
       return { pdf, fileName: deck.fileName };
     } finally {
-      await page.close();
+      await rm(temporaryDirectory, { recursive: true, force: true });
     }
   }
 
@@ -173,6 +179,126 @@ export class PresentationsService implements OnModuleDestroy {
     const oldestKey = this.pdfCache.keys().next().value as string | undefined;
     if (oldestKey) this.pdfCache.delete(oldestKey);
   }
+}
+
+type HybridCapture = {
+  format: "jpeg" | "png";
+  path: string;
+};
+
+async function waitForDeck(page: Page) {
+  await page.waitForLoadState("load");
+  await page.waitForSelector("#assets-ready", { state: "attached", timeout: 30_000 });
+  await page.evaluate(async () => {
+    const requestFrame = (globalThis as unknown as {
+      requestAnimationFrame: (callback: () => void) => number;
+    }).requestAnimationFrame;
+    await new Promise<void>((resolve) => requestFrame(() => requestFrame(() => resolve())));
+  });
+}
+
+function exportUrl(input: string, slide = 1) {
+  const url = pathToFileURL(input);
+  url.searchParams.set("export", "1");
+  url.hash = `slide-${slide}`;
+  return url.href;
+}
+
+async function createNativePdf(browser: Browser, input: string, destination: string) {
+  const page = await browser.newPage({
+    viewport: { width: 1600, height: 900 },
+    deviceScaleFactor: 1,
+  });
+  try {
+    await page.goto(exportUrl(input), { waitUntil: "load", timeout: 30_000 });
+    await waitForDeck(page);
+    await page.pdf({
+      path: destination,
+      width: "16in",
+      height: "9in",
+      printBackground: true,
+      margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      preferCSSPageSize: true,
+    });
+  } finally {
+    await page.close();
+  }
+}
+
+async function captureHybridSlides(browser: Browser, input: string, directory: string) {
+  const page = await browser.newPage({
+    viewport: { width: 1600, height: 900 },
+    deviceScaleFactor: 2,
+  });
+  const captures = new Map<number, HybridCapture>();
+  try {
+    for (const slide of HYBRID_SLIDES) {
+      await page.goto(exportUrl(input, slide.number), { waitUntil: "load", timeout: 30_000 });
+      await waitForDeck(page);
+      const extension = slide.format === "jpeg" ? "jpg" : "png";
+      const destination = path.join(directory, `slide-${slide.number}.${extension}`);
+      if (slide.format === "jpeg") {
+        await page.screenshot({
+          path: destination,
+          type: "jpeg",
+          quality: slide.quality,
+          animations: "disabled",
+          fullPage: false,
+        });
+      } else {
+        await page.screenshot({
+          path: destination,
+          type: "png",
+          animations: "disabled",
+          fullPage: false,
+        });
+      }
+      captures.set(slide.number, { format: slide.format, path: destination });
+    }
+  } finally {
+    await page.close();
+  }
+  return captures;
+}
+
+async function composeHybridPdf(
+  nativePdfPath: string,
+  captures: Map<number, HybridCapture>,
+  snapshot: PresentationSnapshot,
+) {
+  const nativePdf = await PDFDocument.load(await readFile(nativePdfPath));
+  const pageCount = nativePdf.getPageCount();
+  const invalidSlide = HYBRID_SLIDES.find((slide) => slide.number > pageCount);
+  if (invalidSlide) {
+    throw new Error(`La presentazione contiene ${pageCount} pagine: impossibile acquisire la pagina ${invalidSlide.number}`);
+  }
+
+  const outputPdf = await PDFDocument.create();
+  const referencePage = nativePdf.getPage(0);
+  const { width, height } = referencePage.getSize();
+
+  for (let slideNumber = 1; slideNumber <= pageCount; slideNumber += 1) {
+    const capture = captures.get(slideNumber);
+    if (!capture) {
+      const [nativePage] = await outputPdf.copyPages(nativePdf, [slideNumber - 1]);
+      outputPdf.addPage(nativePage);
+      continue;
+    }
+
+    const imageBytes = await readFile(capture.path);
+    const image = capture.format === "jpeg"
+      ? await outputPdf.embedJpg(imageBytes)
+      : await outputPdf.embedPng(imageBytes);
+    const page = outputPdf.addPage([width, height]);
+    page.drawImage(image, { x: 0, y: 0, width, height });
+  }
+
+  outputPdf.setTitle("Rideterminazione rendita catastale");
+  outputPdf.setAuthor("Soul S.r.l.");
+  outputPdf.setCreator("Soul slides hybrid exporter");
+  outputPdf.setSubject(`Proposta per ${snapshot.studio.company}`);
+  outputPdf.setCreationDate(new Date(snapshot.generatedAt));
+  return Buffer.from(await outputPdf.save({ useObjectStreams: true }));
 }
 
 async function inlineTemplateAssets() {
