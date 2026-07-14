@@ -6017,20 +6017,16 @@ function ImuEstimate({ property }: { property: PropertyItem }) {
     return <span className="delta muted">Non calcolabile</span>;
   }
   if (!calculation || calculation.status !== "calculated") return <>{formatEuro(property.estimatedImu)}</>;
-  const rateLabel = calculation.ratePercent.toLocaleString("it-IT", { maximumFractionDigits: 3 });
-  const sourceLabel = `Formula · ${rateLabel}% · ${calculation.rateYear}${calculation.usedFallback ? " fallback" : ""}`;
+  const formula = imuFormulaText(property.estimatedRendita, calculation);
   return (
     <div className="imu-estimate">
-      <strong>{formatEuro(property.estimatedImu)}</strong>
-      <a
-        href={calculation.sourceUrl}
-        target="_blank"
-        rel="noreferrer"
-        title={imuFormulaText(property.estimatedRendita, calculation)}
-        onClick={(event) => event.stopPropagation()}
+      <strong
+        className="imu-estimate-value"
+        title={formula}
+        aria-label={`${formatEuro(property.estimatedImu)}. Formula: ${formula}`}
       >
-        {sourceLabel}
-      </a>
+        {formatEuro(property.estimatedImu)}
+      </strong>
     </div>
   );
 }

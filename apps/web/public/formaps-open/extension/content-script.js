@@ -62,25 +62,78 @@
     const panel = document.createElement("div");
     panel.id = "formaps-open-status";
     panel.style.position = "fixed";
-    panel.style.top = "14px";
-    panel.style.right = "14px";
+    panel.style.top = "76px";
+    panel.style.right = "24px";
     panel.style.zIndex = "2147483647";
     panel.style.maxWidth = "360px";
-    panel.style.padding = "13px 15px";
+    panel.style.padding = "10px 12px";
     panel.style.borderRadius = "12px";
     panel.style.background = "#1f2428";
     panel.style.color = "#fff";
     panel.style.font = "13px/1.45 Arial, Helvetica, sans-serif";
     panel.style.boxShadow = "0 10px 28px rgba(0, 0, 0, 0.22)";
-    panel.textContent = "forMaps Open: avvio automazione...";
+    panel.style.transition = "max-width 160ms ease, padding 160ms ease, background 160ms ease";
+
+    const header = document.createElement("div");
+    header.style.display = "flex";
+    header.style.alignItems = "center";
+    header.style.justifyContent = "space-between";
+    header.style.gap = "12px";
+
+    const title = document.createElement("strong");
+    title.textContent = "forMaps Open";
+    title.style.fontSize = "12px";
+    title.style.letterSpacing = "0.02em";
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.textContent = "−";
+    toggle.title = "Comprimi stato forMaps Open";
+    toggle.setAttribute("aria-label", "Comprimi stato forMaps Open");
+    toggle.setAttribute("aria-expanded", "true");
+    toggle.style.width = "24px";
+    toggle.style.height = "24px";
+    toggle.style.flex = "0 0 auto";
+    toggle.style.display = "grid";
+    toggle.style.placeItems = "center";
+    toggle.style.padding = "0";
+    toggle.style.border = "1px solid rgba(255, 255, 255, 0.24)";
+    toggle.style.borderRadius = "7px";
+    toggle.style.color = "#fff";
+    toggle.style.background = "rgba(255, 255, 255, 0.08)";
+    toggle.style.font = "bold 16px/1 Arial, Helvetica, sans-serif";
+    toggle.style.cursor = "pointer";
+
+    const message = document.createElement("div");
+    message.textContent = "Avvio automazione...";
+    message.style.marginTop = "6px";
+    message.style.maxWidth = "336px";
+
+    let collapsed = false;
+    toggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      collapsed = !collapsed;
+      message.hidden = collapsed;
+      toggle.textContent = collapsed ? "+" : "−";
+      toggle.title = collapsed ? "Espandi stato forMaps Open" : "Comprimi stato forMaps Open";
+      toggle.setAttribute("aria-label", toggle.title);
+      toggle.setAttribute("aria-expanded", String(!collapsed));
+      panel.style.padding = collapsed ? "7px 8px" : "10px 12px";
+      panel.style.maxWidth = collapsed ? "150px" : "360px";
+    });
+
+    header.append(title, toggle);
+    panel.append(header, message);
     document.documentElement.append(panel);
-    return panel;
+    return { panel, message };
   }
 
-  const panel = makePanel();
+  const panelUi = makePanel();
+  const panel = panelUi.panel;
 
   function setStatus(message, tone = "info") {
-    panel.textContent = `forMaps Open: ${message}`;
+    panelUi.message.textContent = message;
     panel.style.background = tone === "error" ? "#8a1f11" : tone === "warn" ? "#7a5400" : "#1f2428";
   }
 

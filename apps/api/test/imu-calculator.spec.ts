@@ -21,6 +21,7 @@ test("calcola l'IMU annua rivalutando la rendita e usando il moltiplicatore D", 
   assert.equal(result.amount, 7_234.5);
   assert.equal(result.rateYear, 2026);
   assert.equal(result.usedFallback, false);
+  assert.equal(result.sourceUrl, `/api/imu/delibere/${"a".repeat(64)}`);
 });
 
 test("fa fallback al 2025 quando il comune non ha una delibera 2026", () => {
@@ -73,7 +74,7 @@ function rateRecord(overrides: Partial<ImuRateRecord>): ImuRateRecord {
     actDate: "01/01/2025",
     publicationDate: "02/01/2025",
     sourcePath: "delibere/X001/atto.pdf",
-    sha256: "test",
+    sha256: "a".repeat(64),
     ...overrides,
   };
 }

@@ -79,10 +79,15 @@ services:
       NEURALWATT_MODEL: ${NEURALWATT_MODEL:-qwen3.6-35b-fast}
       NEURALWATT_CAPTCHA_PROMPT: ${NEURALWATT_CAPTCHA_PROMPT:-}
       CHROMIUM_EXECUTABLE_PATH: ${CHROMIUM_EXECUTABLE_PATH:-/usr/bin/chromium}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      IMU_DOCUMENT_CACHE_DIR: /var/lib/soul-pq/imu-delibere
+      IMU_SOURCE_REPOSITORY: ${IMU_SOURCE_REPOSITORY:-Chromery/soul-delibere-rk}
+      IMU_SOURCE_REF: ${IMU_SOURCE_REF:-main}
     ports:
       - "${API_PORT:-3000}:3000"
     volumes:
       - ./backups/postgres:/backups/postgres
+      - imu_delibere_cache:/var/lib/soul-pq/imu-delibere
     healthcheck:
       test:
         [
@@ -111,3 +116,4 @@ services:
 
 volumes:
   postgres_data:
+  imu_delibere_cache:

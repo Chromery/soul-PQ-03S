@@ -2674,20 +2674,12 @@ a.button {
 }
 
 .imu-estimate {
-  display: grid;
-  gap: 2px;
+  display: inline-flex;
   white-space: nowrap;
 }
 
-.imu-estimate a {
-  color: var(--primary-dark);
-  font-size: 11px;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.imu-estimate a:hover {
-  text-decoration: underline;
+.imu-estimate-value {
+  cursor: help;
 }
 
 .imu-calculation-card {
@@ -3503,6 +3495,7 @@ a.button {
 .plan-editor.focus-mode .back-link,
 .plan-editor.focus-mode .plan-editor-title .eyebrow,
 .plan-editor.focus-mode .plan-editor-title p,
+.plan-editor.focus-mode .plan-editor-meta-row,
 .plan-editor.focus-mode .draft-state,
 .plan-editor.focus-mode .plan-editor-actions .button {
   display: none;
@@ -3558,6 +3551,44 @@ a.button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.plan-editor-meta-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  margin-top: 4px;
+  color: #334155;
+  font-size: 12px;
+}
+
+.plan-editor-meta-row > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-editor-cadastral-data {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.plan-editor-cadastral-data > span {
+  padding: 2px 6px;
+  border: 1px solid #dbe5f0;
+  border-radius: 5px;
+  color: var(--secondary);
+  background: #f8fafc;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.plan-editor-cadastral-data strong {
+  margin-left: 2px;
+  color: #173154;
 }
 
 .plan-editor-title .eyebrow {

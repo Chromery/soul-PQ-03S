@@ -130,6 +130,9 @@ Non chiamarlo dopo await, timeout, polling o callback non direttamente collegati
 - `true`: quando forMaps mostra il CAPTCHA, l'estensione salva file diagnostici in `Downloads/formaps-open/` e invia l'immagine al proxy Qwen se `qwenCaptchaEndpoint` e valido.
 - `false`: disabilita la cattura diagnostica.
 
+Il pannello di stato dell'estensione è posizionato sotto i comandi in alto a destra di forMaps. Il pulsante
+`−` lo riduce alla sola intestazione, mentre `+` ripristina il messaggio operativo.
+
 `qwenCaptchaEndpoint`:
 
 - in alpha deve essere `https://soul-pq-alpha.rainailab.com/api/qwen-captcha` o lo stesso path sulla origin corrente;

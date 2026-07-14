@@ -119,6 +119,7 @@ type EditorProperty = {
   ubicazione?: string | null;
   foglio?: string | number | null;
   particella?: string | number | null;
+  subalterno?: string | number | null;
   categoria: string;
   currentRendita: number;
   estimatedRendita: number;
@@ -5826,9 +5827,14 @@ export default function PlanimetriaEditor({
           <div>
             <p className="eyebrow">Editor planimetrie</p>
             <h1>{property.address}</h1>
-            <p>
-              {study.company} - {property.comune} - categoria {property.categoria}
-            </p>
+            <div className="plan-editor-meta-row">
+              <span>{study.company} · {property.comune} · categoria {property.categoria}</span>
+              <span className="plan-editor-cadastral-data" aria-label="Dati catastali">
+                <span>Foglio <strong>{property.foglio || "—"}</strong></span>
+                <span>Part. <strong>{property.particella || "—"}</strong></span>
+                <span>Sub. <strong>{property.subalterno || "—"}</strong></span>
+              </span>
+            </div>
           </div>
           <div className="plan-editor-actions">
             <span className={`draft-state ${dirty ? "unsaved" : savedAt ? "saved" : ""}`}>

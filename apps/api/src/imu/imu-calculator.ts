@@ -56,7 +56,7 @@ export class ImuCalculator {
       actDate: record.actDate,
       publicationDate: record.publicationDate,
       sourcePath: record.sourcePath,
-      sourceUrl: `https://github.com/Chromery/soul-delibere-rk/blob/main/${encodeURI(record.sourcePath)}`,
+      sourceUrl: `/api/imu/delibere/${record.sha256}`,
     };
   }
 
