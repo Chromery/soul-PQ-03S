@@ -318,6 +318,8 @@ Campi documento obbligatori quando un documento viene inviato:
 - `elaborato_planimetrico`
 - `elaborato`
 
+`planimetria`, `elaborato_planimetrico` ed `elaborato` sono alias dello stesso documento e vengono tutti salvati nel tipo canonico `PLANIMETRIA`, usato dall'editor.
+
 ## Errori
 
 Formato errore:
@@ -354,4 +356,3 @@ Codici principali:
 - Nome definitivo del responsabile tecnico default in produzione.
 - Dimensione massima realistica dei PDF inviati in base64.
 - Se in futuro convenga tornare a presigned URL per file molto grandi.
-- Se `elaborato_planimetrico` debba essere mostrato in UI o solo conservato per integrazione.

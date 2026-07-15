@@ -317,7 +317,9 @@ export class StudiesService {
   }
 
   private toApiProperty(property: PropertyWithDocuments) {
-    const planimetria = property.documents.find((document) => document.type === DocumentType.PLANIMETRIA);
+    const planimetria =
+      property.documents.find((document) => document.type === DocumentType.PLANIMETRIA)
+      ?? property.documents.find((document) => document.type === DocumentType.ELABORATO_PLANIMETRICO);
     const visura = property.documents.find((document) => document.type === DocumentType.VISURA);
     const currentRendita = Number(property.currentRendita);
     const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft) ?? Number(property.estimatedRendita);

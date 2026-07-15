@@ -10,6 +10,7 @@ datasource db {
 enum DocumentType {
   PLANIMETRIA
   VISURA
+  /// Valore legacy: elaborato ed elaborato_planimetrico vengono normalizzati a PLANIMETRIA.
   ELABORATO_PLANIMETRICO
 }
 

@@ -486,6 +486,7 @@ components:
         - non_in_studio
     TipoDocumentoInput:
       type: string
+      description: planimetria, elaborato_planimetrico ed elaborato sono alias e vengono gestiti come PLANIMETRIA nell'editor.
       enum:
         - visura_catastale
         - visura

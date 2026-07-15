@@ -168,7 +168,7 @@ type ScaleExtractionJob = {
 type UploadedPropertyDocument = {
   id: string;
   propertyId: string;
-  type: "planimetria" | "visura" | "elaborato";
+  type: "planimetria" | "visura";
   fileName: string;
   mimeType: string;
   sha256: string | null;

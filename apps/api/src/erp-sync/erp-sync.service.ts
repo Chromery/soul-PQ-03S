@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
+import { erpDocumentType, parseDocumentType } from "../document-types.js";
 import { DocumentType } from "../generated/prisma/enums.js";
 import type { FeasibilityStudy, PlanAnalysisDraft, Property, PropertyDocument, StudyVersion } from "../generated/prisma/client.js";
 import { ImuService } from "../imu/imu.service.js";
@@ -25,7 +26,6 @@ type StudyWithRelations = FeasibilityStudy & {
 };
 
 type NormalizedDocument = {
-  rawType: string;
   type: DocumentType;
   erpDocumentId?: string;
   fileName: string;
@@ -202,7 +202,7 @@ export class ErpSyncService {
         const stored = await this.storage.storeBase64Pdf({
           studioErpId,
           immobileErpId: property.id,
-          tipo: document.rawType,
+          tipo: erpDocumentType(document.type),
           fileNome: document.fileName,
           fileBase64: document.fileBase64,
           expectedSha256: document.expectedSha256,
@@ -374,20 +374,21 @@ export class ErpSyncService {
       outcome: mapPropertyOutcome(optionalString(input.esito), Boolean(input.in_studio ?? input.in_study ?? input.is_study)),
       hasStudy: Boolean(input.in_studio ?? input.in_study ?? input.is_study),
       displayOrder: integerNumber(input.ordine_visualizzazione, index),
-      documents: asArray(input.documenti, "documenti").map((document, documentIndex) =>
-        this.normalizeDocument(asRecord(document, `documenti[${documentIndex}]`)),
+      documents: uniqueDocuments(
+        asArray(input.documenti, "documenti").map((document, documentIndex) =>
+          this.normalizeDocument(asRecord(document, `documenti[${documentIndex}]`)),
+        ),
       ),
     };
   }
 
   private normalizeDocument(input: JsonRecord): NormalizedDocument {
     const rawType = requiredString(input.tipo, "documenti[].tipo");
-    const type = mapDocumentType(rawType);
+    const type = parseDocumentType(rawType);
     const fileName = requiredString(input.file_nome, "documenti[].file_nome");
     const mimeType = optionalString(input.mime_type) ?? "application/pdf";
     if (mimeType !== "application/pdf") throw new BadRequestException(`mime_type non supportato per ${fileName}`);
     return {
-      rawType,
       type,
       erpDocumentId: optionalString(input.documento_erp_id),
       fileName,
@@ -479,7 +480,7 @@ export class ErpSyncService {
         in_studio: property.hasStudy,
         esito: property.outcome,
         documenti: property.documents.map((document) => ({
-          tipo: reverseDocumentType(document.type),
+          tipo: erpDocumentType(document.type),
           file_nome: document.fileName,
           mime_type: document.mimeType,
           storage_key: document.storageKey,
@@ -597,20 +598,10 @@ function mapPropertyOutcome(value: string | undefined, hasStudy: boolean) {
   return "Neutro";
 }
 
-function mapDocumentType(value: string) {
-  const normalized = value.toLowerCase();
-  if (normalized === "planimetria") return DocumentType.PLANIMETRIA;
-  if (normalized === "visura" || normalized === "visura_catastale") return DocumentType.VISURA;
-  if (normalized === "elaborato" || normalized === "elaborato_planimetrico") {
-    return DocumentType.ELABORATO_PLANIMETRICO;
-  }
-  throw new BadRequestException(`tipo documento non supportato: ${value}`);
-}
-
-function reverseDocumentType(value: DocumentType) {
-  if (value === DocumentType.PLANIMETRIA) return "planimetria";
-  if (value === DocumentType.VISURA) return "visura_catastale";
-  return "elaborato_planimetrico";
+function uniqueDocuments(documents: NormalizedDocument[]) {
+  const byType = new Map<DocumentType, NormalizedDocument>();
+  for (const document of documents) byType.set(document.type, document);
+  return Array.from(byType.values());
 }
 
 function hasCompleteCadastralData(property: Pick<NormalizedProperty, "provincia" | "comune" | "foglio" | "particella">) {

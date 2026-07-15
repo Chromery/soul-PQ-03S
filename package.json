@@ -16,6 +16,7 @@
     "build:web": "npm run build --workspace @soul/web",
     "build:api": "npm run build --workspace @soul/api",
     "preview": "npm run preview --workspace @soul/web",
+    "test": "npm test --workspace @soul/api",
     "prezzari:import": "node apps/api/scripts/import-price-lists.mjs",
     "examples:import": "node apps/api/scripts/import-real-examples.mjs",
     "imu:sync": "npm run imu:sync --workspace @soul/api --",

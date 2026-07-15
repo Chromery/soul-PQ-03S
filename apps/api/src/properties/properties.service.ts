@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { documentTypePath, parseDocumentType } from "../document-types.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { DocumentType } from "../generated/prisma/enums.js";
 import { DocumentStorageService } from "../erp-sync/document-storage.service.js";
@@ -160,10 +161,7 @@ export class PropertiesService {
   }
 
   async uploadDocument(propertyId: string, rawType: string, body: unknown) {
-    const type = mapDocumentType(rawType);
-    if (type === DocumentType.ELABORATO_PLANIMETRICO) {
-      throw new BadRequestException("Upload elaborato planimetrico non supportato da UI");
-    }
+    const type = parseDocumentType(rawType);
     const property = await this.requireProperty(propertyId);
     const input = validateDocumentUploadInput(body);
     const stored = await this.storage.storeBase64Pdf({
@@ -207,11 +205,21 @@ export class PropertiesService {
   }
 
   async openDocument(propertyId: string, rawType: string) {
-    const type = mapDocumentType(rawType);
+    const type = parseDocumentType(rawType);
     await this.requireProperty(propertyId);
-    const document = await this.prisma.propertyDocument.findUnique({
+    let document = await this.prisma.propertyDocument.findUnique({
       where: { propertyId_type: { propertyId, type } },
     });
+    if (!document && type === DocumentType.PLANIMETRIA) {
+      document = await this.prisma.propertyDocument.findUnique({
+        where: {
+          propertyId_type: {
+            propertyId,
+            type: DocumentType.ELABORATO_PLANIMETRICO,
+          },
+        },
+      });
+    }
     if (!document) throw new NotFoundException("Documento non trovato");
     if (document.storageKey.startsWith("demo/")) {
       throw new NotFoundException("Documento demo non presente nello storage S3");
@@ -317,22 +325,6 @@ export class PropertiesService {
       aiScaleDetectedAt,
     };
   }
-}
-
-function mapDocumentType(value: string) {
-  const normalized = value.toLowerCase();
-  if (normalized === "planimetria") return DocumentType.PLANIMETRIA;
-  if (normalized === "visura" || normalized === "visura_catastale") return DocumentType.VISURA;
-  if (normalized === "elaborato" || normalized === "elaborato_planimetrico") {
-    return DocumentType.ELABORATO_PLANIMETRICO;
-  }
-  throw new BadRequestException(`tipo documento non supportato: ${value}`);
-}
-
-function documentTypePath(type: DocumentType) {
-  if (type === DocumentType.PLANIMETRIA) return "planimetria";
-  if (type === DocumentType.VISURA) return "visura";
-  return "elaborato";
 }
 
 function validateDocumentUploadInput(body: unknown): DocumentUploadInput {
