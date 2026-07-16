@@ -110,7 +110,12 @@ export function resolveFormapsTerritory(
   const gap = first.score - (second?.score ?? 0);
   const uniqueExactMunicipality = exactMunicipality
     && ranked.filter((candidate) => compactKey(candidate.municipality) === compactKey(municipality)).length === 1;
+  const hasExactUnsectionedCandidate = ranked.some((candidate) => (
+    !hasCadastralSection(candidate.municipality)
+    && compactKey(candidate.municipality) === compactKey(municipality)
+  ));
   const missingCadastralSection = !hasCadastralSection(municipality)
+    && !hasExactUnsectionedCandidate
     && ranked.filter((candidate) => (
       hasCadastralSection(candidate.municipality)
       && compactMunicipalityBase(candidate.municipality) === compactMunicipalityBase(municipality)

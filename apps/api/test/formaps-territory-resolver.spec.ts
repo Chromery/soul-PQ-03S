@@ -64,6 +64,13 @@ test("non inventa la sezione nemmeno quando la provincia coincide esattamente", 
   }
 });
 
+test("preferisce la voce comunale senza sezione quando forMaps la espone", () => {
+  const result = resolveFormapsTerritory("BG", "Bergamo");
+  assert.equal(result.strategy, "exact");
+  assert.equal(result.selected?.municipalityId, "A794");
+  assert.equal(result.selected?.municipality, "BERGAMO");
+});
+
 test("non chiama NeuralWatt quando provincia e comune hanno un match esatto", async () => {
   const service = extractionService({
     found: true,
