@@ -7,6 +7,7 @@ import { ImuService } from "../imu/imu.service.js";
 import type { ImuCalculation } from "../imu/imu.types.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { estimatedRenditaFromAnalysisDraft, estimatedRenditaFromDraftPayload } from "../rendita.js";
+import { VisuraExtractionService } from "../visura-extraction/visura-extraction.service.js";
 
 type DraftPayload = {
   version: number;
@@ -50,6 +51,7 @@ export class PropertiesService {
     private readonly prisma: PrismaService,
     private readonly storage: DocumentStorageService,
     private readonly imu: ImuService,
+    private readonly visuraExtraction: VisuraExtractionService,
   ) {}
 
   async getDraft(propertyId: string) {
@@ -191,6 +193,15 @@ export class PropertiesService {
         sizeBytes: stored.sizeBytes,
       },
     });
+    const visuraExtractionJob = type === DocumentType.VISURA
+      ? await this.visuraExtraction.enqueueDocumentPdf({
+        propertyId,
+        documentId: document.id,
+        fileName: input.file_name,
+        fileBase64: input.file_base64,
+        sha256: stored.sha256,
+      })
+      : null;
 
     return {
       id: document.id,
@@ -200,6 +211,7 @@ export class PropertiesService {
       mimeType: document.mimeType,
       sha256: document.sha256,
       sizeBytes: document.sizeBytes,
+      visuraExtractionJob,
       downloadUrl: `/api/properties/${encodeURIComponent(propertyId)}/documents/${documentTypePath(type)}/download`,
     };
   }

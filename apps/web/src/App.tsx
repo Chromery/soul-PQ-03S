@@ -95,6 +95,9 @@ type PropertyItem = {
   foglio?: string | null;
   particella?: string | null;
   subalterno?: string | null;
+  sezioneCatastale?: string | null;
+  codiceComuneCatastale?: string | null;
+  formapsMunicipalityId?: string | null;
   categoria: string;
   titolarita?: string | null;
   currentRendita: number;

@@ -129,7 +129,9 @@ test("NeuralWatt riceve solo la shortlist e può risolvere un caso ambiguo", asy
     const result = await service.extractFromBase64(pdfInput());
     assert.ok(sentCandidates.length > 1 && sentCandidates.length <= 8);
     assert.equal(result.provincia, "FO");
-    assert.equal(result.comune, "CESENA/sez.B");
+    assert.equal(result.comune, "CESENA");
+    assert.equal(result.sezioneCatastale, "B");
+    assert.equal(result.formapsMunicipalityId, "C573B");
     assert.ok(result.warnings.some((warning) => warning.includes("NeuralWatt su shortlist")));
   } finally {
     globalThis.fetch = originalFetch;
@@ -163,6 +165,8 @@ test("i valori canonici estratti dalla visura sostituiscono comune e provincia E
     found: true,
     provincia: "CO",
     comune: "CASNATE CON BERNATE/sez.B",
+    sezioneCatastale: "B",
+    formapsMunicipalityId: "B977B",
     foglio: "4",
     particella: "370",
     confidence: 0.9,
@@ -171,7 +175,9 @@ test("i valori canonici estratti dalla visura sostituiscono comune e provincia E
   });
 
   assert.equal(updateData?.provincia, "CO");
-  assert.equal(updateData?.comune, "CASNATE CON BERNATE/sez.B");
+  assert.equal(updateData?.comune, "CASNATE CON BERNATE");
+  assert.equal(updateData?.sezioneCatastale, "B");
+  assert.equal(updateData?.formapsMunicipalityId, "B977B");
   assert.equal(updateData?.foglio, "4");
   assert.equal(updateData?.particella, "370");
 });
@@ -212,6 +218,52 @@ test("un territorio non risolto non sovrascrive comune e provincia ERP esistenti
 
   assert.equal(updateData?.provincia, "MI");
   assert.equal(updateData?.comune, "Milano");
+});
+
+test("una visura associata all'immobile sbagliato non aggiorna i dati catastali", async () => {
+  let updated = false;
+  const transaction = {
+    property: {
+      findUnique: async () => ({
+        address: "Via Test 1",
+        comune: "Valmadrera",
+        provincia: "LC",
+        ubicazione: "Via Test 1",
+        foglio: "16",
+        particella: "3001",
+        sezioneCatastale: null,
+        codiceComuneCatastale: "L634",
+        formapsMunicipalityId: "L634",
+      }),
+      update: async () => {
+        updated = true;
+      },
+    },
+  };
+  const service = new VisuraExtractionService(
+    { get: () => undefined } as never,
+    { $transaction: async (callback: (tx: typeof transaction) => unknown) => callback(transaction) } as never,
+  );
+
+  await assert.rejects(
+    (service as unknown as {
+      persistExtractedCadastralData: (propertyId: string, result: Record<string, unknown>) => Promise<void>;
+    }).persistExtractedCadastralData("I-1", {
+      found: true,
+      provincia: "CO",
+      comune: "CASNATE CON BERNATE",
+      sezioneCatastale: "B",
+      codiceComuneCatastale: "B977",
+      formapsMunicipalityId: "B977B",
+      foglio: "4",
+      particella: "2010",
+      confidence: 0.99,
+      evidence: null,
+      warnings: [],
+    }),
+    /foglio diverso, particella diversa, codice comune catastale diverso, identificativo forMaps diverso, comune diverso/,
+  );
+  assert.equal(updated, false);
 });
 
 function extractionService(result: Record<string, unknown>) {

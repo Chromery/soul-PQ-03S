@@ -14,6 +14,7 @@
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
     "formaps:sync": "node scripts/sync-formaps-territories.mjs",
+    "formaps:backfill-visure": "tsx --tsconfig tsconfig.json scripts/backfill-formaps-sections.ts",
     "imu:sync": "node scripts/sync-imu-rates.mjs",
     "test": "tsx --test test/*.spec.ts",
     "test:imu": "tsx --test test/imu-calculator.spec.ts"

@@ -9,12 +9,16 @@ import type {
   PropertyPriceList,
   StudyVersion,
 } from "../generated/prisma/client.js";
-import { resolveFormapsTerritory } from "../formaps-territories/formaps-territory-resolver.js";
+import {
+  formapsTerritoryByMunicipalityId,
+  resolveFormapsTerritory,
+} from "../formaps-territories/formaps-territory-resolver.js";
 import { ImuService } from "../imu/imu.service.js";
 import type { ImuCalculation } from "../imu/imu.types.js";
 import { PriceListsService } from "../price-lists/price-lists.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { estimatedRenditaFromAnalysisDraft } from "../rendita.js";
+import { municipalityWithSection } from "../visura-extraction/visura-text-extractor.js";
 import type { UpdateStudyDto } from "./dto/update-study.dto.js";
 
 type PropertyWithDocuments = Property & {
@@ -318,7 +322,11 @@ export class StudiesService {
   }
 
   private toApiProperty(property: PropertyWithDocuments) {
-    const formapsTerritory = resolveFormapsTerritory(property.provincia, property.comune).selected;
+    const formapsTerritory = formapsTerritoryByMunicipalityId(property.formapsMunicipalityId)
+      ?? resolveFormapsTerritory(
+        property.provincia,
+        municipalityWithSection(property.comune, property.sezioneCatastale),
+      ).selected;
     const planimetria =
       property.documents.find((document) => document.type === DocumentType.PLANIMETRIA)
       ?? property.documents.find((document) => document.type === DocumentType.ELABORATO_PLANIMETRICO);
@@ -355,6 +363,9 @@ export class StudiesService {
       foglio: property.foglio,
       particella: property.particella,
       subalterno: property.subalterno,
+      sezioneCatastale: property.sezioneCatastale,
+      codiceComuneCatastale: property.codiceComuneCatastale,
+      formapsMunicipalityId: formapsTerritory?.municipalityId ?? property.formapsMunicipalityId,
       categoria: property.categoria,
       titolarita: property.titolarita,
       currentRendita,

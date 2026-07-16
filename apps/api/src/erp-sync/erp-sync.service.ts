@@ -2,7 +2,10 @@ import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import { erpDocumentType, parseDocumentType } from "../document-types.js";
-import { resolveFormapsTerritory } from "../formaps-territories/formaps-territory-resolver.js";
+import {
+  formapsTerritoryByMunicipalityId,
+  resolveFormapsTerritory,
+} from "../formaps-territories/formaps-territory-resolver.js";
 import { DocumentType } from "../generated/prisma/enums.js";
 import type { FeasibilityStudy, PlanAnalysisDraft, Property, PropertyDocument, StudyVersion } from "../generated/prisma/client.js";
 import { ImuService } from "../imu/imu.service.js";
@@ -12,6 +15,11 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { estimatedRenditaFromAnalysisDraft } from "../rendita.js";
 import { ScaleExtractionService } from "../scale-extraction/scale-extraction.service.js";
 import { VisuraExtractionService } from "../visura-extraction/visura-extraction.service.js";
+import {
+  municipalityWithSection,
+  municipalityWithoutSection,
+  sectionFromMunicipality,
+} from "../visura-extraction/visura-text-extractor.js";
 import { DocumentStorageService } from "./document-storage.service.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -46,6 +54,9 @@ type NormalizedProperty = {
   foglio?: string;
   particella?: string;
   subalterno?: string;
+  sezioneCatastale?: string;
+  codiceComuneCatastale?: string;
+  formapsMunicipalityId?: string;
   categoria: string;
   titolarita?: string;
   currentRendita: number;
@@ -256,6 +267,9 @@ export class ErpSyncService {
         foglio: property.foglio,
         particella: property.particella,
         subalterno: property.subalterno,
+        sezioneCatastale: property.sezioneCatastale,
+        codiceComuneCatastale: property.codiceComuneCatastale,
+        formapsMunicipalityId: property.formapsMunicipalityId,
         categoria: property.categoria,
         titolarita: property.titolarita,
         currentRendita: property.currentRendita,
@@ -355,9 +369,17 @@ export class ErpSyncService {
     const categoria = normalizeCategory(optionalString(input.categoria) ?? optionalString(input.classamento) ?? "");
     const inputComune = optionalString(input.comune) ?? comuneFromUbicazione(optionalString(input.ubicazione)) ?? "";
     const inputProvincia = optionalString(input.provincia) ?? "";
-    const territory = resolveFormapsTerritory(inputProvincia, inputComune);
-    const comune = territory.selected?.municipality ?? inputComune;
-    const provincia = territory.selected?.provinceId ?? inputProvincia;
+    const inputSection = normalizeCadastralSection(
+      optionalString(input.sezione_catastale ?? input.sezione_urbana ?? input.sezione),
+    );
+    const explicitFormapsId = optionalString(input.formaps_municipality_id ?? input.formaps_comune_id);
+    const selectedTerritory = formapsTerritoryByMunicipalityId(explicitFormapsId)
+      ?? resolveFormapsTerritory(inputProvincia, municipalityWithSection(inputComune, inputSection)).selected;
+    const comune = municipalityWithoutSection(selectedTerritory?.municipality) ?? inputComune;
+    const provincia = selectedTerritory?.provinceId ?? inputProvincia;
+    const sezioneCatastale = sectionFromMunicipality(selectedTerritory?.municipality) ?? inputSection;
+    const codiceComuneCatastale = optionalString(input.codice_comune_catastale ?? input.codice_catastale)
+      ?? cadastralCodeFromFormaps(selectedTerritory?.municipalityId, sezioneCatastale);
     const diffPercent = currentRendita === 0 ? 0 : ((estimatedRendita - currentRendita) / currentRendita) * 100;
     return {
       id,
@@ -368,6 +390,9 @@ export class ErpSyncService {
       foglio: optionalString(input.foglio),
       particella: optionalString(input.particella),
       subalterno: optionalString(input.sub ?? input.subalterno),
+      sezioneCatastale: sezioneCatastale ?? undefined,
+      codiceComuneCatastale: codiceComuneCatastale ?? undefined,
+      formapsMunicipalityId: selectedTerritory?.municipalityId,
       categoria,
       titolarita: optionalString(input.titolarita),
       currentRendita,
@@ -464,6 +489,9 @@ export class ErpSyncService {
         foglio: property.foglio,
         particella: property.particella,
         sub: property.subalterno,
+        sezione_catastale: property.sezioneCatastale,
+        codice_comune_catastale: property.codiceComuneCatastale,
+        formaps_municipality_id: property.formapsMunicipalityId,
         ubicazione: property.ubicazione,
         comune: property.comune,
         provincia: property.provincia,
@@ -609,10 +637,25 @@ function uniqueDocuments(documents: NormalizedDocument[]) {
   return Array.from(byType.values());
 }
 
-function hasCompleteCadastralData(property: Pick<NormalizedProperty, "provincia" | "comune" | "foglio" | "particella">) {
+function hasCompleteCadastralData(
+  property: Pick<NormalizedProperty, "provincia" | "comune" | "foglio" | "particella" | "formapsMunicipalityId">,
+) {
   if (!property.provincia || !property.comune || !property.foglio || !property.particella) return false;
   if (["BZ", "TN"].includes(property.provincia.toUpperCase())) return true;
+  if (formapsTerritoryByMunicipalityId(property.formapsMunicipalityId)) return true;
   return Boolean(resolveFormapsTerritory(property.provincia, property.comune).selected);
+}
+
+function normalizeCadastralSection(value?: string) {
+  return value?.replace(/^SEZ(?:IONE)?\.?\s*/i, "").trim().toUpperCase() || null;
+}
+
+function cadastralCodeFromFormaps(municipalityId?: string, section?: string | null) {
+  if (!municipalityId) return null;
+  if (section && municipalityId.toUpperCase().endsWith(section.toUpperCase())) {
+    return municipalityId.slice(0, -section.length);
+  }
+  return municipalityId;
 }
 
 function normalizeCategory(value: string) {

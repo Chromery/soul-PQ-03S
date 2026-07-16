@@ -51,6 +51,9 @@ const municipalityCandidates: FormapsTerritoryCandidate[] = catalog.provinces.fl
     municipalityScore: 0,
   })),
 );
+const municipalityById = new Map(
+  municipalityCandidates.map((candidate) => [candidate.municipalityId.toUpperCase(), candidate]),
+);
 const candidatesByMunicipalityKey = indexMunicipalities(municipalityCandidates);
 const resolutionCache = new Map<string, FormapsTerritoryResolution>();
 
@@ -148,6 +151,12 @@ export function resolveFormapsTerritory(
 
 export function formapsProvinceName(provinceId: string) {
   return provinceById.get(provinceId.trim().toUpperCase())?.text ?? null;
+}
+
+export function formapsTerritoryByMunicipalityId(municipalityId: string | null | undefined) {
+  const id = municipalityId?.trim().toUpperCase();
+  if (!id) return null;
+  return municipalityById.get(id) ?? null;
 }
 
 function scoreCandidate(

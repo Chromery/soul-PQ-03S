@@ -34,3 +34,42 @@ Le variabili opzionali sono:
 L'estensione 0.4.0 applica inoltre un ultimo fuzzy match sulla lista live di forMaps quando il valore ricevuto
 non produce un match esatto. Il fallback fisso viene quindi usato soltanto se anche catalogo, shortlist e lista
 live non riescono a produrre una scelta sufficientemente distinta.
+
+## Estrazione delle nuove visure
+
+Le nuove visure caricate manualmente o ricevute durante la sync ERP vengono elaborate automaticamente. Il
+flusso prova prima `pdftotext` sul PDF originale e legge separatamente:
+
+- comune e provincia;
+- codice comune catastale;
+- sezione catastale o urbana corrente;
+- foglio e particella.
+
+Le righe `Codice Comune … - Sezione …` vengono usate soltanto quando sono correlate al codice comune e al
+foglio o alla particella dell'immobile principale. I riferimenti storici non correlati vengono ignorati. Se il
+PDF non contiene testo nativo o resta incompleto, OpenRouter esegue il fallback sul PDF; NeuralWatt interviene
+soltanto sull'eventuale shortlist territoriale ancora ambigua.
+
+Il risultato canonico viene salvato nei campi `sezioneCatastale`, `codiceComuneCatastale` e
+`formapsMunicipalityId`. Prima della scrittura il sistema confronta la visura con comune, foglio, particella e
+gli identificativi già presenti: una visura associata all'immobile sbagliato fallisce senza modificare il record.
+
+## Backfill delle visure esistenti
+
+Il backfill è in dry-run per default e restituisce proposte, conflitti, documenti incompleti e mismatch senza
+scrivere nel database:
+
+```bash
+npm run formaps:backfill-visure
+```
+
+Solo dopo aver controllato il report si applicano le proposte coerenti:
+
+```bash
+npm run formaps:backfill-visure -- --apply
+```
+
+Una visura può propagare la sezione agli altri immobili esclusivamente all'interno dello stesso studio e con
+comune, foglio e particella identici. Un `formapsMunicipalityId` già presente e diverso non viene sovrascritto.
+Ogni estrazione diretta applicata genera inoltre un `VisuraExtractionJob` di audit con metodo
+`deterministic_pdf_text`.

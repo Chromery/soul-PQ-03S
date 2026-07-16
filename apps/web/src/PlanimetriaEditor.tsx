@@ -122,6 +122,9 @@ type EditorProperty = {
   foglio?: string | number | null;
   particella?: string | number | null;
   subalterno?: string | number | null;
+  sezioneCatastale?: string | null;
+  codiceComuneCatastale?: string | null;
+  formapsMunicipalityId?: string | null;
   categoria: string;
   currentRendita: number;
   estimatedRendita: number;
@@ -5832,6 +5835,7 @@ export default function PlanimetriaEditor({
             <div className="plan-editor-meta-row">
               <span>{study.company} · {property.comune} · categoria {property.categoria}</span>
               <span className="plan-editor-cadastral-data" aria-label="Dati catastali">
+                <span>Sez. <strong>{property.sezioneCatastale || "—"}</strong></span>
                 <span>Foglio <strong>{property.foglio || "—"}</strong></span>
                 <span>Part. <strong>{property.particella || "—"}</strong></span>
                 <span>Sub. <strong>{property.subalterno || "—"}</strong></span>
