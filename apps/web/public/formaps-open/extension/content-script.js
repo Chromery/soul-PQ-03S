@@ -168,19 +168,94 @@
     const wantedCompact = compact(label);
 
     return items.find((item) => normalize(item.text) === wanted)
-      || items.find((item) => compact(item.text) === wantedCompact)
-      || items.find((item) => normalize(item.text).includes(wanted))
-      || items.find((item) => wanted.includes(normalize(item.text)));
+      || items.find((item) => compact(item.text) === wantedCompact);
+  }
+
+  function chooseClosest(items, label, options = {}) {
+    const minimumScore = options.minimumScore || 0.78;
+    const minimumGap = options.minimumGap || 0.035;
+    const compareId = Boolean(options.compareId);
+    const ranked = items
+      .map((item) => ({
+        item,
+        score: Math.max(
+          textSimilarity(label, item.text),
+          compareId ? textSimilarity(label, item.id) * 0.95 : 0
+        )
+      }))
+      .sort((first, second) => second.score - first.score);
+    const first = ranked[0];
+    const second = ranked[1];
+    const gap = first ? first.score - (second ? second.score : 0) : 0;
+
+    if (!first || first.score < minimumScore || gap < minimumGap) {
+      return null;
+    }
+
+    return { item: first.item, score: first.score };
+  }
+
+  function textSimilarity(firstValue, secondValue) {
+    const first = compact(firstValue);
+    const second = compact(secondValue);
+    if (!first || !second) return 0;
+    if (first === second) return 1;
+    const edit = 1 - levenshteinDistance(first, second) / Math.max(first.length, second.length);
+    const containment = first.includes(second) || second.includes(first)
+      ? Math.min(first.length, second.length) / Math.max(first.length, second.length)
+      : 0;
+    return Math.max(edit, containment >= 0.72 ? containment * 0.94 : 0);
+  }
+
+  function levenshteinDistance(first, second) {
+    const previous = Array.from({ length: second.length + 1 }, (_value, index) => index);
+    const current = new Array(second.length + 1);
+
+    for (let row = 1; row <= first.length; row += 1) {
+      current[0] = row;
+      for (let column = 1; column <= second.length; column += 1) {
+        current[column] = Math.min(
+          current[column - 1] + 1,
+          previous[column] + 1,
+          previous[column - 1] + (first[row - 1] === second[column - 1] ? 0 : 1)
+        );
+      }
+      for (let column = 0; column <= second.length; column += 1) {
+        previous[column] = current[column];
+      }
+    }
+
+    return previous[second.length];
   }
 
   async function findProvince(label) {
     const data = await fetchJsonp("GetProvinceCatastali", { term: label });
     const items = data.items || [];
+    const exact = chooseBest(items, label);
+
+    if (exact) {
+      return {
+        item: exact,
+        firstItem: items[0] || null,
+        itemCount: items.length,
+        match: "exact"
+      };
+    }
+
+    const completeData = await fetchJsonp("GetProvinceCatastali", { term: "" });
+    const completeItems = completeData.items || [];
+    const closest = chooseClosest(completeItems, label, {
+      minimumScore: 0.72,
+      minimumGap: 0.04,
+      compareId: true
+    });
 
     return {
-      item: chooseBest(items, label) || null,
-      firstItem: items[0] || null,
-      itemCount: items.length
+      item: closest ? closest.item : null,
+      firstItem: completeItems[0] || items[0] || null,
+      itemCount: completeItems.length,
+      match: closest ? "fuzzy" : "none",
+      score: closest ? closest.score : null
     };
   }
 
@@ -200,16 +275,39 @@
           item,
           firstItem: items[0] || null,
           itemCount: items.length,
-          term
+          term,
+          match: "exact"
         };
       }
     }
 
+    const completeData = await fetchJsonp("GetComuniCatastali", {
+      idProvincia: provinceId,
+      term: ""
+    });
+    const completeItems = completeData.items || [];
+    const closest = chooseClosest(completeItems, label, {
+      minimumScore: 0.78,
+      minimumGap: 0.035
+    });
+
+    if (closest) {
+      return {
+        item: closest.item,
+        firstItem: completeItems[0] || null,
+        itemCount: completeItems.length,
+        term: "",
+        match: "fuzzy",
+        score: closest.score
+      };
+    }
+
     return {
       item: null,
-      firstItem: null,
-      itemCount: 0,
-      term: attempts[attempts.length - 1]
+      firstItem: completeItems[0] || null,
+      itemCount: completeItems.length,
+      term: attempts[attempts.length - 1],
+      match: "none"
     };
   }
 
@@ -904,6 +1002,8 @@
       province = await resolveFallbackProvince();
       usingFallbackProvince = true;
       setStatus(`${fallbackMessage(selectionFallbacks)} Continuo con gli altri campi...`, "warn");
+    } else if (provinceLookup.match === "fuzzy") {
+      setStatus(`Provincia "${entry.provincia}" ricondotta a "${province.text}" (${Math.round(provinceLookup.score * 100)}%).`);
     }
 
     await setSelect2Value(jQuery, provinceElement, province);
@@ -925,6 +1025,10 @@
         error: error && error.message ? error.message : String(error)
       }));
       comune = comuneLookup.item;
+
+      if (comune && comuneLookup.match === "fuzzy") {
+        setStatus(`Comune "${entry.comune}" ricondotto a "${comune.text}" (${Math.round(comuneLookup.score * 100)}%).`);
+      }
 
       if (!comune) {
         selectionFallbacks.push({

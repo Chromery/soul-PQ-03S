@@ -2,6 +2,10 @@ import { BadRequestException, Injectable, InternalServerErrorException } from "@
 import type { OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash } from "node:crypto";
+import {
+  resolveFormapsTerritory,
+  type FormapsTerritoryCandidate,
+} from "../formaps-territories/formaps-territory-resolver.js";
 import { VisuraExtractionStatus } from "../generated/prisma/enums.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -34,6 +38,8 @@ export type VisuraExtractionResult = {
 };
 
 const DEFAULT_VISURA_MODEL = "qwen/qwen3.5-flash-02-23";
+const DEFAULT_NEURALWATT_API_URL = "https://api.neuralwatt.com/v1/chat/completions";
+const DEFAULT_NEURALWATT_MODEL = "qwen3.6-35b-fast";
 
 const VISURA_EXTRACTION_SCHEMA = {
   type: "object",
@@ -71,6 +77,10 @@ export class VisuraExtractionService implements OnModuleInit {
   private readonly appTitle: string;
   private readonly pdfEngine: string;
   private readonly timeoutMs: number;
+  private readonly neuralwattApiUrl: string;
+  private readonly neuralwattModel: string;
+  private readonly territoryMatchEnabled: boolean;
+  private readonly territoryMatchTimeoutMs: number;
 
   constructor(
     private readonly config: ConfigService,
@@ -84,6 +94,12 @@ export class VisuraExtractionService implements OnModuleInit {
     this.appTitle = optionalConfig(config.get<string>("OPENROUTER_APP_TITLE")) ?? "Soul Prospect Qualifier";
     this.pdfEngine = optionalConfig(config.get<string>("OPENROUTER_PDF_ENGINE")) ?? "mistral-ocr";
     this.timeoutMs = positiveIntegerConfig(config.get<string>("OPENROUTER_VISURA_TIMEOUT_MS")) ?? 180_000;
+    this.neuralwattApiUrl = optionalConfig(config.get<string>("NEURALWATT_API_URL")) ?? DEFAULT_NEURALWATT_API_URL;
+    this.neuralwattModel = optionalConfig(config.get<string>("NEURALWATT_MODEL")) ?? DEFAULT_NEURALWATT_MODEL;
+    this.territoryMatchEnabled = config.get<string>("NEURALWATT_TERRITORY_MATCH_ENABLED")?.trim().toLowerCase() !== "false";
+    this.territoryMatchTimeoutMs = positiveIntegerConfig(
+      config.get<string>("NEURALWATT_TERRITORY_MATCH_TIMEOUT_MS"),
+    ) ?? 25_000;
   }
 
   async onModuleInit() {
@@ -210,8 +226,9 @@ export class VisuraExtractionService implements OnModuleInit {
       });
       if (!property) return;
 
-      const comune = property.comune || result.comune || "";
-      const provincia = property.provincia || result.provincia || null;
+      const canonicalTerritory = resolveFormapsTerritory(result.provincia, result.comune).selected;
+      const comune = canonicalTerritory?.municipality || property.comune || result.comune || "";
+      const provincia = canonicalTerritory?.provinceId || property.provincia || result.provincia || null;
       const address =
         property.address || (comune ? (provincia ? `${comune} (${provincia})` : comune) : property.address);
       const data = {
@@ -232,12 +249,13 @@ export class VisuraExtractionService implements OnModuleInit {
 
   private async extractVisura(source: { fileName: string; fileData: string; sizeBytes: number }) {
     const primary = parseOpenRouterVisuraExtraction(await this.callOpenRouterVisuraExtraction(source, false));
+    let result = primary;
     if (!primary.found || !primary.provincia || !primary.comune || !primary.foglio || !primary.particella) {
       try {
         const retry = parseOpenRouterVisuraExtraction(await this.callOpenRouterVisuraExtraction(source, true));
-        if (scoreExtraction(retry) > scoreExtraction(primary)) return retry;
+        if (scoreExtraction(retry) > scoreExtraction(primary)) result = retry;
       } catch (error) {
-        return {
+        result = {
           ...primary,
           warnings: [
             ...primary.warnings,
@@ -246,7 +264,144 @@ export class VisuraExtractionService implements OnModuleInit {
         };
       }
     }
-    return primary;
+    return this.resolveFormapsTerritory(result);
+  }
+
+  private async resolveFormapsTerritory(result: VisuraExtractionResult) {
+    if (!result.provincia || !result.comune) return result;
+    const resolution = resolveFormapsTerritory(result.provincia, result.comune, 8);
+    let selected = resolution.selected;
+    let selectedByNeuralwatt = false;
+    let llmWarning: string | null = null;
+
+    if (
+      !selected
+      && resolution.strategy === "ambiguous"
+      && resolution.candidates.length > 0
+      && this.territoryMatchEnabled
+    ) {
+      try {
+        selected = await this.selectTerritoryWithNeuralwatt(result, resolution.candidates);
+        selectedByNeuralwatt = Boolean(selected);
+      } catch (error) {
+        llmWarning = error instanceof Error
+          ? `Spareggio NeuralWatt forMaps non riuscito: ${error.message}`
+          : "Spareggio NeuralWatt forMaps non riuscito";
+      }
+    }
+
+    if (!selected) {
+      const first = resolution.candidates[0];
+      const second = resolution.candidates[1];
+      const gap = first ? first.score - (second?.score ?? 0) : 0;
+      if (first && first.score >= 0.78 && gap >= 0.025) selected = first;
+    }
+
+    if (!selected) {
+      return {
+        ...result,
+        warnings: [
+          ...result.warnings,
+          ...(llmWarning ? [llmWarning] : []),
+          `Provincia/comune non risolti con sufficiente certezza nel catalogo forMaps (${result.provincia}/${result.comune}).`,
+        ],
+      };
+    }
+
+    const changed = selected.provinceId.toUpperCase() !== result.provincia.toUpperCase()
+      || selected.municipality.toUpperCase() !== result.comune.toUpperCase();
+    return {
+      ...result,
+      provincia: selected.provinceId,
+      comune: selected.municipality,
+      confidence: Math.min(
+        result.confidence,
+        selectedByNeuralwatt ? 0.92 : Math.max(0.75, selected.score),
+      ),
+      warnings: [
+        ...result.warnings,
+        ...(llmWarning ? [llmWarning] : []),
+        ...(changed
+          ? [
+              `Territorio forMaps: ${result.provincia}/${result.comune} → ${selected.provinceId}/${selected.municipality} (${selectedByNeuralwatt ? "NeuralWatt su shortlist" : resolution.strategy}).`,
+            ]
+          : []),
+      ],
+    };
+  }
+
+  private async selectTerritoryWithNeuralwatt(
+    result: VisuraExtractionResult,
+    candidates: FormapsTerritoryCandidate[],
+  ) {
+    const apiKey = optionalConfig(this.config.get<string>("NEURALWATT_API_KEY"));
+    if (!apiKey) return null;
+    const shortlist = candidates.slice(0, 8).map((candidate) => ({
+      provinceId: candidate.provinceId,
+      province: candidate.province,
+      municipalityId: candidate.municipalityId,
+      municipality: candidate.municipality,
+      similarity: candidate.score,
+    }));
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.territoryMatchTimeoutMs);
+    try {
+      const response = await fetch(this.neuralwattApiUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: this.neuralwattModel,
+          messages: [
+            {
+              role: "system",
+              content:
+                "Seleziona soltanto una voce dalla shortlist catastale forMaps. Considera denominazioni storiche, accenti e sezioni catastali. Non inventare valori. Se provincia, comune ed evidenza non bastano per scegliere una sezione, restituisci municipalityId null. Rispondi solo con JSON: {\"municipalityId\":\"ID\"} oppure {\"municipalityId\":null}.",
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                extracted: {
+                  province: result.provincia,
+                  municipality: result.comune,
+                  evidence: result.evidence?.slice(0, 1_000) ?? null,
+                },
+                candidates: shortlist,
+              }),
+            },
+          ],
+          temperature: 0,
+          max_tokens: 128,
+        }),
+        signal: controller.signal,
+      });
+      const rawBody = await response.text();
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${rawBody.slice(0, 240)}`);
+      const data = parseJsonRecord(rawBody, "risposta NeuralWatt");
+      const choice = Array.isArray(data.choices) ? data.choices[0] : null;
+      const message = choice && typeof choice === "object" && "message" in choice
+        ? (choice as JsonRecord).message
+        : null;
+      const content = message && typeof message === "object" && "content" in message
+        ? messageContentToText((message as JsonRecord).content)
+        : "";
+      const parsed = content ? parseJsonRecord(content, "selezione NeuralWatt") : data;
+      const municipalityId = optionalString(parsed.municipalityId);
+      if (!municipalityId) return null;
+      const selected = candidates.find((candidate) => candidate.municipalityId === municipalityId) ?? null;
+      const section = selected?.municipality.match(/\/\s*sez\.\s*([A-Z0-9-]+)/i)?.[1];
+      if (section && !evidenceSupportsSection(result.evidence, section)) return null;
+      return selected;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(`timeout dopo ${Math.round(this.territoryMatchTimeoutMs / 1_000)}s`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private async callOpenRouterVisuraExtraction(
@@ -272,7 +427,7 @@ export class VisuraExtractionService implements OnModuleInit {
             {
               type: "text",
               text:
-                "Analizza la visura e restituisci i dati dell'immobile principale indicati nei Dati della richiesta o nella prima riga dei DATI IDENTIFICATIVI: provincia, comune, foglio e particella. Per provincia preferisci la sigla automobilistica se e esplicita o ricavabile dalla denominazione (es. COMO -> CO, VARESE -> VA, TREVISO -> TV). Per comune usa il nome del comune, senza codice catastale. Foglio e particella devono rimanere stringhe esatte, senza zeri aggiunti e senza includere il subalterno. Se un dato non e leggibile usa null. Riporta in evidence la riga o le parole lette nella visura." +
+                "Analizza la visura e restituisci i dati dell'immobile principale indicati nei Dati della richiesta o nella prima riga dei DATI IDENTIFICATIVI: provincia, comune, foglio e particella. Per provincia preferisci la sigla automobilistica se e esplicita o ricavabile dalla denominazione (es. COMO -> CO, VARESE -> VA, TREVISO -> TV). Per comune usa il nome senza codice catastale; se la visura indica esplicitamente una sezione catastale o urbana, aggiungi il suffisso /sez.X (es. CESENA/sez.A). Foglio e particella devono rimanere stringhe esatte, senza zeri aggiunti e senza includere il subalterno. Se un dato non e leggibile usa null. Riporta in evidence la riga o le parole lette nella visura, includendo l'eventuale sezione." +
                 (retry
                   ? " Questo e un secondo tentativo: controlla in particolare l'intestazione 'Dati della richiesta', 'Comune di', 'Provincia di', 'Foglio:' e 'Particella:'."
                   : ""),
@@ -386,7 +541,13 @@ function parseOpenRouterVisuraExtraction(rawBody: string) {
 
 function validateVisuraExtractionResult(value: Partial<VisuraExtractionResult>, sourceText = ""): VisuraExtractionResult {
   const fallback = extractFromVisuraText(sourceText);
-  const comune = formatComuneName(optionalString(value.comune) ?? fallback.comune);
+  const modelComune = optionalString(value.comune);
+  const fallbackSection = fallback.comune?.match(/\/\s*sez\.\s*([A-Z0-9-]+)/i)?.[1];
+  const comune = formatComuneName(
+    modelComune && fallbackSection && !/\/\s*sez\./i.test(modelComune)
+      ? `${modelComune}/sez.${fallbackSection}`
+      : modelComune ?? fallback.comune,
+  );
   const provincia = normalizeProvince(optionalString(value.provincia) ?? fallback.provincia);
   const foglio = normalizeIdentifier(optionalString(value.foglio) ?? fallback.foglio);
   const particella = normalizeIdentifier(optionalString(value.particella) ?? fallback.particella);
@@ -419,22 +580,36 @@ function extractFromVisuraText(text: string) {
   const normalized = text.replace(/\s+/g, " ").trim();
   const comune = normalized.match(/Comune\s+di\s+(.+?)(?:\s+\(Codice:|\s+Provincia\s+di|\s+Catasto\s+)/i)?.[1];
   const provincia = normalized.match(/Provincia\s+di\s+([A-ZÀ-Ü' -]+?)(?:\s+Catasto\s+|\s+Sez\.|\s+Foglio:|$)/i)?.[1];
+  const section = normalized.match(/\bSez(?:ione)?\.?\s*(?:Urbana|Censuaria)?\s*:?\s*([A-Z0-9]{1,2})(?=\s|[,;]|$)/i)?.[1];
+  const comuneWithSection = comune && section && !/\/\s*sez\./i.test(comune)
+    ? `${comune}/sez.${section.toUpperCase()}`
+    : comune;
   const identificativi = normalized.match(/Foglio:\s*([A-Z0-9/-]+)\s+Particella:\s*([A-Z0-9/-]+)/i);
   return {
-    found: Boolean(comune && provincia && identificativi),
-    comune: optionalString(comune),
+    found: Boolean(comuneWithSection && provincia && identificativi),
+    comune: optionalString(comuneWithSection),
     provincia: optionalString(provincia),
     foglio: optionalString(identificativi?.[1]),
     particella: optionalString(identificativi?.[2]),
     evidence:
-      comune && provincia && identificativi
-        ? `Comune di ${comune}; Provincia di ${provincia}; Foglio ${identificativi[1]}; Particella ${identificativi[2]}`
+      comuneWithSection && provincia && identificativi
+        ? `Comune di ${comuneWithSection}; Provincia di ${provincia}; Foglio ${identificativi[1]}; Particella ${identificativi[2]}`
         : null,
   };
 }
 
 function scoreExtraction(value: VisuraExtractionResult) {
   return Number(Boolean(value.found)) + [value.provincia, value.comune, value.foglio, value.particella].filter(Boolean).length;
+}
+
+function evidenceSupportsSection(evidence: string | null, section: string) {
+  if (!evidence) return false;
+  const normalizedEvidence = evidence
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toUpperCase();
+  const escapedSection = section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\bSEZ(?:IONE)?\\b(?:\\s+[A-Z]+){0,4}\\s*[:.-]?\\s*${escapedSection}\\b`).test(normalizedEvidence);
 }
 
 function normalizeIdentifier(value?: string) {

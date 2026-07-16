@@ -9,6 +9,7 @@ import type {
   PropertyPriceList,
   StudyVersion,
 } from "../generated/prisma/client.js";
+import { resolveFormapsTerritory } from "../formaps-territories/formaps-territory-resolver.js";
 import { ImuService } from "../imu/imu.service.js";
 import type { ImuCalculation } from "../imu/imu.types.js";
 import { PriceListsService } from "../price-lists/price-lists.service.js";
@@ -317,6 +318,7 @@ export class StudiesService {
   }
 
   private toApiProperty(property: PropertyWithDocuments) {
+    const formapsTerritory = resolveFormapsTerritory(property.provincia, property.comune).selected;
     const planimetria =
       property.documents.find((document) => document.type === DocumentType.PLANIMETRIA)
       ?? property.documents.find((document) => document.type === DocumentType.ELABORATO_PLANIMETRICO);
@@ -347,6 +349,8 @@ export class StudiesService {
       address: property.address,
       comune: property.comune,
       provincia: property.provincia,
+      formapsComune: formapsTerritory?.municipality ?? null,
+      formapsProvincia: formapsTerritory?.provinceId ?? null,
       ubicazione: property.ubicazione,
       foglio: property.foglio,
       particella: property.particella,

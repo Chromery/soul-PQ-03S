@@ -89,6 +89,8 @@ type PropertyItem = {
   address: string;
   comune: string;
   provincia?: string | null;
+  formapsComune?: string | null;
+  formapsProvincia?: string | null;
   ubicazione?: string | null;
   foglio?: string | null;
   particella?: string | null;

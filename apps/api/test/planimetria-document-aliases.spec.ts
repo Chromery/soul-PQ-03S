@@ -9,6 +9,7 @@ import { StudiesService } from "../src/studies/studies.service.js";
 for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
   test(`il sync normalizza ${alias} come PLANIMETRIA e avvia l'estrazione della scala`, async () => {
     const documentUpserts: Array<Record<string, any>> = [];
+    const propertyUpserts: Array<Record<string, any>> = [];
     const extractionJobs: Array<Record<string, any>> = [];
     const storageWrites: Array<Record<string, any>> = [];
     const prisma = {
@@ -17,7 +18,12 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
         upsert: async () => undefined,
       },
       studyVersion: { upsert: async () => undefined },
-      property: { upsert: async () => undefined },
+      property: {
+        upsert: async (input: Record<string, any>) => {
+          propertyUpserts.push(input);
+          return undefined;
+        },
+      },
       propertyDocument: {
         upsert: async (input: Record<string, any>) => {
           documentUpserts.push(input);
@@ -60,6 +66,10 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
             {
               immobile_erp_id: "I-1",
               ubicazione: "Via Test 1",
+              comune: "Monza",
+              provincia: "MB",
+              foglio: "1",
+              particella: "2",
               categoria: "D/1",
               in_studio: true,
               documenti: [
@@ -77,6 +87,8 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
     });
 
     assert.equal(documentUpserts.length, 1);
+    assert.equal(propertyUpserts[0]?.create.provincia, "MI");
+    assert.equal(propertyUpserts[0]?.create.comune, "MONZA");
     assert.equal(documentUpserts[0]?.create.type, DocumentType.PLANIMETRIA);
     assert.equal(storageWrites[0]?.tipo, "planimetria");
     assert.equal(extractionJobs.length, 1);
@@ -221,4 +233,6 @@ test("la risposta studio espone un record elaborato legacy come planimetria", as
 
   assert.equal(apiProperty?.documents.planimetria, "elaborato.pdf");
   assert.equal(apiProperty?.documentUrls.planimetria, "/api/properties/I-1/documents/planimetria/download");
+  assert.equal(apiProperty?.formapsProvincia, "MI");
+  assert.equal(apiProperty?.formapsComune, "MILANO");
 });

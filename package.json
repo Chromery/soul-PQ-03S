@@ -19,6 +19,7 @@
     "test": "npm test --workspace @soul/api",
     "prezzari:import": "node apps/api/scripts/import-price-lists.mjs",
     "examples:import": "node apps/api/scripts/import-real-examples.mjs",
+    "formaps:sync": "npm run formaps:sync --workspace @soul/api",
     "imu:sync": "npm run imu:sync --workspace @soul/api --",
     "test:imu": "npm run test:imu --workspace @soul/api",
     "db:generate": "npm run prisma:generate --workspace @soul/api",

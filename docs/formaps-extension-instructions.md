@@ -133,6 +133,10 @@ Non chiamarlo dopo await, timeout, polling o callback non direttamente collegati
 Il pannello di stato dell'estensione è posizionato sotto i comandi in alto a destra di forMaps. Il pulsante
 `−` lo riduce alla sola intestazione, mentre `+` ripristina il messaggio operativo.
 
+Dalla versione 0.4.0 provincia e comune arrivano già normalizzati sul catalogo catastale forMaps. Se un valore
+non coincide ancora, l'estensione confronta la lista completa restituita dal Select2 e accetta il candidato più
+simile soltanto quando supera soglia e margine di sicurezza; le sezioni ambigue non vengono scelte arbitrariamente.
+
 `qwenCaptchaEndpoint`:
 
 - in alpha deve essere `https://soul-pq-alpha.rainailab.com/api/qwen-captcha` o lo stesso path sulla origin corrente;

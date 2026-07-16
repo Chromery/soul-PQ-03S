@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import { erpDocumentType, parseDocumentType } from "../document-types.js";
+import { resolveFormapsTerritory } from "../formaps-territories/formaps-territory-resolver.js";
 import { DocumentType } from "../generated/prisma/enums.js";
 import type { FeasibilityStudy, PlanAnalysisDraft, Property, PropertyDocument, StudyVersion } from "../generated/prisma/client.js";
 import { ImuService } from "../imu/imu.service.js";
@@ -352,13 +353,17 @@ export class ErpSyncService {
     const currentImu = optionalDecimalNumber(input.imu_attuale);
     const estimatedImu = optionalDecimalNumber(input.imu_prevista);
     const categoria = normalizeCategory(optionalString(input.categoria) ?? optionalString(input.classamento) ?? "");
-    const comune = optionalString(input.comune) ?? comuneFromUbicazione(optionalString(input.ubicazione)) ?? "";
+    const inputComune = optionalString(input.comune) ?? comuneFromUbicazione(optionalString(input.ubicazione)) ?? "";
+    const inputProvincia = optionalString(input.provincia) ?? "";
+    const territory = resolveFormapsTerritory(inputProvincia, inputComune);
+    const comune = territory.selected?.municipality ?? inputComune;
+    const provincia = territory.selected?.provinceId ?? inputProvincia;
     const diffPercent = currentRendita === 0 ? 0 : ((estimatedRendita - currentRendita) / currentRendita) * 100;
     return {
       id,
       address: optionalString(input.indirizzo_normalizzato) ?? optionalString(input.ubicazione) ?? "",
       comune,
-      provincia: optionalString(input.provincia) ?? "",
+      provincia,
       ubicazione: optionalString(input.ubicazione),
       foglio: optionalString(input.foglio),
       particella: optionalString(input.particella),
@@ -605,7 +610,9 @@ function uniqueDocuments(documents: NormalizedDocument[]) {
 }
 
 function hasCompleteCadastralData(property: Pick<NormalizedProperty, "provincia" | "comune" | "foglio" | "particella">) {
-  return Boolean(property.provincia && property.comune && property.foglio && property.particella);
+  if (!property.provincia || !property.comune || !property.foglio || !property.particella) return false;
+  if (["BZ", "TN"].includes(property.provincia.toUpperCase())) return true;
+  return Boolean(resolveFormapsTerritory(property.provincia, property.comune).selected);
 }
 
 function normalizeCategory(value: string) {
