@@ -110,21 +110,28 @@ export function resolveFormapsTerritory(
   const gap = first.score - (second?.score ?? 0);
   const uniqueExactMunicipality = exactMunicipality
     && ranked.filter((candidate) => compactKey(candidate.municipality) === compactKey(municipality)).length === 1;
+  const missingCadastralSection = !hasCadastralSection(municipality)
+    && ranked.filter((candidate) => (
+      hasCadastralSection(candidate.municipality)
+      && compactMunicipalityBase(candidate.municipality) === compactMunicipalityBase(municipality)
+    )).length > 1;
   const normalizedMatch = exactMunicipality
     && (exactProvince || uniqueExactMunicipality || first.provinceScore >= 0.9 || gap >= 0.08);
   const confidentFuzzy = first.score >= 0.86
     && first.municipalityScore >= 0.82
     && (gap >= 0.035 || first.provinceScore >= 0.98);
 
-  const strategy = exactMatch
-    ? "exact"
-    : normalizedMatch
-      ? "normalized"
-      : confidentFuzzy
-        ? "fuzzy"
-        : first.score >= 0.55
-          ? "ambiguous"
-          : "unresolved";
+  const strategy = missingCadastralSection
+    ? "ambiguous"
+    : exactMatch
+      ? "exact"
+      : normalizedMatch
+        ? "normalized"
+        : confidentFuzzy
+          ? "fuzzy"
+          : first.score >= 0.55
+            ? "ambiguous"
+            : "unresolved";
   return cacheResolution(cacheKey, {
     input: { province, municipality },
     exactMatch,

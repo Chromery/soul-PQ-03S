@@ -55,6 +55,15 @@ test("non inventa la sezione quando più voci forMaps sono equivalenti", () => {
   );
 });
 
+test("non inventa la sezione nemmeno quando la provincia coincide esattamente", () => {
+  for (const [province, municipality] of [["VE", "Venezia"], ["BA", "Bari"]]) {
+    const result = resolveFormapsTerritory(province, municipality);
+    assert.equal(result.strategy, "ambiguous");
+    assert.equal(result.selected, null);
+    assert.ok(result.candidates.length > 1);
+  }
+});
+
 test("non chiama NeuralWatt quando provincia e comune hanno un match esatto", async () => {
   const service = extractionService({
     found: true,
