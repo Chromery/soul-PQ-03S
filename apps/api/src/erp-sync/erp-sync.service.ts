@@ -367,8 +367,9 @@ export class ErpSyncService {
     const currentImu = optionalDecimalNumber(input.imu_attuale);
     const estimatedImu = optionalDecimalNumber(input.imu_prevista);
     const categoria = normalizeCategory(optionalString(input.categoria) ?? optionalString(input.classamento) ?? "");
-    const inputComune = optionalString(input.comune) ?? comuneFromUbicazione(optionalString(input.ubicazione)) ?? "";
-    const inputProvincia = optionalString(input.provincia) ?? "";
+    const inputUbicazione = optionalString(input.ubicazione);
+    const inputComune = optionalString(input.comune) ?? comuneFromUbicazione(inputUbicazione) ?? "";
+    const inputProvincia = optionalString(input.provincia) ?? provinciaFromUbicazione(inputUbicazione) ?? "";
     const inputSection = normalizeCadastralSection(
       optionalString(input.sezione_catastale ?? input.sezione_urbana ?? input.sezione),
     );
@@ -386,7 +387,7 @@ export class ErpSyncService {
       address: optionalString(input.indirizzo_normalizzato) ?? optionalString(input.ubicazione) ?? "",
       comune,
       provincia,
-      ubicazione: optionalString(input.ubicazione),
+      ubicazione: inputUbicazione,
       foglio: optionalString(input.foglio),
       particella: optionalString(input.particella),
       subalterno: optionalString(input.sub ?? input.subalterno),
@@ -665,6 +666,10 @@ function normalizeCategory(value: string) {
 function comuneFromUbicazione(value?: string) {
   const match = value?.match(/^([A-ZÀ-Ü' -]+)\(/i);
   return match?.[1]?.trim();
+}
+
+function provinciaFromUbicazione(value?: string) {
+  return value?.match(/^[A-ZÀ-Ü' -]+\(\s*([A-Z]{2})\s*\)/i)?.[1]?.toUpperCase();
 }
 
 function isCategoryD(value: string) {

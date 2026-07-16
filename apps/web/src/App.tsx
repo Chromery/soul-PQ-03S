@@ -5056,10 +5056,7 @@ function StudyDetail({
   }
 
   function propertyForMapsPayload(property: PropertyItem) {
-    return {
-      ...property,
-      provincia: property.provincia || study.provincia,
-    };
+    return property;
   }
 
   function handleOpenDocument(property: PropertyItem, type: PropertyDocumentKind) {

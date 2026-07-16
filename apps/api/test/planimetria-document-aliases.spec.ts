@@ -96,6 +96,35 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
   });
 }
 
+test("il sync ricava la provincia dalla ubicazione catastale quando il campo ERP è assente", () => {
+  const service = new ErpSyncService(
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    { get: (_name: string, fallback: string) => fallback } as never,
+  );
+  const property = (service as unknown as {
+    normalizeProperty: (input: Record<string, unknown>, index: number) => {
+      comune: string;
+      provincia: string;
+    };
+  }).normalizeProperty({
+    immobile_erp_id: "1555370",
+    ubicazione: "BARI(BA) STRADA BARI-MODUGNO-TORITTO n. 10 Piano S1-T",
+    comune: "BARI",
+    foglio: "36",
+    particella: "127",
+    categoria: "D/7",
+    documenti: [],
+  }, 0);
+
+  assert.equal(property.comune, "BARI");
+  assert.equal(property.provincia, "BA");
+});
+
 test("il download planimetria usa un record ELABORATO_PLANIMETRICO legacy", async () => {
   const requestedTypes: DocumentType[] = [];
   const legacyDocument = {

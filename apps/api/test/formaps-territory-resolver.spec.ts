@@ -21,6 +21,14 @@ test("risolve match esatti anche con accenti e apostrofi differenti", () => {
   assert.equal(result.selected?.municipality, "CANICATTI'");
 });
 
+test("risolve un comune univoco anche quando la provincia ERP è assente", () => {
+  const result = resolveFormapsTerritory(null, "Modugno");
+  assert.equal(result.strategy, "normalized");
+  assert.equal(result.selected?.provinceId, "BA");
+  assert.equal(result.selected?.municipalityId, "F262");
+  assert.equal(result.selected?.municipality, "MODUGNO");
+});
+
 test("converte province amministrative nuove nelle province catastali forMaps", () => {
   const monza = resolveFormapsTerritory("MB", "Monza");
   assert.equal(monza.strategy, "normalized");
