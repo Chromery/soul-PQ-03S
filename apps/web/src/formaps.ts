@@ -1,3 +1,5 @@
+import { FORMAPS_PROVINCE_NAMES_BY_CODE } from "./formaps-provinces.generated";
+
 export type ForMapsEntry = {
   provincia: string;
   comune: string;
@@ -8,6 +10,8 @@ export type ForMapsEntry = {
 type PropertyLike = {
   provincia?: string | null;
   comune?: string | null;
+  formapsProvincia?: string | null;
+  formapsComune?: string | null;
   foglio?: string | number | null;
   particella?: string | number | null;
 };
@@ -19,79 +23,9 @@ const defaultLayers = [
   { Nome: "simboloGraffa", Acceso: true, Opacita: 100 },
 ];
 
-const PROVINCE_NAMES_BY_CODE: Record<string, string> = {
-  AG: "Agrigento",
-  AL: "Alessandria",
-  AN: "Ancona",
-  AP: "Ascoli Piceno",
-  AR: "Arezzo",
-  BA: "Bari",
-  BG: "Bergamo",
-  BL: "Belluno",
-  BO: "Bologna",
-  BS: "Brescia",
-  BZ: "Bolzano",
-  CA: "Cagliari",
-  CB: "Campobasso",
-  CE: "Caserta",
-  CL: "Caltanissetta",
-  CN: "Cuneo",
-  CO: "Como",
-  CT: "Catania",
-  FE: "Ferrara",
-  FI: "Firenze",
-  GE: "Genova",
-  GO: "Gorizia",
-  GR: "Grosseto",
-  LC: "Lecco",
-  LI: "Livorno",
-  LO: "Lodi",
-  LT: "Latina",
-  LU: "Lucca",
-  MC: "Macerata",
-  ME: "Messina",
-  MI: "Milano",
-  MN: "Mantova",
-  MO: "Modena",
-  MS: "Massa Carrara",
-  MT: "Matera",
-  NA: "Napoli",
-  NO: "Novara",
-  PA: "Palermo",
-  PD: "Padova",
-  PG: "Perugia",
-  PI: "Pisa",
-  PN: "Pordenone",
-  PO: "Prato",
-  PR: "Parma",
-  PT: "Pistoia",
-  PU: "Pesaro e Urbino",
-  PV: "Pavia",
-  PZ: "Potenza",
-  RC: "Reggio Calabria",
-  RE: "Reggio Emilia",
-  RM: "Roma",
-  RO: "Rovigo",
-  SI: "Siena",
-  SO: "Sondrio",
-  SR: "Siracusa",
-  SS: "Sassari",
-  SV: "Savona",
-  TE: "Teramo",
-  TO: "Torino",
-  TR: "Terni",
-  TS: "Trieste",
-  TV: "Treviso",
-  UD: "Udine",
-  VA: "Varese",
-  VE: "Venezia",
-  VI: "Vicenza",
-  VR: "Verona",
-};
-
 export function toForMapsEntry(property: PropertyLike): ForMapsEntry | null {
-  const provincia = normalizeRequired(property.provincia);
-  const comune = normalizeRequired(property.comune);
+  const provincia = normalizeRequired(property.formapsProvincia ?? property.provincia);
+  const comune = normalizeRequired(property.formapsComune ?? property.comune);
   const foglio = normalizeRequired(property.foglio);
   const particella = normalizeRequired(property.particella);
   if (!provincia || !comune || !foglio || !particella) return null;
@@ -169,6 +103,6 @@ function normalizeRequired(value: string | number | null | undefined) {
 
 function normalizeProvince(value: string) {
   const code = value.trim().toLocaleUpperCase("it-IT");
-  if (/^[A-Z]{2}$/.test(code)) return PROVINCE_NAMES_BY_CODE[code] ?? code;
+  if (/^[A-Z]{2}$/.test(code)) return FORMAPS_PROVINCE_NAMES_BY_CODE[code] ?? code;
   return value.trim();
 }

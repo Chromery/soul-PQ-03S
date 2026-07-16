@@ -102,6 +102,9 @@ model Property {
   foglio             String?
   particella         String?
   subalterno         String?
+  sezioneCatastale   String?
+  codiceComuneCatastale String?
+  formapsMunicipalityId String?
   categoria          String
   titolarita         String?
   currentRendita     Decimal             @db.Decimal(14, 2)
@@ -214,6 +217,10 @@ model VisuraExtractionJob {
   extractedComune     String?
   extractedFoglio     String?
   extractedParticella String?
+  extractedSezioneCatastale String?
+  extractedCodiceComuneCatastale String?
+  extractedFormapsMunicipalityId String?
+  extractionMethod    String?
   confidence          Decimal?               @db.Decimal(5, 4)
   evidence            String?
   warnings            Json?

@@ -89,10 +89,15 @@ type PropertyItem = {
   address: string;
   comune: string;
   provincia?: string | null;
+  formapsComune?: string | null;
+  formapsProvincia?: string | null;
   ubicazione?: string | null;
   foglio?: string | null;
   particella?: string | null;
   subalterno?: string | null;
+  sezioneCatastale?: string | null;
+  codiceComuneCatastale?: string | null;
+  formapsMunicipalityId?: string | null;
   categoria: string;
   titolarita?: string | null;
   currentRendita: number;
@@ -5051,10 +5056,7 @@ function StudyDetail({
   }
 
   function propertyForMapsPayload(property: PropertyItem) {
-    return {
-      ...property,
-      provincia: property.provincia || study.provincia,
-    };
+    return property;
   }
 
   function handleOpenDocument(property: PropertyItem, type: PropertyDocumentKind) {

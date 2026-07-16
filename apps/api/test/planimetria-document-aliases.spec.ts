@@ -9,6 +9,7 @@ import { StudiesService } from "../src/studies/studies.service.js";
 for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
   test(`il sync normalizza ${alias} come PLANIMETRIA e avvia l'estrazione della scala`, async () => {
     const documentUpserts: Array<Record<string, any>> = [];
+    const propertyUpserts: Array<Record<string, any>> = [];
     const extractionJobs: Array<Record<string, any>> = [];
     const storageWrites: Array<Record<string, any>> = [];
     const prisma = {
@@ -17,7 +18,12 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
         upsert: async () => undefined,
       },
       studyVersion: { upsert: async () => undefined },
-      property: { upsert: async () => undefined },
+      property: {
+        upsert: async (input: Record<string, any>) => {
+          propertyUpserts.push(input);
+          return undefined;
+        },
+      },
       propertyDocument: {
         upsert: async (input: Record<string, any>) => {
           documentUpserts.push(input);
@@ -60,6 +66,10 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
             {
               immobile_erp_id: "I-1",
               ubicazione: "Via Test 1",
+              comune: "Monza",
+              provincia: "MB",
+              foglio: "1",
+              particella: "2",
               categoria: "D/1",
               in_studio: true,
               documenti: [
@@ -77,12 +87,43 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
     });
 
     assert.equal(documentUpserts.length, 1);
+    assert.equal(propertyUpserts[0]?.create.provincia, "MI");
+    assert.equal(propertyUpserts[0]?.create.comune, "MONZA");
     assert.equal(documentUpserts[0]?.create.type, DocumentType.PLANIMETRIA);
     assert.equal(storageWrites[0]?.tipo, "planimetria");
     assert.equal(extractionJobs.length, 1);
     assert.equal(response.risultati[0]?.documenti_salvati, 1);
   });
 }
+
+test("il sync ricava la provincia dalla ubicazione catastale quando il campo ERP è assente", () => {
+  const service = new ErpSyncService(
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    { get: (_name: string, fallback: string) => fallback } as never,
+  );
+  const property = (service as unknown as {
+    normalizeProperty: (input: Record<string, unknown>, index: number) => {
+      comune: string;
+      provincia: string;
+    };
+  }).normalizeProperty({
+    immobile_erp_id: "1555370",
+    ubicazione: "BARI(BA) STRADA BARI-MODUGNO-TORITTO n. 10 Piano S1-T",
+    comune: "BARI",
+    foglio: "36",
+    particella: "127",
+    categoria: "D/7",
+    documenti: [],
+  }, 0);
+
+  assert.equal(property.comune, "BARI");
+  assert.equal(property.provincia, "BA");
+});
 
 test("il download planimetria usa un record ELABORATO_PLANIMETRICO legacy", async () => {
   const requestedTypes: DocumentType[] = [];
@@ -221,4 +262,6 @@ test("la risposta studio espone un record elaborato legacy come planimetria", as
 
   assert.equal(apiProperty?.documents.planimetria, "elaborato.pdf");
   assert.equal(apiProperty?.documentUrls.planimetria, "/api/properties/I-1/documents/planimetria/download");
+  assert.equal(apiProperty?.formapsProvincia, "MI");
+  assert.equal(apiProperty?.formapsComune, "MILANO");
 });
