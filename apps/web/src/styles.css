@@ -1232,13 +1232,23 @@ a.button {
 
 .property-tile {
   position: relative;
-  width: 42px;
-  height: 42px;
-  display: inline-grid;
-  place-items: center;
+  width: 58px;
+  height: 58px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 4px 4px;
   border: 1px solid currentColor;
   border-radius: 7px;
   background: #fff;
+}
+
+.property-tile-symbol {
+  min-height: 23px;
+  display: grid;
+  place-items: center;
 }
 
 .property-tile::after {
@@ -1372,6 +1382,47 @@ a.button {
 .tooltip-documents button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.document-availability {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.document-availability-item {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.document-availability-item.available {
+  color: #15803d;
+  background: #f0fdf4;
+}
+
+.document-availability-item.missing {
+  color: #8a94a5;
+  background: #f8fafc;
+}
+
+.document-availability.compact {
+  gap: 3px;
+}
+
+.document-availability.compact .document-availability-item {
+  min-height: 17px;
+  gap: 2px;
+  padding: 0 3px;
+  border-radius: 4px;
 }
 
 .summary-grid,
@@ -2547,7 +2598,7 @@ a.button {
 }
 
 .property-operational-table {
-  min-width: 1780px;
+  min-width: 1930px;
 }
 
 .property-operational-table th,
@@ -2600,11 +2651,16 @@ a.button {
 
 .property-operational-table th:nth-child(14),
 .property-operational-table td:nth-child(14) {
-  width: 142px;
+  width: 158px;
 }
 
 .property-operational-table th:nth-child(15),
 .property-operational-table td:nth-child(15) {
+  width: 142px;
+}
+
+.property-operational-table th:nth-child(16),
+.property-operational-table td:nth-child(16) {
   width: 122px;
 }
 
@@ -3158,6 +3214,31 @@ a.button {
   color: var(--secondary);
   font-size: 13px;
   font-weight: 700;
+}
+
+.property-area-cadastral-reference {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.property-area-cadastral-reference span {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid #dce8f6;
+  border-radius: 6px;
+  color: var(--secondary);
+  background: #f8fbff;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.property-area-cadastral-reference strong {
+  color: var(--text);
 }
 
 .property-area-modal .property-area-detail-actions {
@@ -4766,6 +4847,28 @@ a.button {
   border-bottom: 0;
 }
 
+.area-selection-table tfoot th,
+.area-selection-table tfoot td {
+  position: sticky;
+  bottom: 0;
+  top: auto;
+  z-index: 1;
+  border-top: 2px solid #cbd7e6;
+  border-bottom: 0;
+  background: #eef4fb;
+}
+
+.area-selection-table tfoot th {
+  color: #173154;
+  text-align: right;
+}
+
+.area-selection-table tfoot strong {
+  color: #173154;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .area-selection-table tbody tr.selected td {
   background: #f5f9ff;
 }
@@ -5331,6 +5434,32 @@ a.button {
   color: #9a6700;
   font-size: 11px;
   font-weight: 750;
+}
+
+.area-totals-content .editor-imu-summary {
+  gap: 5px;
+  background: #f8fbff;
+}
+
+.area-totals-content .editor-imu-summary small {
+  color: #526780;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.area-totals-content .editor-imu-summary .editor-imu-source {
+  color: #31567f;
+}
+
+.editor-imu-source a {
+  display: inline-flex;
+  margin-left: 5px;
+  color: var(--primary);
+  font-weight: 850;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .selected-areas-list {

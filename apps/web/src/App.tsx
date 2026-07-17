@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -1613,6 +1614,38 @@ function propertyDocumentUrl(property: PropertyItem, type: PropertyDocumentKind)
 
 function propertyDocumentLabel(type: PropertyDocumentKind) {
   return type === "planimetria" ? "Planimetria PDF" : "Visura PDF";
+}
+
+function PropertyDocumentAvailability({
+  property,
+  compact = false,
+}: {
+  property: PropertyItem;
+  compact?: boolean;
+}) {
+  const documents: Array<{ type: PropertyDocumentKind; label: string; shortLabel: string; icon: ReactNode }> = [
+    { type: "planimetria", label: "Planimetria", shortLabel: "Plan.", icon: <File size={compact ? 11 : 13} /> },
+    { type: "visura", label: "Visura", shortLabel: "Vis.", icon: <FileText size={compact ? 11 : 13} /> },
+  ];
+  return (
+    <div className={`document-availability ${compact ? "compact" : ""}`} aria-label="Disponibilità documenti">
+      {documents.map((document) => {
+        const available = Boolean(propertyDocumentUrl(property, document.type));
+        return (
+          <span
+            key={document.type}
+            className={`document-availability-item ${available ? "available" : "missing"}`}
+            title={`${document.label}: ${available ? "disponibile" : "non disponibile"}`}
+            aria-label={`${document.label} ${available ? "disponibile" : "non disponibile"}`}
+          >
+            {document.icon}
+            {!compact && <span>{document.shortLabel}</span>}
+            {available ? <CheckCircle2 size={compact ? 10 : 12} /> : <X size={compact ? 10 : 12} />}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 function openPropertyDocument(
@@ -4433,7 +4466,10 @@ function StudyRows({
                       tabIndex={0}
                       aria-label={`Dettagli immobile ${property.address}, ${property.comune}`}
                     >
-                      {property.categoria.startsWith("D/") ? <Factory size={20} /> : <Home size={20} />}
+                      <span className="property-tile-symbol">
+                        {property.categoria.startsWith("D/") ? <Factory size={20} /> : <Home size={20} />}
+                      </span>
+                      <PropertyDocumentAvailability property={property} compact />
                       <div className="property-tooltip" role="tooltip">
                         <strong>{property.address}</strong>
                         <small>{property.comune}</small>
@@ -5223,6 +5259,7 @@ function StudyDetail({
                 <PropertySortHeader label="IMU attuale" sortKey="currentImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="IMU prevista" sortKey="estimatedImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Diff. IMU" sortKey="imuDiff" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <th>Documenti</th>
                 <PropertySortHeader label="Titolarità" sortKey="titolarita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Esito" sortKey="outcome" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
               </tr>
@@ -5284,11 +5321,12 @@ function StudyDetail({
                     <td>
                       <MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} favorableDirection="down" />
                     </td>
-                    <td>{property.currentImu === null || property.currentImu === undefined ? "In attesa ERP" : formatEuro(property.currentImu)}</td>
+                    <td><ImuCurrent property={property} /></td>
                     <td><ImuEstimate property={property} /></td>
                     <td>
                       <MoneyPercentStack amount={propertyImuDiffAmount(property)} percent={imuPercent} />
                     </td>
+                    <td><PropertyDocumentAvailability property={property} /></td>
                     <td>{formatTitolarita(property.titolarita)}</td>
                     <td>
                       <OutcomeSelect
@@ -5670,6 +5708,11 @@ function PropertyAreaDetail({
             <p>
               {propertyLocation(property)} - {property.categoria}
             </p>
+            <div className="property-area-cadastral-reference" aria-label="Riferimenti catastali">
+              <span>Foglio <strong>{property.foglio || "—"}</strong></span>
+              <span>Part. <strong>{property.particella || "—"}</strong></span>
+              <span>Sub. <strong>{property.subalterno || "—"}</strong></span>
+            </div>
           </div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi lista aree">
             <X size={16} />
@@ -6033,6 +6076,26 @@ function ImuEstimate({ property }: { property: PropertyItem }) {
   );
 }
 
+function ImuCurrent({ property }: { property: PropertyItem }) {
+  const calculation = property.currentImuCalculation;
+  if (property.currentImu === null || property.currentImu === undefined) {
+    return <span className="delta muted">Non calcolabile</span>;
+  }
+  if (!calculation || calculation.status !== "calculated") return <>{formatEuro(property.currentImu)}</>;
+  const formula = imuFormulaText(property.currentRendita, calculation);
+  return (
+    <div className="imu-estimate">
+      <strong
+        className="imu-estimate-value"
+        title={formula}
+        aria-label={`${formatEuro(property.currentImu)}. Formula: ${formula}`}
+      >
+        {formatEuro(property.currentImu)}
+      </strong>
+    </div>
+  );
+}
+
 function ImuCalculationBreakdown({ property }: { property: PropertyItem }) {
   const calculation = property.imuCalculation;
   const currentCalculation = property.currentImuCalculation;
@@ -6104,7 +6167,7 @@ function ImuCalculationBreakdown({ property }: { property: PropertyItem }) {
         </div>
         <p>
           {currentImuSource === "calculated"
-            ? "Calcolata da PQ dalla rendita attuale perché il dato registrato non era disponibile."
+            ? "Calcolata da PQ dalla rendita attuale con la stessa aliquota comunale e la stessa metodologia usate per l’IMU prevista."
             : currentImuSource === "stored"
               ? "Dato registrato nell’ERP o inserito manualmente: PQ non lo ha ricalcolato."
               : "Né il dato registrato né un’aliquota calcolabile sono disponibili."}

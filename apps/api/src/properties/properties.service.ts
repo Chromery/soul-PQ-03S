@@ -90,9 +90,8 @@ export class PropertiesService {
     const estimatedImuCalculation = totalEstimatedRendita === null
       ? null
       : this.calculateImu(totalEstimatedRendita, property);
-    const currentImu = property.currentImu === null
-      ? calculatedAmount(currentImuCalculation)
-      : Number(property.currentImu);
+    const currentImu = calculatedAmount(currentImuCalculation)
+      ?? (property.currentImu === null ? null : Number(property.currentImu));
     const estimatedImu = estimatedImuCalculation === null ? null : calculatedAmount(estimatedImuCalculation);
     const data = {
       documentSource: (payload.document === null ? Prisma.JsonNull : payload.document) as Prisma.InputJsonValue,
@@ -268,8 +267,8 @@ export class PropertiesService {
     );
     const currentImu = sum(
       properties.map((property) => {
-        if (property.currentImu !== null) return Number(property.currentImu);
-        return calculatedAmount(this.calculateImu(Number(property.currentRendita), property)) ?? 0;
+        return calculatedAmount(this.calculateImu(Number(property.currentRendita), property))
+          ?? (property.currentImu === null ? 0 : Number(property.currentImu));
       }),
     );
     const estimatedImu = sum(

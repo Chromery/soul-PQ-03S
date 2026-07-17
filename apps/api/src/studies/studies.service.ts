@@ -175,8 +175,8 @@ export class StudiesService {
     const estimatedImuCalculation = input.estimatedRendita > 0
       ? this.calculateImu(input.estimatedRendita, input, study.provincia)
       : null;
-    const currentImu = input.currentImu ?? calculatedAmount(currentImuCalculation);
-    const estimatedImu = input.estimatedImu ?? calculatedAmount(estimatedImuCalculation);
+    const currentImu = calculatedAmount(currentImuCalculation) ?? input.currentImu;
+    const estimatedImu = calculatedAmount(estimatedImuCalculation) ?? input.estimatedImu;
     await this.prisma.property.create({
       data: {
         id: propertyId,
@@ -285,7 +285,12 @@ export class StudiesService {
         .filter((property) => property.categoria.trim().toUpperCase().startsWith("D/"))
         .map((property) => Number(property.currentRendita)),
     );
-    const currentImu = sum(properties.map((property) => (property.currentImu === null ? 0 : Number(property.currentImu))));
+    const currentImu = sum(
+      properties.map((property) => (
+        calculatedAmount(this.calculateImu(Number(property.currentRendita), property))
+        ?? (property.currentImu === null ? 0 : Number(property.currentImu))
+      )),
+    );
     const estimatedImu = sum(
       properties.map((property) => {
         const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft)
@@ -337,15 +342,14 @@ export class StudiesService {
     const estimatedImuCalculation = estimatedRendita > 0 || property.hasStudy
       ? this.calculateImu(estimatedRendita, property)
       : null;
-    const currentImu = property.currentImu === null
-      ? calculatedAmount(currentImuCalculation)
-      : Number(property.currentImu);
+    const currentImu = calculatedAmount(currentImuCalculation)
+      ?? (property.currentImu === null ? null : Number(property.currentImu));
     const estimatedImu = calculatedAmount(estimatedImuCalculation)
       ?? (property.estimatedImu === null ? null : Number(property.estimatedImu));
-    const currentImuSource = property.currentImu !== null
-      ? "stored"
-      : currentImuCalculation.status === "calculated"
-        ? "calculated"
+    const currentImuSource = currentImuCalculation.status === "calculated"
+      ? "calculated"
+      : property.currentImu !== null
+        ? "stored"
         : "unavailable";
     const estimatedImuSource = estimatedImuCalculation?.status === "calculated"
       ? "calculated"

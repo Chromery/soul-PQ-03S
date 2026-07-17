@@ -128,6 +128,10 @@ type EditorProperty = {
   categoria: string;
   currentRendita: number;
   estimatedRendita: number;
+  currentImu?: number | null;
+  estimatedImu?: number | null;
+  currentImuCalculation?: PropertyImuCalculation | null;
+  imuCalculation?: PropertyImuCalculation | null;
   sheetSize?: SheetSize | null;
   scaleDenominator?: number | null;
   scaleSource?: ScaleSource | null;
@@ -735,6 +739,28 @@ function formatCompactM2(value: number) {
   return `${compactAreaFormatter.format(value)} m2`;
 }
 
+type CalculatedImu = Extract<PropertyImuCalculation, { status: "calculated" }>;
+
+function roundCurrency(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function calculateImuWithRate(rendita: number, rate: CalculatedImu) {
+  const taxableBase = roundCurrency(rendita * 1.05 * rate.cadastralMultiplier);
+  return {
+    taxableBase,
+    amount: roundCurrency(taxableBase * (rate.ratePercent / 100)),
+  };
+}
+
+function imuFormula(rendita: number, taxableBase: number, amount: number, rate: CalculatedImu) {
+  const rateLabel = rate.ratePercent.toLocaleString("it-IT", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  });
+  return `${moneyFormatter.format(rendita)} × 1,05 × ${rate.cadastralMultiplier} = ${moneyFormatter.format(taxableBase)}; ${moneyFormatter.format(taxableBase)} × ${rateLabel}% = ${moneyFormatter.format(amount)}`;
+}
+
 function pageRealAreaM2(sheetSize: SheetSize, scaleDenominator: number) {
   const sheet = SHEET_SIZES[sheetSize];
   const width = (sheet.widthMm / 1000) * scaleDenominator;
@@ -1086,14 +1112,7 @@ export default function PlanimetriaEditor({
         : null,
     [property.documentUrls?.planimetria, property.documents.planimetria],
   );
-  const forMapsEntry = useMemo(
-    () =>
-      toForMapsEntry({
-        ...property,
-        provincia: property.provincia || study.provincia,
-      }),
-    [property, study.provincia],
-  );
+  const forMapsEntry = useMemo(() => toForMapsEntry(property), [property]);
   const activeCustomUsage = customUsageByIdOrLabel(customUsages, activeCustomUsageId, customUsageLabel);
   const activeUsageOption =
     activeUsage === CUSTOM_USAGE_ID
@@ -1166,6 +1185,14 @@ export default function PlanimetriaEditor({
       { area: 0, amount: 0, rendita: 0 },
     );
   }, [selectedAreas]);
+
+  const currentImuCalculation =
+    property.currentImuCalculation?.status === "calculated" ? property.currentImuCalculation : null;
+  const estimatedImuRate =
+    property.imuCalculation?.status === "calculated" ? property.imuCalculation : currentImuCalculation;
+  const editorEstimatedImu = estimatedImuRate
+    ? calculateImuWithRate(totals.rendita, estimatedImuRate)
+    : null;
 
   const usageBreakdown = useMemo(() => {
     const byUsage = new Map<string, { usage: UsageDefinition; area: number }>();
@@ -6446,8 +6473,8 @@ export default function PlanimetriaEditor({
                           <th>Area</th>
                           <th>Tipologia</th>
                           <th>Nome custom</th>
-                          <th>Superficie</th>
-                          <th>€/m2</th>
+                          <th>Superficie (m²)</th>
+                          <th>Valore unitario (€/m²)</th>
                           <th>Valore</th>
                           <th>Pixel</th>
                           <th>Colore</th>
@@ -6565,7 +6592,6 @@ export default function PlanimetriaEditor({
                                         }
                                       }}
                                     />
-                                    <span className="area-value-unit">m2</span>
                                     {areaOverridden && <span className="manual-override-badge">Manuale</span>}
                                     {areaOverridden && (
                                       <button
@@ -6576,7 +6602,7 @@ export default function PlanimetriaEditor({
                                         Annulla
                                       </button>
                                     )}
-                                    {areaOverridden && <small>Calc. {formatM2(calculatedArea)}</small>}
+                                    {areaOverridden && <small>Calc. {areaFormatter.format(calculatedArea)}</small>}
                                   </div>
                                 </td>
                                 <td>
@@ -6599,7 +6625,6 @@ export default function PlanimetriaEditor({
                                         }
                                       }}
                                     />
-                                    <span className="area-value-unit">€/m2</span>
                                   </div>
                                 </td>
                                 <td>
@@ -6655,6 +6680,15 @@ export default function PlanimetriaEditor({
                           },
                         )}
                       </tbody>
+                      <tfoot>
+                        <tr>
+                          <th colSpan={6}>Nuova rendita totale (valore × 2%)</th>
+                          <td>
+                            <strong>{moneyFormatter.format(totals.rendita)}</strong>
+                          </td>
+                          <td colSpan={4}></td>
+                        </tr>
+                      </tfoot>
                     </table>
                   )}
                 </div>
@@ -6866,6 +6900,66 @@ export default function PlanimetriaEditor({
                   <span>Nuova rendita</span>
                   <strong>{moneyFormatter.format(totals.rendita)}</strong>
                   <small>Saggio di fruttuosita 2%</small>
+                </div>
+                <div className="editor-imu-summary">
+                  <span>IMU attuale</span>
+                  <strong>
+                    {property.currentImu === null || property.currentImu === undefined
+                      ? "Non calcolabile"
+                      : moneyFormatter.format(property.currentImu)}
+                  </strong>
+                  {currentImuCalculation ? (
+                    <>
+                      <small>
+                        {imuFormula(
+                          property.currentRendita,
+                          currentImuCalculation.taxableBase,
+                          currentImuCalculation.amount,
+                          currentImuCalculation,
+                        )}
+                      </small>
+                      <small className="editor-imu-source">
+                        Aliquota {currentImuCalculation.municipality} {currentImuCalculation.rateYear}
+                        {currentImuCalculation.usedFallback ? " (fallback)" : ""} · delibera n. {currentImuCalculation.actNumber}
+                        {currentImuCalculation.sourceUrl && (
+                          <a href={currentImuCalculation.sourceUrl} target="_blank" rel="noreferrer">
+                            Apri PDF
+                          </a>
+                        )}
+                      </small>
+                    </>
+                  ) : (
+                    <small>Formula non disponibile per il dato registrato</small>
+                  )}
+                </div>
+                <div className="editor-imu-summary">
+                  <span>IMU prevista</span>
+                  <strong>
+                    {editorEstimatedImu ? moneyFormatter.format(editorEstimatedImu.amount) : "Non calcolabile"}
+                  </strong>
+                  {editorEstimatedImu && estimatedImuRate ? (
+                    <>
+                      <small>
+                        {imuFormula(
+                          totals.rendita,
+                          editorEstimatedImu.taxableBase,
+                          editorEstimatedImu.amount,
+                          estimatedImuRate,
+                        )}
+                      </small>
+                      <small className="editor-imu-source">
+                        Aliquota {estimatedImuRate.municipality} {estimatedImuRate.rateYear}
+                        {estimatedImuRate.usedFallback ? " (fallback)" : ""} · delibera n. {estimatedImuRate.actNumber}
+                        {estimatedImuRate.sourceUrl && (
+                          <a href={estimatedImuRate.sourceUrl} target="_blank" rel="noreferrer">
+                            Apri PDF
+                          </a>
+                        )}
+                      </small>
+                    </>
+                  ) : (
+                    <small>Aliquota comunale non disponibile per comune o categoria catastale</small>
+                  )}
                 </div>
               </div>
             )}
