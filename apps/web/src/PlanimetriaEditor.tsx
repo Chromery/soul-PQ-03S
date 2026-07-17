@@ -6897,9 +6897,11 @@ export default function PlanimetriaEditor({
                   <small>Valori da validare</small>
                 </div>
                 <div>
-                  <span>Nuova rendita</span>
+                  <span>Nuova rendita catastale</span>
                   <strong>{moneyFormatter.format(totals.rendita)}</strong>
-                  <small>Saggio di fruttuosita 2%</small>
+                  <small>
+                    {moneyFormatter.format(totals.amount)} × 2% = {moneyFormatter.format(totals.rendita)}
+                  </small>
                 </div>
                 <div className="editor-imu-summary">
                   <span>IMU attuale</span>
