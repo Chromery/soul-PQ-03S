@@ -40,6 +40,13 @@ import {
 import { DEFAULT_EDITOR_PREFERENCES, readEditorPreferences } from "./editorPreferences";
 import { openEntriesInForMaps, toForMapsEntry } from "./formaps";
 import type { PropertyImuCalculation } from "./imu";
+import {
+  DEFAULT_LOT_VALUATION,
+  calculateAreaValuation,
+  normalizeLotValuation,
+  selectionIsIncludedInLot,
+  type LotValuation,
+} from "./lotValuation";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
@@ -208,6 +215,7 @@ type AreaSelection = {
   rate: number;
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
+  includedInLot?: boolean;
   totalPixels: number;
   region: Region;
   bitmap: HTMLCanvasElement;
@@ -230,6 +238,7 @@ type SavedSelection = {
   rate?: number;
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
+  includedInLot?: boolean;
   opacity: number;
   totalPixels: number;
   source?: SelectionSource;
@@ -297,6 +306,7 @@ type SavedDraft = {
   totalEstimatedRendita?: number;
   estimatedImu?: number | null;
   imuCalculation?: PropertyImuCalculation | null;
+  lotValuation?: LotValuation;
   selections: SavedSelection[];
 };
 
@@ -358,6 +368,7 @@ type ClipboardSelection = {
   rate: number;
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
+  includedInLot?: boolean;
   totalPixels: number;
   source: SelectionSource;
   polygon?: CanvasPoint[];
@@ -410,6 +421,7 @@ type EditorSnapshot = {
   dash: number;
   wallInclusionRadius: number | null;
   knownSegmentMeters: number;
+  lotValuation: LotValuation;
 };
 
 type AreaTuningTrial = {
@@ -481,7 +493,10 @@ const USAGES: UsageDefinition[] = [
 ];
 
 const CUSTOM_USAGE_ID: UsageId = "custom";
-const FIXED_USAGES = USAGES.filter((usage) => usage.id !== CUSTOM_USAGE_ID);
+const LEGACY_LOT_USAGE_ID: UsageId = "lotto";
+const FIXED_USAGES = USAGES.filter(
+  (usage) => usage.id !== CUSTOM_USAGE_ID && usage.id !== LEGACY_LOT_USAGE_ID,
+);
 const CUSTOM_USAGE_COLORS = ["#0891b2", "#0e7490", "#0f766e", "#2563eb", "#9333ea", "#be123c", "#ca8a04"];
 const FRUITFULNESS_RATE = 0.02;
 
@@ -795,12 +810,6 @@ function effectiveSelectionAreaM2(selection: Pick<AreaSelection, "areaOverrideM2
     : calculatedArea;
 }
 
-function effectiveSelectionAmount(selection: Pick<AreaSelection, "amountOverride">, calculatedAmount: number) {
-  return typeof selection.amountOverride === "number" && Number.isFinite(selection.amountOverride)
-    ? selection.amountOverride
-    : calculatedAmount;
-}
-
 function estimatedRenditaFromAmount(amount: number) {
   return amount * FRUITFULNESS_RATE;
 }
@@ -1018,6 +1027,9 @@ export default function PlanimetriaEditor({
   const [activeCustomUsageId, setActiveCustomUsageId] = useState<string | null>(null);
   const [customUsages, setCustomUsages] = useState<CustomUsagePreset[]>([]);
   const [customUsageLabel, setCustomUsageLabel] = useState("");
+  const [lotValuation, setLotValuation] = useState<LotValuation>(() => ({
+    ...DEFAULT_LOT_VALUATION,
+  }));
   const [scaleDenominator, setScaleDenominator] = useState(() => readEditorPreferences().scale.denominator);
   const [sheetSize, setSheetSize] = useState<SheetSize>(() => readEditorPreferences().scale.sheetSize);
   const [scaleSource, setScaleSource] = useState<ScaleSource>("DEFAULT");
@@ -1138,32 +1150,44 @@ export default function PlanimetriaEditor({
           scaleDenominator,
         );
         const area = effectiveSelectionAreaM2(selection, calculatedArea);
-        const calculatedAmount = area * selection.rate;
-        const amount = effectiveSelectionAmount(selection, calculatedAmount);
+        const includedInLot = selectionIsIncludedInLot(selection);
+        const valuation = calculateAreaValuation({
+          areaM2: area,
+          destinationRate: selection.rate,
+          destinationAmountOverride: selection.amountOverride,
+          includedInLot,
+          lotValuation,
+        });
         return {
           selection,
           index,
           usage,
           area,
           calculatedArea,
-          amount,
-          calculatedAmount,
+          amount: valuation.totalAmount,
+          destinationAmount: valuation.destinationAmount,
+          calculatedAmount: valuation.calculatedDestinationAmount,
+          lotAmount: valuation.lotAmount,
+          includedInLot,
           areaOverridden: typeof selection.areaOverrideM2 === "number" && Number.isFinite(selection.areaOverrideM2),
           amountOverridden: typeof selection.amountOverride === "number" && Number.isFinite(selection.amountOverride),
         };
       }),
-    [allSelections, customUsages, scaleDenominator, sheetSize, revision],
+    [allSelections, customUsages, lotValuation, scaleDenominator, sheetSize, revision],
   );
 
   const totals = useMemo(() => {
     return selectedAreas.reduce(
       (acc, area) => {
         acc.area += area.area;
+        acc.lotArea += area.includedInLot ? area.area : 0;
+        acc.destinationAmount += area.destinationAmount;
+        acc.lotAmount += area.lotAmount;
         acc.amount += area.amount;
         acc.rendita += estimatedRenditaFromAmount(area.amount);
         return acc;
       },
-      { area: 0, amount: 0, rendita: 0 },
+      { area: 0, lotArea: 0, destinationAmount: 0, lotAmount: 0, amount: 0, rendita: 0 },
     );
   }, [selectedAreas]);
 
@@ -1400,6 +1424,7 @@ export default function PlanimetriaEditor({
     setActiveCustomUsageId(null);
     setCustomUsages([]);
     setCustomUsageLabel("");
+    setLotValuation({ ...DEFAULT_LOT_VALUATION });
     dragStateRef.current = null;
     marqueeDragRef.current = null;
     segmentDragRef.current = null;
@@ -1446,10 +1471,13 @@ export default function PlanimetriaEditor({
         draft.customUsageLabel,
       );
       setAiScale(draftAiScale.denominator ? draftAiScale : aiScaleFromProperty(property));
-      setActiveUsage(draft.activeUsage);
+      setActiveUsage(
+        draft.activeUsage === LEGACY_LOT_USAGE_ID ? "sistemazione-esterna" : draft.activeUsage,
+      );
       setCustomUsages(draftCustomUsages);
       setActiveCustomUsageId(draftActiveCustomUsage?.id ?? null);
       setCustomUsageLabel(draftActiveCustomUsage?.label ?? draft.customUsageLabel ?? "");
+      setLotValuation(normalizeLotValuation(draft.lotValuation));
       setOpacityPercent(draft.opacityPercent);
       setThreshold(draft.threshold);
       setInflate(draft.inflate);
@@ -1901,6 +1929,7 @@ export default function PlanimetriaEditor({
           typeof saved.amountOverride === "number" && Number.isFinite(saved.amountOverride)
             ? saved.amountOverride
             : null,
+        includedInLot: selectionIsIncludedInLot(saved),
         opacity: saved.opacity,
         totalPixels: saved.totalPixels,
         region,
@@ -1934,6 +1963,7 @@ export default function PlanimetriaEditor({
         rate: selection.rate,
         areaOverrideM2: selection.areaOverrideM2 ?? null,
         amountOverride: selection.amountOverride ?? null,
+        includedInLot: selectionIsIncludedInLot(selection),
         opacity: selection.opacity,
         totalPixels: selection.totalPixels,
         source: selection.source,
@@ -1977,6 +2007,7 @@ export default function PlanimetriaEditor({
       totalArea: totals.area,
       totalEstimatedAmount: totals.amount,
       totalEstimatedRendita: totals.rendita,
+      lotValuation,
       selections: selectionsToSave,
     };
 
@@ -3292,6 +3323,7 @@ export default function PlanimetriaEditor({
       dash,
       wallInclusionRadius,
       knownSegmentMeters,
+      lotValuation: { ...lotValuation },
     };
   }
 
@@ -3356,6 +3388,7 @@ export default function PlanimetriaEditor({
     setDash(snapshot.dash);
     setWallInclusionRadius(snapshot.wallInclusionRadius);
     setKnownSegmentMeters(snapshot.knownSegmentMeters);
+    setLotValuation({ ...snapshot.lotValuation });
     runtimeRef.current.wallMap = null;
     runtimeRef.current.wallKey = "";
     if (currentRotation !== restoredRotation && runtimeRef.current.pdfDoc && runtimeRef.current.currentPage) {
@@ -3408,6 +3441,7 @@ export default function PlanimetriaEditor({
       customUsageId?: string;
       customUsageLabel?: string;
       color?: string;
+      includedInLot?: boolean;
     } = {},
   ) {
     const customPreset =
@@ -3449,6 +3483,9 @@ export default function PlanimetriaEditor({
       selection.bitmap = createTintedCanvas(region, color, opacity);
       selection.source = source;
       selection.polygon = polygon;
+      if (typeof options.includedInLot === "boolean") {
+        selection.includedInLot = options.includedInLot;
+      }
       redrawMasks();
       setStatus(`Area ${duplicateIndex + 1} aggiornata`);
       if (shouldSelect) setSelectedSelectionIds([selection.id]);
@@ -3467,6 +3504,7 @@ export default function PlanimetriaEditor({
       customUsageLabel: customLabel,
       color,
       rate,
+      includedInLot: options.includedInLot ?? false,
       opacity,
       totalPixels: getCanvasTotalPixels(),
       region,
@@ -4303,6 +4341,42 @@ export default function PlanimetriaEditor({
     return null;
   }
 
+  function changeSelectionLotInclusion(id: string, includedInLot: boolean) {
+    for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
+      const selection = pageSelections.find((item) => item.id === id);
+      if (!selection || selectionIsIncludedInLot(selection) === includedInLot) continue;
+      recordUndoState();
+      selection.includedInLot = includedInLot;
+      setStatus(includedInLot ? "Area inclusa nel lotto" : "Area esclusa dal lotto");
+      markDirty();
+      bumpRevision();
+      return;
+    }
+  }
+
+  function changeLotValuationMode(mode: LotValuation["mode"]) {
+    if (lotValuation.mode === mode) return;
+    recordUndoState();
+    setLotValuation((current) => ({ ...current, mode }));
+    setStatus(mode === "percentage" ? "Lotto calcolato in percentuale" : "Lotto calcolato al m2");
+    markDirty();
+  }
+
+  function changeLotValuationValue(rawValue: string) {
+    const parsed = parseNumberInput(rawValue);
+    if (parsed === null || parsed < 0) {
+      setStatus("Inserisci un valore lotto valido");
+      bumpRevision();
+      return null;
+    }
+    if (lotValuation.value === parsed) return parsed;
+    recordUndoState();
+    setLotValuation((current) => ({ ...current, value: parsed }));
+    setStatus("Valore lotto aggiornato");
+    markDirty();
+    return parsed;
+  }
+
   function changeSelectionAreaOverride(id: string, rawValue: string, calculatedArea: number) {
     const parsed = parseNumberInput(rawValue);
     if (parsed === null || parsed < 0) {
@@ -4816,6 +4890,7 @@ export default function PlanimetriaEditor({
       rate: selection.rate,
       areaOverrideM2: selection.areaOverrideM2,
       amountOverride: selection.amountOverride,
+      includedInLot: selectionIsIncludedInLot(selection),
       totalPixels: selection.totalPixels,
       source: selection.source === "merged" ? "merged" : "copy",
       polygon: selection.polygon?.map((point) => ({ ...point })),
@@ -4860,6 +4935,7 @@ export default function PlanimetriaEditor({
         rate: item.rate,
         areaOverrideM2: item.areaOverrideM2,
         amountOverride: item.amountOverride,
+        includedInLot: item.includedInLot,
         opacity: item.opacity,
         totalPixels: getCanvasTotalPixels(),
         region,
@@ -4955,6 +5031,7 @@ export default function PlanimetriaEditor({
       customUsageId: first.customUsageId,
       customUsageLabel: first.customUsageLabel,
       color: first.color,
+      includedInLot: selected.every(selectionIsIncludedInLot),
     });
     if (mergedId) setSelectedSelectionIds([mergedId]);
     setStatus(`${selected.length} aree unite`);
@@ -5799,8 +5876,17 @@ export default function PlanimetriaEditor({
 
   const topPriceLists = property.priceLists?.slice(0, 5) ?? [];
 
-  const renderAreaUsageOptions = (orphanCustomLabel: string, orphanValue: string) => (
+  const renderAreaUsageOptions = (
+    orphanCustomLabel: string,
+    orphanValue: string,
+    legacyLotUsage = false,
+  ) => (
     <>
+      {legacyLotUsage && (
+        <option value={`fixed:${LEGACY_LOT_USAGE_ID}`} disabled>
+          Lotto (legacy: scegli destinazione)
+        </option>
+      )}
       <optgroup label="Predefinite">
         {FIXED_USAGES.map((usageOption) => (
           <option key={usageOption.id} value={`fixed:${usageOption.id}`}>
@@ -6445,10 +6531,13 @@ export default function PlanimetriaEditor({
                           <th>Sel.</th>
                           <th>Area</th>
                           <th>Tipologia</th>
+                          <th>Lotto</th>
                           <th>Nome custom</th>
                           <th>Superficie</th>
                           <th>€/m2</th>
-                          <th>Valore</th>
+                          <th>Valore destinazione</th>
+                          <th>Quota lotto</th>
+                          <th>Totale</th>
                           <th>Pixel</th>
                           <th>Colore</th>
                           <th>Opacita</th>
@@ -6464,7 +6553,10 @@ export default function PlanimetriaEditor({
                             area,
                             calculatedArea,
                             amount,
+                            destinationAmount,
                             calculatedAmount,
+                            lotAmount,
+                            includedInLot,
                             areaOverridden,
                             amountOverridden,
                           }) => {
@@ -6505,7 +6597,11 @@ export default function PlanimetriaEditor({
                                       value={selectionUsageChoiceValue(selection)}
                                       onChange={(event) => changeSelectionUsageChoice(selection.id, event.target.value)}
                                     >
-                                      {renderAreaUsageOptions(orphanCustomLabel, `orphan:${selection.id}`)}
+                                      {renderAreaUsageOptions(
+                                        orphanCustomLabel,
+                                        `orphan:${selection.id}`,
+                                        selection.usageId === LEGACY_LOT_USAGE_ID,
+                                      )}
                                     </select>
                                     <button
                                       type="button"
@@ -6516,6 +6612,19 @@ export default function PlanimetriaEditor({
                                       <Plus size={14} />
                                     </button>
                                   </div>
+                                </td>
+                                <td>
+                                  <label className="lot-checkmark" title="Includi quest'area nel calcolo del lotto">
+                                    <input
+                                      type="checkbox"
+                                      checked={includedInLot}
+                                      onChange={(event) =>
+                                        changeSelectionLotInclusion(selection.id, event.target.checked)
+                                      }
+                                      aria-label={`Lotto area ${index + 1}`}
+                                    />
+                                    <span>Lotto</span>
+                                  </label>
                                 </td>
                                 <td>
                                   {selection.usageId === CUSTOM_USAGE_ID ? (
@@ -6604,7 +6713,7 @@ export default function PlanimetriaEditor({
                                 </td>
                                 <td>
                                   <div className="area-table-estimate-cell">
-                                    <strong>{moneyFormatter.format(amount)}</strong>
+                                    <strong>{moneyFormatter.format(destinationAmount)}</strong>
                                     {amountOverridden && <span className="manual-override-badge">Manuale</span>}
                                     {amountOverridden && (
                                       <button
@@ -6616,6 +6725,23 @@ export default function PlanimetriaEditor({
                                       </button>
                                     )}
                                     {amountOverridden && <small>Calc. {moneyFormatter.format(calculatedAmount)}</small>}
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="area-table-estimate-cell">
+                                    <strong>{includedInLot ? moneyFormatter.format(lotAmount) : "-"}</strong>
+                                    {includedInLot && (
+                                      <small>
+                                        {lotValuation.mode === "percentage"
+                                          ? `${areaFormatter.format(lotValuation.value)}%`
+                                          : `${moneyFormatter.format(lotValuation.value)}/m2`}
+                                      </small>
+                                    )}
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="area-table-estimate-cell">
+                                    <strong>{moneyFormatter.format(amount)}</strong>
                                   </div>
                                 </td>
                                 <td>{selection.source === "manual" ? "-" : selection.region.count.toLocaleString("it-IT")}</td>
@@ -6846,6 +6972,57 @@ export default function PlanimetriaEditor({
               <div className="editor-price-list-empty">Nessun prezzario collegato per {property.comune}</div>
             )}
           </details>
+          <section className="lot-valuation-panel" aria-label="Impostazioni valore lotto">
+            <div className="lot-valuation-head">
+              <span>Valore lotto</span>
+              <strong>{moneyFormatter.format(totals.lotAmount)}</strong>
+            </div>
+            <div className="lot-valuation-controls">
+              <label>
+                <span>Metodo</span>
+                <select
+                  value={lotValuation.mode}
+                  onChange={(event) =>
+                    changeLotValuationMode(event.target.value as LotValuation["mode"])
+                  }
+                >
+                  <option value="percentage">Percentuale sul valore destinazione</option>
+                  <option value="per-square-meter">Valore al m2</option>
+                </select>
+              </label>
+              <label>
+                <span>{lotValuation.mode === "percentage" ? "Incidenza" : "Valore unitario"}</span>
+                <div className="lot-value-input">
+                  <input
+                    key={`${lotValuation.mode}-${lotValuation.value}`}
+                    type="text"
+                    inputMode="decimal"
+                    defaultValue={String(lotValuation.value).replace(".", ",")}
+                    onBlur={(event) => {
+                      const nextValue = changeLotValuationValue(event.currentTarget.value);
+                      event.currentTarget.value = String(nextValue ?? lotValuation.value).replace(".", ",");
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                      if (event.key === "Escape") {
+                        event.currentTarget.value = String(lotValuation.value).replace(".", ",");
+                        event.currentTarget.blur();
+                      }
+                    }}
+                  />
+                  <span>{lotValuation.mode === "percentage" ? "%" : "€/m2"}</span>
+                </div>
+              </label>
+            </div>
+            <div className="lot-valuation-summary">
+              <span>{selectedAreas.filter((item) => item.includedInLot).length} aree nel lotto</span>
+              <span>{formatM2(totals.lotArea)}</span>
+            </div>
+            <small>
+              La percentuale si applica al valore base delle sole aree spuntate. Il 12% e un
+              riferimento estimativo da validare con il mercato e il prezzario territoriale.
+            </small>
+          </section>
           <section className={`area-totals ${collapsedRightSections.totals ? "collapsed" : ""}`}>
             <button className="right-panel-toggle" type="button" onClick={() => toggleRightPanelSection("totals")}>
               <span>Riepilogo superfici</span>
@@ -6858,7 +7035,15 @@ export default function PlanimetriaEditor({
                   <strong>{formatM2(totals.area)}</strong>
                 </div>
                 <div>
-                  <span>Valore totale aree</span>
+                  <span>Valore destinazioni</span>
+                  <strong>{moneyFormatter.format(totals.destinationAmount)}</strong>
+                </div>
+                <div>
+                  <span>Quota lotto</span>
+                  <strong>{moneyFormatter.format(totals.lotAmount)}</strong>
+                </div>
+                <div>
+                  <span>Valore totale aree + lotto</span>
                   <strong>{moneyFormatter.format(totals.amount)}</strong>
                   <small>Valori da validare</small>
                 </div>
@@ -6936,7 +7121,20 @@ export default function PlanimetriaEditor({
                       <strong>Nessuna area</strong>
                     </div>
                   ) : (
-                    selectedAreas.map(({ selection, index, usage, area, calculatedArea, amount, calculatedAmount, areaOverridden, amountOverridden }) => {
+                    selectedAreas.map(({
+                      selection,
+                      index,
+                      usage,
+                      area,
+                      calculatedArea,
+                      amount,
+                      destinationAmount,
+                      calculatedAmount,
+                      lotAmount,
+                      includedInLot,
+                      areaOverridden,
+                      amountOverridden,
+                    }) => {
                       const areaCollapsed = collapsedAreaIds.includes(selection.id);
                       const selectedCustomPreset = selectionCustomUsagePreset(selection);
                       const orphanCustomLabel =
@@ -6995,6 +7193,21 @@ export default function PlanimetriaEditor({
                                 </em>
                               )}
                             </div>
+                            <label
+                              className="lot-checkmark area-row-lot"
+                              title="Includi quest'area nel calcolo del lotto"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={includedInLot}
+                                onChange={(event) =>
+                                  changeSelectionLotInclusion(selection.id, event.target.checked)
+                                }
+                                aria-label={`Lotto area ${index + 1}`}
+                              />
+                              <span>Lotto</span>
+                            </label>
                             <button
                               title={withShortcut("Rimuovi area", SHORTCUTS.delete)}
                               onClick={(event) => {
@@ -7012,24 +7225,10 @@ export default function PlanimetriaEditor({
                                   value={selectionUsageChoiceValue(selection)}
                                   onChange={(event) => changeSelectionUsageChoice(selection.id, event.target.value)}
                                 >
-                                  <optgroup label="Predefinite">
-                                    {FIXED_USAGES.map((usageOption) => (
-                                      <option key={usageOption.id} value={`fixed:${usageOption.id}`}>
-                                        {usageOption.label}
-                                      </option>
-                                    ))}
-                                  </optgroup>
-                                  {customUsages.length > 0 && (
-                                    <optgroup label="Custom">
-                                      {customUsages.map((preset) => (
-                                        <option key={preset.id} value={`custom:${preset.id}`}>
-                                          {preset.label}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                  {orphanCustomLabel && (
-                                    <option value={`orphan:${selection.id}`}>{orphanCustomLabel}</option>
+                                  {renderAreaUsageOptions(
+                                    orphanCustomLabel,
+                                    `orphan:${selection.id}`,
+                                    selection.usageId === LEGACY_LOT_USAGE_ID,
                                   )}
                                 </select>
                                 <button
@@ -7129,9 +7328,9 @@ export default function PlanimetriaEditor({
                                   </dd>
                                 </div>
                                 <div>
-                                  <dt>Valore</dt>
+                                  <dt>Valore destinazione</dt>
                                   <dd className="area-override-cell">
-                                    <strong>{moneyFormatter.format(amount)}</strong>
+                                    <strong>{moneyFormatter.format(destinationAmount)}</strong>
                                     {amountOverridden && <span className="manual-override-badge">Manuale</span>}
                                     {amountOverridden && (
                                       <button
@@ -7146,6 +7345,18 @@ export default function PlanimetriaEditor({
                                       </button>
                                     )}
                                     {amountOverridden && <small>Calcolata: {moneyFormatter.format(calculatedAmount)}</small>}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt>Quota lotto</dt>
+                                  <dd>
+                                    <strong>{includedInLot ? moneyFormatter.format(lotAmount) : "-"}</strong>
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt>Totale</dt>
+                                  <dd>
+                                    <strong>{moneyFormatter.format(amount)}</strong>
                                   </dd>
                                 </div>
                                 <div>

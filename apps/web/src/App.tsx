@@ -59,6 +59,12 @@ import {
   writeEditorPreferences,
 } from "./editorPreferences";
 import { openEntriesInForMaps, toForMapsEntries, toForMapsEntry } from "./formaps";
+import {
+  calculateAreaValuation,
+  normalizeLotValuation,
+  selectionIsIncludedInLot,
+  type LotValuation,
+} from "./lotValuation";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.45.0";
@@ -380,6 +386,7 @@ type PlanAreaDraft = {
   totalEstimatedRendita?: number;
   estimatedImu?: number | null;
   imuCalculation?: PropertyImuCalculation | null;
+  lotValuation?: LotValuation;
   selections: PlanAreaDraftSelection[];
 };
 
@@ -393,9 +400,10 @@ type PlanAreaDraftSelection = {
   rate?: number;
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
+  includedInLot?: boolean;
   opacity: number;
   totalPixels: number;
-  source?: "smart" | "polygon" | "merged" | "copy";
+  source?: "smart" | "polygon" | "merged" | "copy" | "manual";
   region: {
     count: number;
   };
@@ -1467,6 +1475,7 @@ const planAreaUsages: Array<{
 ];
 
 const PLAN_AREA_CUSTOM_USAGE_ID: PlanAreaUsageId = "custom";
+const PLAN_AREA_LEGACY_LOT_USAGE_ID: PlanAreaUsageId = "lotto";
 
 const planAreaSheetSizes: Record<PlanAreaSheetSize, { widthMm: number; heightMm: number }> = {
   A3: { widthMm: 420, heightMm: 297 },
@@ -1673,6 +1682,7 @@ function planAreaUsageForSelection(selection: PlanAreaDraftSelection) {
 }
 
 function planAreaSourceLabel(source?: PlanAreaDraftSelection["source"]) {
+  if (source === "manual") return "Manuale";
   if (source === "polygon") return "Poligono";
   if (source === "merged") return "Unione";
   if (source === "copy") return "Copia";
@@ -1707,10 +1717,13 @@ function planAreaEffectiveAreaM2(selection: PlanAreaDraftSelection, draft: PlanA
 function planAreaEffectiveAmount(selection: PlanAreaDraftSelection, draft: PlanAreaDraft) {
   const usage = planAreaUsageForSelection(selection);
   const rate = selection.rate ?? usage.rate;
-  const computedAmount = planAreaEffectiveAreaM2(selection, draft) * rate;
-  return typeof selection.amountOverride === "number" && Number.isFinite(selection.amountOverride)
-    ? selection.amountOverride
-    : computedAmount;
+  return calculateAreaValuation({
+    areaM2: planAreaEffectiveAreaM2(selection, draft),
+    destinationRate: rate,
+    destinationAmountOverride: selection.amountOverride,
+    includedInLot: selectionIsIncludedInLot(selection),
+    lotValuation: normalizeLotValuation(draft.lotValuation),
+  }).totalAmount;
 }
 
 function planAreaEstimatedRenditaFromAmount(amount: number) {
@@ -1737,6 +1750,7 @@ function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft): PlanAreaDraft {
   );
   return {
     ...draft,
+    lotValuation: normalizeLotValuation(draft.lotValuation),
     totalArea: totals.area,
     totalEstimatedAmount: totals.amount,
     totalEstimatedRendita: planAreaEstimatedRenditaFromAmount(totals.amount),
@@ -5459,6 +5473,7 @@ function PropertyAreaDetail({
   }, [draftState.draft?.propertyId, draftState.draft?.savedAt]);
 
   const draft = editableDraft;
+  const lotValuation = normalizeLotValuation(draft?.lotValuation);
   const rows = useMemo(() => {
     if (!draft) return [];
     return draft.selections.map((selection, index) => {
@@ -5466,8 +5481,14 @@ function PropertyAreaDetail({
       const rate = selection.rate ?? usage.rate;
       const calculatedArea = planAreaFromPixels(selection, draft);
       const area = planAreaEffectiveAreaM2(selection, draft);
-      const calculatedAmount = area * rate;
-      const amount = planAreaEffectiveAmount(selection, draft);
+      const includedInLot = selectionIsIncludedInLot(selection);
+      const valuation = calculateAreaValuation({
+        areaM2: area,
+        destinationRate: rate,
+        destinationAmountOverride: selection.amountOverride,
+        includedInLot,
+        lotValuation,
+      });
       return {
         id: selection.id,
         index: index + 1,
@@ -5477,25 +5498,31 @@ function PropertyAreaDetail({
         rate,
         area,
         calculatedArea,
-        amount,
-        calculatedAmount,
+        amount: valuation.totalAmount,
+        destinationAmount: valuation.destinationAmount,
+        calculatedAmount: valuation.calculatedDestinationAmount,
+        lotAmount: valuation.lotAmount,
+        includedInLot,
         areaOverridden: typeof selection.areaOverrideM2 === "number" && Number.isFinite(selection.areaOverrideM2),
         amountOverridden: typeof selection.amountOverride === "number" && Number.isFinite(selection.amountOverride),
         source: planAreaSourceLabel(selection.source),
       };
     });
-  }, [draft]);
+  }, [draft, lotValuation.mode, lotValuation.value]);
 
   const totals = useMemo(
     () =>
       rows.reduce(
         (acc, row) => {
           acc.area += row.area;
+          acc.lotArea += row.includedInLot ? row.area : 0;
+          acc.destinationAmount += row.destinationAmount;
+          acc.lotAmount += row.lotAmount;
           acc.amount += row.amount;
           acc.rendita += planAreaEstimatedRenditaFromAmount(row.amount);
           return acc;
         },
-        { area: 0, amount: 0, rendita: 0 },
+        { area: 0, lotArea: 0, destinationAmount: 0, lotAmount: 0, amount: 0, rendita: 0 },
       ),
     [rows],
   );
@@ -5610,13 +5637,32 @@ function PropertyAreaDetail({
   function handleAmountBlur(row: (typeof rows)[number], input: HTMLInputElement) {
     handleNumberBlur(
       input.value,
-      row.amount,
+      row.destinationAmount,
       (value) =>
         updateEditableSelection(row.id, (selection) => {
           selection.amountOverride = Math.abs(value - row.calculatedAmount) < 0.005 ? null : value;
         }),
       input,
       "Inserisci un valore valido.",
+    );
+  }
+
+  function handleLotValuationMode(mode: LotValuation["mode"]) {
+    updateEditableDraft((nextDraft) => {
+      nextDraft.lotValuation = { ...normalizeLotValuation(nextDraft.lotValuation), mode };
+    });
+  }
+
+  function handleLotValuationValue(input: HTMLInputElement) {
+    handleNumberBlur(
+      input.value,
+      lotValuation.value,
+      (value) =>
+        updateEditableDraft((nextDraft) => {
+          nextDraft.lotValuation = { ...normalizeLotValuation(nextDraft.lotValuation), value };
+        }),
+      input,
+      "Inserisci un valore lotto valido.",
     );
   }
 
@@ -5796,7 +5842,10 @@ function PropertyAreaDetail({
             <div className="property-area-summary">
               <SummaryStat label="Aree tracciate" value={rows.length.toString()} />
               <SummaryStat label="Area totale" value={formatM2(totals.area)} />
-              <SummaryStat label="Valore totale" value={formatEuro(totals.amount)} />
+              <SummaryStat label="Aree nel lotto" value={formatM2(totals.lotArea)} />
+              <SummaryStat label="Valore destinazioni" value={formatEuro(totals.destinationAmount)} />
+              <SummaryStat label="Quota lotto" value={formatEuro(totals.lotAmount)} />
+              <SummaryStat label="Totale con lotto" value={formatEuro(totals.amount)} />
               <SummaryStat label="Nuova rendita" value={formatEuro(totals.rendita)} />
               <SummaryStat label="Scala e foglio" value={`${draft.sheetSize} 1:${draft.scaleDenominator}`} />
               <SummaryStat label="Origine scala" value={planScaleSourceLabel(draft.scaleSource)} />
@@ -5805,6 +5854,46 @@ function PropertyAreaDetail({
                 value={draft.aiScaleDenominator ? `${draft.aiSheetSize ?? draft.sheetSize} 1:${draft.aiScaleDenominator}` : "Non rilevata"}
               />
             </div>
+
+            <section className="lot-valuation-panel property-lot-valuation" aria-labelledby="property-lot-valuation-title">
+              <div className="lot-valuation-head">
+                <div>
+                  <strong id="property-lot-valuation-title">Valore lotto</strong>
+                  <span>Applicato soltanto alle aree con la spunta Lotto.</span>
+                </div>
+                <strong>{formatEuro(totals.lotAmount)}</strong>
+              </div>
+              <div className="lot-valuation-controls">
+                <label>
+                  Metodo
+                  <select
+                    value={lotValuation.mode}
+                    onChange={(event) => handleLotValuationMode(event.target.value as LotValuation["mode"])}
+                  >
+                    <option value="percentage">Percentuale sul valore destinazione</option>
+                    <option value="per-square-meter">Valore al metro quadro</option>
+                  </select>
+                </label>
+                <label>
+                  {lotValuation.mode === "percentage" ? "Percentuale" : "Valore lotto"}
+                  <span className="lot-valuation-number">
+                    <input
+                      key={`property-lot-value-${lotValuation.mode}-${lotValuation.value}`}
+                      type="text"
+                      inputMode="decimal"
+                      defaultValue={areaFormatter.format(lotValuation.value)}
+                      onBlur={(event) => handleLotValuationValue(event.currentTarget)}
+                      onKeyDown={(event) => handleNumericInputKeyDown(event, areaFormatter.format(lotValuation.value))}
+                    />
+                    <span>{lotValuation.mode === "percentage" ? "%" : "€/m²"}</span>
+                  </span>
+                </label>
+              </div>
+              <small>
+                In percentuale, la quota si calcola sul valore della destinazione d'uso di ciascuna area spuntata; al
+                metro quadro, sulla sua superficie. Il 12% iniziale è un riferimento estimativo e resta modificabile.
+              </small>
+            </section>
 
             <div className="property-area-meta">
               <span>Documento: {draft.document?.fileName ?? "Nessun documento associato"}</span>
@@ -5831,9 +5920,12 @@ function PropertyAreaDetail({
                     <th>Area</th>
                     <th>Pagina</th>
                     <th>Tipologia</th>
+                    <th>Lotto</th>
                     <th>Superficie</th>
                     <th>€/m2</th>
-                    <th>Valore</th>
+                    <th>Valore destinazione</th>
+                    <th>Quota lotto</th>
+                    <th>Totale</th>
                     <th>Origine</th>
                   </tr>
                 </thead>
@@ -5857,13 +5949,21 @@ function PropertyAreaDetail({
                           >
                             <optgroup label="Predefinite">
                               {planAreaUsages
-                                .filter((usage) => usage.id !== PLAN_AREA_CUSTOM_USAGE_ID)
+                                .filter(
+                                  (usage) =>
+                                    usage.id !== PLAN_AREA_CUSTOM_USAGE_ID && usage.id !== PLAN_AREA_LEGACY_LOT_USAGE_ID,
+                                )
                                 .map((usage) => (
                                   <option key={usage.id} value={`fixed:${usage.id}`}>
                                     {usage.label}
                                   </option>
                                 ))}
                             </optgroup>
+                            {row.selection.usageId === PLAN_AREA_LEGACY_LOT_USAGE_ID && (
+                              <option value={`fixed:${PLAN_AREA_LEGACY_LOT_USAGE_ID}`} disabled>
+                                Lotto (legacy: scegli una destinazione)
+                              </option>
+                            )}
                             {draft.customUsages && draft.customUsages.length > 0 && (
                               <optgroup label="Custom">
                                 {draft.customUsages.map((customUsage) => (
@@ -5875,6 +5975,21 @@ function PropertyAreaDetail({
                             )}
                             {orphanCustomLabel && <option value={`orphan:${row.id}`}>{orphanCustomLabel}</option>}
                           </select>
+                        </td>
+                        <td>
+                          <label className="lot-checkmark property-area-lot-checkmark">
+                            <input
+                              type="checkbox"
+                              checked={row.includedInLot}
+                              onChange={(event) => {
+                                const includedInLot = event.currentTarget.checked;
+                                updateEditableSelection(row.id, (selection) => {
+                                  selection.includedInLot = includedInLot;
+                                });
+                              }}
+                            />
+                            <span>Lotto</span>
+                          </label>
                         </td>
                         <td>
                           <div className="property-area-edit-field">
@@ -5919,12 +6034,14 @@ function PropertyAreaDetail({
                         <td>
                           <div className="property-area-edit-field">
                             <input
-                              key={`${row.id}-amount-${row.amount}`}
+                              key={`${row.id}-amount-${row.destinationAmount}`}
                               type="text"
                               inputMode="decimal"
-                              defaultValue={areaFormatter.format(row.amount)}
+                              defaultValue={areaFormatter.format(row.destinationAmount)}
                               onBlur={(event) => handleAmountBlur(row, event.currentTarget)}
-                              onKeyDown={(event) => handleNumericInputKeyDown(event, areaFormatter.format(row.amount))}
+                              onKeyDown={(event) =>
+                                handleNumericInputKeyDown(event, areaFormatter.format(row.destinationAmount))
+                              }
                             />
                             {row.amountOverridden && <span className="manual-override-badge">Manuale</span>}
                             {row.amountOverridden && (
@@ -5943,6 +6060,8 @@ function PropertyAreaDetail({
                             {row.amountOverridden && <small>Calc. {formatEuro(row.calculatedAmount)}</small>}
                           </div>
                         </td>
+                        <td>{formatEuro(row.lotAmount)}</td>
+                        <td><strong>{formatEuro(row.amount)}</strong></td>
                         <td>{row.source}</td>
                       </tr>
                     );

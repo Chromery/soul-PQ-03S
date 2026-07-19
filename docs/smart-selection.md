@@ -11,7 +11,8 @@ The operator opens a planimetria PDF, clicks inside a bounded area, and the app 
 - Tettoie
 - Sistemazione esterna
 - Verde
-- Lotto
+
+`Lotto` is not a destination usage. It is a separate flag that can be applied to any area while retaining that area's actual usage.
 
 The app calculates the selected surface in square meters from the PDF sheet size and scale, then estimates the area contribution using the selected usage coefficient.
 
@@ -181,24 +182,39 @@ This is why the operator must confirm the correct sheet size and scale before tr
 
 Each selected mask has a `destinazione d'uso`. The current frontend uses local coefficients for the prototype.
 
-For each area:
+For each area, the destination value is:
 
 ```text
-estimatedValue = selectedAreaM2 * usageRate
+destinationValue = selectedAreaM2 * usageRate
 ```
+
+Areas marked with the `Lotto` checkbox also receive a lot contribution. The operator chooses one method for the draft:
+
+```text
+percentage:
+  lotContribution = destinationValue * lotPercentage / 100
+
+per square metre:
+  lotContribution = selectedAreaM2 * lotRatePerM2
+
+areaEstimatedValue = destinationValue + lotContribution
+```
+
+The initial percentage is `12%`, but it is always editable. This is a fallback reference rather than a universal market coefficient: the Italian Revenue Agency's technical guidance says that the lot should preferably be estimated through a direct market investigation; when suitable information is unavailable, it may normally be estimated at no less than 12% of the construction cost of the structures. Special locations or properties where the land is the predominant component require a specific estimate. See [Agenzia del Territorio, Circolare 6/2012, Allegato Tecnico II, section C1](https://www1.agenziaentrate.gov.it/mt/circolari/Circ_6_Allegato2.pdf).
 
 The proposed cadastral rent then applies the `0.02` saggio di fruttuosita:
 
 ```text
-newRendita = sum(estimatedValue) * 0.02
+newRendita = sum(areaEstimatedValue) * 0.02
 ```
 
 The editor displays:
 
 - area in square meters
 - selected destination usage
+- lot inclusion checkbox
 - coefficient
-- estimated value
+- destination value, lot contribution, and their total
 - total selected area
 - total estimated value
 - new rendita

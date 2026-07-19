@@ -26,6 +26,7 @@ Implemented:
 - Smart area selection for planimetria PDFs.
 - Area calculation from selected mask pixels, sheet size, and scale.
 - Assignment of `destinazione d'uso` to selected areas.
+- Per-area `Lotto` flag, with a separately configurable lot contribution by percentage or by square metre.
 - Server-persisted editor drafts, including masks and calibration settings, with a local fallback when the API is unavailable.
 - Calcolo IMU previsto da rendita e aliquote comunali 2026, con fallback 2025 e provenienza della delibera.
 - Collapsible editor panels with an anchored plan workspace and independently scrolling controls.
@@ -95,7 +96,8 @@ The editor supports:
   - Tettoie
   - Sistemazione esterna
   - Verde
-  - Lotto
+- A separate `Lotto` checkbox for every area, visible both in the editor and in the property area summary.
+- Lot valuation either as a percentage of the checked area's destination value or as a value per square metre.
 - Scale input, for example `1:500`.
 - Sheet size selection, with A3 selected by default.
 - Area calculation in square meters for every selected mask.

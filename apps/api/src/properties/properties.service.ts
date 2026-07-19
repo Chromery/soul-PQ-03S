@@ -25,6 +25,10 @@ type DraftPayload = {
   totalArea?: number;
   totalEstimatedAmount?: number;
   totalEstimatedRendita?: number;
+  lotValuation?: {
+    mode: "percentage" | "per-square-meter";
+    value: number;
+  };
   selections: unknown[];
 };
 
@@ -313,6 +317,7 @@ export class PropertiesService {
     const aiSheetSize = validateOptionalSheetSize(payload.aiSheetSize, "aiSheetSize");
     const aiScaleConfidence = validateOptionalConfidence(payload.aiScaleConfidence, "aiScaleConfidence");
     const aiScaleDetectedAt = validateOptionalDate(payload.aiScaleDetectedAt, "aiScaleDetectedAt");
+    validateOptionalLotValuation(payload.lotValuation);
     if (
       payload.version !== 1 ||
       payload.propertyId !== propertyId ||
@@ -322,6 +327,13 @@ export class PropertiesService {
       payload.scaleDenominator < 20 ||
       payload.scaleDenominator > 20000 ||
       !Array.isArray(payload.selections) ||
+      payload.selections.some(
+        (selection) =>
+          selection !== null &&
+          typeof selection === "object" &&
+          "includedInLot" in selection &&
+          typeof (selection as { includedInLot?: unknown }).includedInLot !== "boolean",
+      ) ||
       !savedAt ||
       Number.isNaN(savedAt.getTime())
     ) {
@@ -336,6 +348,20 @@ export class PropertiesService {
       aiScaleConfidence,
       aiScaleDetectedAt,
     };
+  }
+}
+
+function validateOptionalLotValuation(value: DraftPayload["lotValuation"]) {
+  if (value === undefined) return;
+  if (
+    !value ||
+    typeof value !== "object" ||
+    (value.mode !== "percentage" && value.mode !== "per-square-meter") ||
+    typeof value.value !== "number" ||
+    !Number.isFinite(value.value) ||
+    value.value < 0
+  ) {
+    throw new BadRequestException("Configurazione valore lotto non valida");
   }
 }
 
