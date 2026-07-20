@@ -459,7 +459,7 @@ type AreaTuningTrial = {
 };
 
 type ToolSectionId = "usage" | "planimetry" | "smart";
-type RightPanelSectionId = "totals" | "areas" | "breakdown";
+type RightPanelSectionId = "totals" | "areas";
 
 type CanvasBundle = {
   pdfCanvas: HTMLCanvasElement;
@@ -1114,7 +1114,7 @@ export default function PlanimetriaEditor({
   const [savedAt, setSavedAt] = useState("");
   const [leftPanelOpen, setLeftPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.left));
   const [rightPanelOpen, setRightPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.right));
-  const [priceListDropdownOpen, setPriceListDropdownOpen] = useState(true);
+  const [priceListDropdownOpen, setPriceListDropdownOpen] = useState(false);
   const [scaleModalOpen, setScaleModalOpen] = useState(false);
   const [scaleModalSheetSize, setScaleModalSheetSize] = useState<SheetSize>(() => readEditorPreferences().scale.sheetSize);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
@@ -1128,10 +1128,11 @@ export default function PlanimetriaEditor({
     smart: false,
   });
   const [collapsedRightSections, setCollapsedRightSections] = useState<Record<RightPanelSectionId, boolean>>({
-    totals: false,
+    totals: true,
     areas: false,
-    breakdown: false,
   });
+  const [lotValuationCollapsed, setLotValuationCollapsed] = useState(true);
+  const [imuDetailsCollapsed, setImuDetailsCollapsed] = useState(true);
   const [collapsedAreaIds, setCollapsedAreaIds] = useState<string[]>([]);
   const [selectedPolygonVertex, setSelectedPolygonVertex] = useState<SelectedPolygonVertex | null>(null);
   const [hoverPolygonInsert, setHoverPolygonInsert] = useState<PolygonInsertTarget | null>(null);
@@ -1515,6 +1516,10 @@ export default function PlanimetriaEditor({
     setSelectedPolygonVertex(null);
     setHoverPolygonInsert(null);
     setCollapsedAreaIds([]);
+    setPriceListDropdownOpen(false);
+    setCollapsedRightSections({ totals: true, areas: false });
+    setLotValuationCollapsed(true);
+    setImuDetailsCollapsed(true);
     setScaleExtractionJob(null);
     setScaleExtractionBusy(false);
     setThreshold(SMART_TRACE_DEFAULTS.threshold);
@@ -2117,6 +2122,7 @@ export default function PlanimetriaEditor({
     }
     runtimeRef.current.selectionsByPage = restored;
     runtimeRef.current.history = draft.selections.map((selection) => selection.id);
+    setCollapsedAreaIds(draft.selections.map((selection) => selection.id));
     pendingDraftRef.current = null;
     redrawMasks();
     setDirty(false);
@@ -7186,55 +7192,84 @@ export default function PlanimetriaEditor({
                   <strong>{moneyFormatter.format(totals.baseAmount)}</strong>
                   <small>Valori da validare</small>
                 </div>
-                <div className="editor-lot-valuation">
-                  <span>Valorizzazione lotto</span>
-                  <div className="lot-mode-toggle" role="group" aria-label="Metodo di valorizzazione del lotto">
-                    <button
-                      type="button"
-                      className={lotValuation.mode === "percentage" ? "active" : ""}
-                      onClick={() => changeLotValuationMode("percentage")}
-                    >
-                      Percentuale
-                    </button>
-                    <button
-                      type="button"
-                      className={lotValuation.mode === "per_sqm" ? "active" : ""}
-                      onClick={() => changeLotValuationMode("per_sqm")}
-                    >
-                      €/m²
-                    </button>
-                  </div>
-                  <label className="lot-value-field">
-                    <span>{lotValuation.mode === "percentage" ? "Incidenza sul valore destinazioni" : "Valore unitario lotto"}</span>
-                    <div>
-                      <input
-                        key={`${lotValuation.mode}-${lotValuation.mode === "percentage" ? lotValuation.percentage : lotValuation.unitValuePerM2}`}
-                        type="text"
-                        inputMode="decimal"
-                        defaultValue={areaFormatter.format(
-                          lotValuation.mode === "percentage" ? lotValuation.percentage : lotValuation.unitValuePerM2,
-                        )}
-                        onBlur={(event) => {
-                          const field = lotValuation.mode === "percentage" ? "percentage" : "unitValuePerM2";
-                          const fallback = lotValuation[field];
-                          const nextValue = changeLotValuationValue(field, event.currentTarget.value);
-                          event.currentTarget.value = areaFormatter.format(nextValue ?? fallback);
-                        }}
-                      />
-                      <strong>{lotValuation.mode === "percentage" ? "%" : "€/m²"}</strong>
+                <div className="editor-usage-breakdown" aria-label="Ripartizione superfici">
+                  <span>Ripartizione</span>
+                  {usageBreakdown.length > 0 ? (
+                    <div className="usage-breakdown-list">
+                      {usageBreakdown.map(({ usage, area }) => (
+                        <div key={`${usage.id}-${usage.shortLabel}`} className="usage-breakdown-row">
+                          <span style={{ background: usage.color }} />
+                          <strong>{usage.shortLabel}</strong>
+                          <em>{formatCompactM2(area)}</em>
+                        </div>
+                      ))}
                     </div>
-                  </label>
-                  <small>
-                    {lotValuation.mode === "percentage"
-                      ? "Applicata al valore delle sole destinazioni con check Lotto; riferimento ordinario 12%."
-                      : "Applicata ai m² con check Lotto. Evita di selezionare superfici sovrapposte su più piani."}
-                  </small>
+                  ) : (
+                    <small>Nessuna superficie valorizzata</small>
+                  )}
                 </div>
-                <div className="editor-lot-total">
-                  <span>Lotto selezionato</span>
-                  <strong>{moneyFormatter.format(totals.lotValue)}</strong>
-                  <small>{formatM2(totals.lotArea)} · {selectedAreas.filter(({ selection }) => selection.includedInLot).length} aree</small>
-                </div>
+                <section className={`editor-summary-collapse editor-lot-collapse ${lotValuationCollapsed ? "collapsed" : ""}`}>
+                  <button
+                    className="editor-summary-collapse-toggle"
+                    type="button"
+                    onClick={() => setLotValuationCollapsed((collapsed) => !collapsed)}
+                    aria-expanded={!lotValuationCollapsed}
+                  >
+                    <span>Valore lotto</span>
+                    <strong>{moneyFormatter.format(totals.lotValue)}</strong>
+                    <ChevronDown size={16} />
+                  </button>
+                  {!lotValuationCollapsed && (
+                    <div className="editor-summary-collapse-content">
+                      <div className="editor-lot-valuation">
+                        <div className="lot-mode-toggle" role="group" aria-label="Metodo di valorizzazione del lotto">
+                          <button
+                            type="button"
+                            className={lotValuation.mode === "percentage" ? "active" : ""}
+                            onClick={() => changeLotValuationMode("percentage")}
+                          >
+                            Percentuale
+                          </button>
+                          <button
+                            type="button"
+                            className={lotValuation.mode === "per_sqm" ? "active" : ""}
+                            onClick={() => changeLotValuationMode("per_sqm")}
+                          >
+                            €/m²
+                          </button>
+                        </div>
+                        <label className="lot-value-field">
+                          <span>{lotValuation.mode === "percentage" ? "Incidenza sul valore destinazioni" : "Valore unitario lotto"}</span>
+                          <div>
+                            <input
+                              key={`${lotValuation.mode}-${lotValuation.mode === "percentage" ? lotValuation.percentage : lotValuation.unitValuePerM2}`}
+                              type="text"
+                              inputMode="decimal"
+                              defaultValue={areaFormatter.format(
+                                lotValuation.mode === "percentage" ? lotValuation.percentage : lotValuation.unitValuePerM2,
+                              )}
+                              onBlur={(event) => {
+                                const field = lotValuation.mode === "percentage" ? "percentage" : "unitValuePerM2";
+                                const fallback = lotValuation[field];
+                                const nextValue = changeLotValuationValue(field, event.currentTarget.value);
+                                event.currentTarget.value = areaFormatter.format(nextValue ?? fallback);
+                              }}
+                            />
+                            <strong>{lotValuation.mode === "percentage" ? "%" : "€/m²"}</strong>
+                          </div>
+                        </label>
+                        <small>
+                          {lotValuation.mode === "percentage"
+                            ? "Applicata al valore delle sole destinazioni con check Lotto; riferimento ordinario 12%."
+                            : "Applicata ai m² con check Lotto. Evita di selezionare superfici sovrapposte su più piani."}
+                        </small>
+                        <small className="editor-lot-selection-meta">
+                          {formatM2(totals.lotArea)} · {selectedAreas.filter(({ selection }) => selection.includedInLot).length} aree incluse
+                        </small>
+                      </div>
+                    </div>
+                  )}
+                </section>
                 <div>
                   <span>Valore complessivo</span>
                   <strong>{moneyFormatter.format(totals.amount)}</strong>
@@ -7247,6 +7282,30 @@ export default function PlanimetriaEditor({
                     {moneyFormatter.format(totals.amount)} × 2% = {moneyFormatter.format(totals.rendita)}
                   </small>
                 </div>
+                <section className={`editor-summary-collapse editor-imu-collapse ${imuDetailsCollapsed ? "collapsed" : ""}`}>
+                  <button
+                    className="editor-summary-collapse-toggle editor-imu-collapse-toggle"
+                    type="button"
+                    onClick={() => setImuDetailsCollapsed((collapsed) => !collapsed)}
+                    aria-expanded={!imuDetailsCollapsed}
+                    aria-label="Dettagli aliquota e calcolo IMU"
+                  >
+                    <span className="editor-imu-collapse-value">
+                      <small>IMU attuale</small>
+                      <strong>
+                        {property.currentImu === null || property.currentImu === undefined
+                          ? "Non calcolabile"
+                          : moneyFormatter.format(property.currentImu)}
+                      </strong>
+                    </span>
+                    <span className="editor-imu-collapse-value">
+                      <small>IMU prevista</small>
+                      <strong>{editorEstimatedImu ? moneyFormatter.format(editorEstimatedImu.amount) : "Non calcolabile"}</strong>
+                    </span>
+                    <ChevronDown size={16} />
+                  </button>
+                  {!imuDetailsCollapsed && (
+                    <div className="editor-summary-collapse-content editor-imu-collapse-content">
                 <div className="editor-imu-rate-control">
                   <div className="editor-imu-rate-head">
                     <span>Aliquota IMU applicata</span>
@@ -7336,12 +7395,7 @@ export default function PlanimetriaEditor({
                   </div>
                 </div>
                 <div className="editor-imu-summary">
-                  <span>IMU attuale</span>
-                  <strong>
-                    {property.currentImu === null || property.currentImu === undefined
-                      ? "Non calcolabile"
-                      : moneyFormatter.format(property.currentImu)}
-                  </strong>
+                  <span>Formula IMU attuale</span>
                   {currentImuCalculation ? (
                     <>
                       <small>
@@ -7372,10 +7426,7 @@ export default function PlanimetriaEditor({
                   )}
                 </div>
                 <div className="editor-imu-summary">
-                  <span>IMU prevista</span>
-                  <strong>
-                    {editorEstimatedImu ? moneyFormatter.format(editorEstimatedImu.amount) : "Non calcolabile"}
-                  </strong>
+                  <span>Formula IMU prevista</span>
                   {editorEstimatedImu && estimatedImuRate ? (
                     <>
                       <small>
@@ -7405,6 +7456,9 @@ export default function PlanimetriaEditor({
                     <small>Aliquota comunale non disponibile per comune o categoria catastale</small>
                   )}
                 </div>
+                    </div>
+                  )}
+                </section>
               </div>
             )}
           </section>
@@ -7750,20 +7804,6 @@ export default function PlanimetriaEditor({
             )}
           </section>
 
-          <section className={`usage-breakdown ${collapsedRightSections.breakdown ? "collapsed" : ""}`}>
-            <button className="right-panel-toggle" type="button" onClick={() => toggleRightPanelSection("breakdown")}>
-              <span>Ripartizione</span>
-              <ChevronDown size={16} />
-            </button>
-            {!collapsedRightSections.breakdown &&
-              usageBreakdown.map(({ usage, area }) => (
-                <div key={`${usage.id}-${usage.shortLabel}`} className="usage-breakdown-row">
-                  <span style={{ background: usage.color }} />
-                  <strong>{usage.shortLabel}</strong>
-                  <em>{formatCompactM2(area)}</em>
-                </div>
-              ))}
-          </section>
           </aside>
         )}
       </section>

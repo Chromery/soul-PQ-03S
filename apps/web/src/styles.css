@@ -3992,7 +3992,6 @@ a.button {
 .selected-property-card,
 .area-totals,
 .selected-areas-list,
-.usage-breakdown,
 .plan-canvas-panel {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -4001,14 +4000,12 @@ a.button {
 }
 
 .tool-block,
-.selected-areas-list,
-.usage-breakdown {
+.selected-areas-list {
   padding: 12px;
 }
 
 .area-totals,
-.selected-property-card,
-.usage-breakdown {
+.selected-property-card {
   flex: 0 0 auto;
 }
 
@@ -5572,6 +5569,19 @@ a.button {
   overflow: hidden;
 }
 
+.area-totals:not(.collapsed) {
+  max-height: calc(100% - 150px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.area-totals > .right-panel-toggle {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+}
+
 .editor-price-list-dropdown {
   display: grid;
   gap: 8px;
@@ -5665,8 +5675,7 @@ a.button {
 }
 
 .area-totals.collapsed .right-panel-toggle svg,
-.selected-areas-list.collapsed .right-panel-toggle svg,
-.usage-breakdown.collapsed .right-panel-toggle svg {
+.selected-areas-list.collapsed .right-panel-toggle svg {
   transform: rotate(-90deg);
 }
 
@@ -5676,14 +5685,18 @@ a.button {
   border-top: 1px solid var(--border);
 }
 
-.area-totals-content > div {
+.area-totals-content > div,
+.area-totals-content > .editor-summary-collapse {
   display: grid;
   gap: 3px;
-  padding: 12px;
   background: #fff;
 }
 
-.area-totals-content > div + div {
+.area-totals-content > div {
+  padding: 12px;
+}
+
+.area-totals-content > * + * {
   border-top: 1px solid var(--border);
 }
 
@@ -5701,12 +5714,16 @@ a.button {
 }
 
 .area-totals-content .editor-imu-summary {
+  display: grid;
   gap: 5px;
+  padding: 12px;
   background: #f8fbff;
 }
 
 .area-totals-content .editor-imu-rate-control {
+  display: grid;
   gap: 8px;
+  padding: 12px;
   background: #fffaf0;
 }
 
@@ -5748,7 +5765,9 @@ a.button {
 }
 
 .area-totals-content .editor-lot-valuation {
+  display: grid;
   gap: 8px;
+  padding: 12px;
   background: #f8fbff;
 }
 
@@ -5756,8 +5775,95 @@ a.button {
   width: 100%;
 }
 
-.area-totals-content .editor-lot-total {
+.editor-summary-collapse {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.editor-summary-collapse-toggle {
+  width: 100%;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 0;
+  color: var(--text);
   background: #f4f8ff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.editor-summary-collapse-toggle > span:first-child {
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.editor-summary-collapse-toggle > strong {
+  color: var(--text);
+  font-size: 17px;
+  white-space: nowrap;
+}
+
+.editor-summary-collapse-toggle > svg {
+  color: var(--secondary);
+  transition: transform 160ms ease;
+}
+
+.editor-summary-collapse.collapsed .editor-summary-collapse-toggle > svg {
+  transform: rotate(-90deg);
+}
+
+.editor-summary-collapse-content {
+  display: grid;
+  border-top: 1px solid var(--border);
+}
+
+.editor-summary-collapse-content > * + * {
+  border-top: 1px solid var(--border);
+}
+
+.editor-lot-selection-meta {
+  color: #526780 !important;
+}
+
+.editor-imu-collapse-toggle {
+  min-height: 72px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  background: #eef6ff;
+}
+
+.editor-imu-collapse-value {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.editor-imu-collapse-value small {
+  color: #526780;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.editor-imu-collapse-value strong {
+  color: var(--text);
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.editor-usage-breakdown > span {
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.usage-breakdown-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 6px;
 }
 
 .area-totals-content .editor-imu-summary small {
@@ -6100,11 +6206,6 @@ a.button {
   color: var(--secondary);
   font-size: 11px;
   font-weight: 850;
-}
-
-.usage-breakdown {
-  display: grid;
-  gap: 9px;
 }
 
 .usage-breakdown-row {
