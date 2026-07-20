@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from "@nestjs/common";
+import { BadRequestException, Injectable, InternalServerErrorException, Optional } from "@nestjs/common";
 import type { OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash } from "node:crypto";
@@ -9,6 +9,7 @@ import {
 } from "../formaps-territories/formaps-territory-resolver.js";
 import { VisuraExtractionStatus } from "../generated/prisma/enums.js";
 import type { Prisma } from "../generated/prisma/client.js";
+import { PriceListsService } from "../price-lists/price-lists.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
   extractCadastralDataFromText,
@@ -115,6 +116,7 @@ export class VisuraExtractionService implements OnModuleInit {
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    @Optional() private readonly priceLists?: PriceListsService,
   ) {
     this.model =
       optionalConfig(config.get<string>("OPENROUTER_VISURA_MODEL")) ??
@@ -301,6 +303,12 @@ export class VisuraExtractionService implements OnModuleInit {
         data,
       });
     });
+
+    try {
+      await this.priceLists?.assignForProperty(propertyId);
+    } catch (error) {
+      console.error(`Price list reassignment failed after visura extraction for ${propertyId}`, error);
+    }
   }
 
   private async extractVisura(

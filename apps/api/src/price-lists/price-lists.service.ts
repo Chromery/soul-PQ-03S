@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import type { OnModuleInit } from "@nestjs/common";
+import { resolveFormapsTerritory } from "../formaps-territories/formaps-territory-resolver.js";
 import type { FeasibilityStudy, PriceList, Property } from "../generated/prisma/client.js";
 import { DocumentStorageService } from "../erp-sync/document-storage.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -6,11 +8,29 @@ import { PrismaService } from "../prisma/prisma.service.js";
 type PropertyWithStudy = Property & { study: FeasibilityStudy };
 
 @Injectable()
-export class PriceListsService {
+export class PriceListsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: DocumentStorageService,
   ) {}
+
+  async onModuleInit() {
+    try {
+      await this.assignAllProperties();
+    } catch (error) {
+      console.error("Price list backfill failed on API startup", error);
+    }
+  }
+
+  async assignAllProperties() {
+    const properties = await this.prisma.property.findMany({
+      include: { study: true },
+    });
+    for (const property of properties) {
+      await this.assignForPropertyRecord(property);
+    }
+    return properties.length;
+  }
 
   async openPriceList(id: string) {
     const priceList = await this.prisma.priceList.findUnique({ where: { id } });
@@ -124,9 +144,23 @@ function rankPriceLists(property: PropertyWithStudy, priceLists: PriceList[]): P
 function territoryForProperty(property: PropertyWithStudy) {
   const comune = normalizeTerritory(property.comune);
   const cityTerritory = CITY_TERRITORIES[comune];
+  const territoryResolution = resolveFormapsTerritory(
+    property.provincia || property.study.provincia,
+    property.comune,
+  );
+  const resolvedTerritory = territoryResolution.selected;
+  const candidateProvinceIds = new Set(territoryResolution.candidates.map((candidate) => candidate.provinceId));
+  const unambiguousCandidateProvince = candidateProvinceIds.size === 1
+    ? territoryResolution.candidates[0]?.provinceId
+    : undefined;
   const propertyProvince = normalizeProvinceCode(property.provincia);
   const addressProvince = provinceCodeFromAddress(property.address);
-  const province = cityTerritory?.provincia || propertyProvince || addressProvince || normalizeProvinceCode(property.study.provincia);
+  const province = cityTerritory?.provincia
+    || resolvedTerritory?.provinceId
+    || unambiguousCandidateProvince
+    || propertyProvince
+    || addressProvince
+    || normalizeProvinceCode(property.study.provincia);
   const region = cityTerritory?.region ?? regionForProvince(province) ?? property.study.region;
   const normalizedRegion = normalizeTerritory(region);
 
@@ -218,6 +252,10 @@ const PROVINCE_REGIONS: Record<string, string> = {
   CN: "Piemonte",
   NO: "Piemonte",
   TO: "Piemonte",
+  AT: "Piemonte",
+  BI: "Piemonte",
+  VC: "Piemonte",
+  VB: "Piemonte",
   BL: "Veneto",
   PD: "Veneto",
   RO: "Veneto",
@@ -234,6 +272,8 @@ const PROVINCE_REGIONS: Record<string, string> = {
   MO: "Emilia-Romagna",
   PR: "Emilia-Romagna",
   RE: "Emilia-Romagna",
+  FC: "Emilia-Romagna",
+  FO: "Emilia-Romagna",
   AR: "Toscana",
   FI: "Toscana",
   GR: "Toscana",
@@ -253,10 +293,18 @@ const PROVINCE_REGIONS: Record<string, string> = {
   LT: "Lazio",
   RM: "Lazio",
   TE: "Abruzzo",
+  AQ: "Abruzzo",
+  CH: "Abruzzo",
+  PE: "Abruzzo",
   CB: "Molise",
   CE: "Campania",
   NA: "Campania",
   BA: "Puglia",
+  BR: "Puglia",
+  BT: "Puglia",
+  FG: "Puglia",
+  LE: "Puglia",
+  TA: "Puglia",
   MT: "Basilicata",
   PZ: "Basilicata",
   RC: "Calabria",
@@ -271,6 +319,7 @@ const PROVINCE_REGIONS: Record<string, string> = {
   BZ: "Trentino-Alto Adige",
   GE: "Liguria",
   SV: "Liguria",
+  AO: "Valle d'Aosta",
 };
 
 const REGION_COORDS: Record<string, Coordinates> = {
@@ -293,4 +342,5 @@ const REGION_COORDS: Record<string, Coordinates> = {
   calabria: { lat: 38.9059, lon: 16.5944 },
   molise: { lat: 41.5603, lon: 14.6687 },
   "trentino alto adige": { lat: 46.4983, lon: 11.3548 },
+  "valle d aosta": { lat: 45.7389, lon: 7.4262 },
 };

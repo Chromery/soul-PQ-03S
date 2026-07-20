@@ -39,6 +39,11 @@
   --fixed-corner-offset: 24px;
 }
 
+html {
+  /* Equivale ai due step 100% -> 90% -> 80% del controllo zoom di Chrome. */
+  zoom: 0.8;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1048,8 +1053,8 @@ a.button {
   position: absolute;
   z-index: 3;
   top: 0;
-  right: -5px;
-  width: 10px;
+  right: -1px;
+  width: 8px;
   height: 100%;
   padding: 0;
   border: 0;
@@ -1063,7 +1068,7 @@ a.button {
   content: "";
   position: absolute;
   top: 8px;
-  right: 4px;
+  right: 0;
   bottom: 8px;
   width: 1px;
   background: #dbe4ef;
@@ -3976,6 +3981,64 @@ body.is-resizing-columns {
   margin-top: 0;
 }
 
+.archive-table-tools {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(130px, 170px) minmax(120px, 150px) auto;
+  gap: 10px;
+  align-items: end;
+  margin: 0 -18px;
+  padding: 13px 18px;
+  border-top: 1px solid #edf1f7;
+  border-bottom: 1px solid #edf1f7;
+  background: #fbfdff;
+}
+
+.archive-table-search {
+  height: 40px;
+}
+
+.archive-filter-field {
+  gap: 4px;
+}
+
+.archive-filter-field select {
+  height: 40px;
+}
+
+.archive-table-tools .table-column-trigger {
+  height: 40px;
+}
+
+.properties-index-table {
+  min-width: 0;
+}
+
+.properties-index-table th,
+.properties-index-table td {
+  overflow: hidden;
+  padding-inline: 7px;
+  text-overflow: ellipsis;
+}
+
+.properties-index-table td {
+  white-space: nowrap;
+}
+
+.properties-index-table .company-cell {
+  overflow: hidden;
+}
+
+.properties-index-table .outcome-select {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 6px;
+}
+
+.properties-index-table .document-availability.compact {
+  flex-wrap: nowrap;
+  gap: 2px;
+}
+
 .inline-link {
   border: 0;
   padding: 0;
@@ -6003,6 +6066,26 @@ body.is-resizing-columns {
   display: none;
 }
 
+.editor-price-list-summary-copy {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.editor-price-list-summary-copy strong,
+.editor-price-list-summary-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-price-list-summary-copy small {
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: 750;
+}
+
 .editor-price-list-dropdown .dropdown-chevron {
   color: var(--secondary);
   transition: transform 0.15s ease;
@@ -6668,6 +6751,10 @@ body.is-resizing-columns {
 }
 
 @media (max-width: 1180px) {
+  .archive-table-tools {
+    grid-template-columns: minmax(240px, 1fr) repeat(2, minmax(120px, 160px)) auto;
+  }
+
   .dashboard-summary-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -6970,6 +7057,14 @@ body.is-resizing-columns {
 
   .dashboard-summary-strip {
     grid-template-columns: 1fr;
+  }
+
+  .archive-table-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .archive-table-tools .table-column-trigger {
+    width: 100%;
   }
 
   .table-tools-primary {

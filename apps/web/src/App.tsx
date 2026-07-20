@@ -393,6 +393,20 @@ type PropertyTableColumnId =
   | "ownership"
   | "outcome";
 
+type ArchivePropertyColumnId =
+  | "location"
+  | "sheet"
+  | "parcel"
+  | "sub"
+  | "category"
+  | "company"
+  | "currentRendita"
+  | "outcome"
+  | "study"
+  | "documents";
+
+type ArchivePropertySortKey = ArchivePropertyColumnId;
+
 const STUDY_TABLE_COLUMNS = [
   { id: "select", label: "Selezione", defaultWidth: 40, minWidth: 40, hideable: false, resizable: false },
   { id: "id", label: "ID studio", defaultWidth: 112, minWidth: 72 },
@@ -425,6 +439,19 @@ const PROPERTY_TABLE_COLUMNS = [
   { id: "ownership", label: "Titolarità", defaultWidth: 82, minWidth: 64 },
   { id: "outcome", label: "Esito", defaultWidth: 82, minWidth: 68 },
 ] as const satisfies readonly TableColumnDefinition<PropertyTableColumnId>[];
+
+const ARCHIVE_PROPERTY_TABLE_COLUMNS = [
+  { id: "location", label: "Ubicazione", defaultWidth: 230, minWidth: 130, hideable: false },
+  { id: "sheet", label: "Foglio", defaultWidth: 48, minWidth: 40 },
+  { id: "parcel", label: "Part.", defaultWidth: 50, minWidth: 40 },
+  { id: "sub", label: "Sub", defaultWidth: 44, minWidth: 38 },
+  { id: "category", label: "Cat.", defaultWidth: 48, minWidth: 40 },
+  { id: "company", label: "Azienda", defaultWidth: 180, minWidth: 110 },
+  { id: "currentRendita", label: "Rendita attuale", defaultWidth: 100, minWidth: 72 },
+  { id: "outcome", label: "Esito", defaultWidth: 96, minWidth: 72 },
+  { id: "study", label: "Studio", defaultWidth: 100, minWidth: 72 },
+  { id: "documents", label: "Documenti", defaultWidth: 90, minWidth: 72 },
+] as const satisfies readonly TableColumnDefinition<ArchivePropertyColumnId>[];
 
 function tableColumn<Id extends string>(
   columns: readonly TableColumnDefinition<Id>[],
@@ -2322,7 +2349,7 @@ function App() {
   }
 
   function handleGlobalQuery(nextQuery: string) {
-    if (route.view !== "dashboard" && route.view !== "studies") {
+    if (route.view !== "dashboard" && route.view !== "studies" && route.view !== "properties") {
       if (!navigate({ view: "studies" })) return;
     }
     setQuery(nextQuery);
@@ -2840,6 +2867,8 @@ function App() {
       >
         <PropertiesPage
           studies={studies}
+          query={query}
+          onQueryChange={handleGlobalQuery}
           onOpenStudy={(study) => navigate({ view: "study", studyId: study.id })}
           onOpenEditor={(study, property) =>
             navigate({ view: "editor", studyId: study.id, propertyId: property.id })
@@ -3997,18 +4026,107 @@ function SortableHeader({
 
 function PropertiesPage({
   studies,
+  query,
+  onQueryChange,
   onOpenStudy,
   onOpenEditor,
   onOutcomeChange,
 }: {
   studies: FeasibilityStudy[];
+  query: string;
+  onQueryChange: (query: string) => void;
   onOpenStudy: (study: FeasibilityStudy) => void;
   onOpenEditor: (study: FeasibilityStudy, property: PropertyItem) => void;
   onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
 }) {
-  const properties = studies.flatMap((study) =>
-    study.properties.map((property) => ({ property, study })),
+  const [outcomeFilter, setOutcomeFilter] = useState<PropertyOutcome | "Tutti">("Tutti");
+  const [categoryFilter, setCategoryFilter] = useState("Tutte");
+  const [sortKey, setSortKey] = useState<ArchivePropertySortKey>("location");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const archiveColumns = useTableColumns("soul-table-properties-archive-v1", ARCHIVE_PROPERTY_TABLE_COLUMNS);
+  const visibleColumnIds = useMemo(
+    () => new Set<ArchivePropertyColumnId>(archiveColumns.visibleColumns.map((column) => column.id)),
+    [archiveColumns.visibleColumns],
   );
+  const properties = useMemo(
+    () => studies.flatMap((study) => study.properties.map((property) => ({ property, study }))),
+    [studies],
+  );
+  const categories = useMemo(
+    () => Array.from(new Set(properties.map(({ property }) => property.categoria).filter(Boolean))).sort((a, b) => a.localeCompare(b, "it", { numeric: true })),
+    [properties],
+  );
+  const filteredProperties = useMemo(() => {
+    const normalizedQuery = normalizeComuneSearch(query);
+    const filtered = properties.filter(({ property, study }) => {
+      if (outcomeFilter !== "Tutti" && property.outcome !== outcomeFilter) return false;
+      if (categoryFilter !== "Tutte" && property.categoria !== categoryFilter) return false;
+      if (!normalizedQuery) return true;
+      const searchable = normalizeComuneSearch([
+        propertyLocation(property),
+        property.foglio,
+        property.particella,
+        property.subalterno,
+        property.categoria,
+        study.company,
+        study.id,
+      ].filter(Boolean).join(" "));
+      return searchable.includes(normalizedQuery);
+    });
+
+    return filtered.sort((first, second) => {
+      const documentCount = (property: PropertyItem) => Object.values(property.documentUrls ?? {}).filter(Boolean).length;
+      const values: Record<ArchivePropertySortKey, [string | number, string | number]> = {
+        location: [propertyLocation(first.property), propertyLocation(second.property)],
+        sheet: [first.property.foglio ?? "", second.property.foglio ?? ""],
+        parcel: [first.property.particella ?? "", second.property.particella ?? ""],
+        sub: [first.property.subalterno ?? "", second.property.subalterno ?? ""],
+        category: [first.property.categoria, second.property.categoria],
+        company: [first.study.company, second.study.company],
+        currentRendita: [first.property.currentRendita, second.property.currentRendita],
+        outcome: [first.property.outcome, second.property.outcome],
+        study: [first.study.id, second.study.id],
+        documents: [documentCount(first.property), documentCount(second.property)],
+      };
+      const [left, right] = values[sortKey];
+      const comparison = typeof left === "number" && typeof right === "number"
+        ? left - right
+        : String(left).localeCompare(String(right), "it", { numeric: true, sensitivity: "base" });
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [categoryFilter, outcomeFilter, properties, query, sortDirection, sortKey]);
+
+  function handleSort(nextSortKey: ArchivePropertySortKey) {
+    if (sortKey === nextSortKey) {
+      setSortDirection((current) => current === "asc" ? "desc" : "asc");
+      return;
+    }
+    setSortKey(nextSortKey);
+    setSortDirection("asc");
+  }
+
+  function renderHeader(columnId: ArchivePropertyColumnId) {
+    if (!visibleColumnIds.has(columnId)) return null;
+    const column = tableColumn(ARCHIVE_PROPERTY_TABLE_COLUMNS, columnId);
+    return (
+      <ResizableTableHeader
+        column={column}
+        canResize={archiveColumns.canResize(columnId)}
+        resizing={archiveColumns.resizingColumn === columnId}
+        onResizeStart={archiveColumns.startResize}
+        onNudge={archiveColumns.nudgeColumn}
+        ariaSort={ariaSortState(sortKey === columnId, sortDirection)}
+      >
+        <ArchivePropertySortHeader
+          label={column.label}
+          sortKey={columnId}
+          activeSort={sortKey}
+          direction={sortDirection}
+          onSort={handleSort}
+        />
+      </ResizableTableHeader>
+    );
+  }
 
   return (
     <main className="detail-page">
@@ -4016,69 +4134,150 @@ function PropertiesPage({
         <div>
           <p className="eyebrow">Archivio immobili</p>
           <h1>Immobili da analizzare</h1>
-          <p>{properties.length} immobili associati agli studi importati nella demo corrente.</p>
+          <p>{properties.length} immobili associati agli studi importati.</p>
         </div>
       </section>
       <section className="detail-card property-detail-card properties-index">
         <div className="section-title">
           <h2>Planimetrie e analisi</h2>
-          <span>Seleziona un immobile per aprire l'editor</span>
+          <span>{filteredProperties.length} immobili nella vista · clicca una riga per aprire l'editor</span>
         </div>
-        <div className="compact-table-wrap">
-          <table className="compact-table">
+        <div className="archive-table-tools" aria-label="Filtri archivio immobili">
+          <label className="search-field archive-table-search">
+            <Search size={16} />
+            <input
+              aria-label="Cerca nell'archivio immobili"
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              placeholder="Cerca ubicazione, azienda, studio o dati catastali..."
+            />
+          </label>
+          <label className="select-field archive-filter-field">
+            <span>Categoria</span>
+            <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+              <option value="Tutte">Tutte</option>
+              {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+            </select>
+          </label>
+          <label className="select-field archive-filter-field">
+            <span>Esito</span>
+            <select value={outcomeFilter} onChange={(event) => setOutcomeFilter(event.target.value as PropertyOutcome | "Tutti") }>
+              <option value="Tutti">Tutti</option>
+              {propertyOutcomeOptions.map((outcome) => <option key={outcome} value={outcome}>{outcome}</option>)}
+            </select>
+          </label>
+          <TableColumnMenu
+            columns={ARCHIVE_PROPERTY_TABLE_COLUMNS}
+            visibility={archiveColumns.visibility}
+            onToggle={archiveColumns.toggleColumn}
+            onShowAll={archiveColumns.showAllColumns}
+            onResetWidths={archiveColumns.resetWidths}
+          />
+        </div>
+        <div className="compact-table-wrap resizable-table-wrap">
+          <table className="compact-table resizable-data-table properties-index-table">
+            <colgroup>
+              {archiveColumns.visibleColumns.map((column) => (
+                <col key={column.id} style={{ width: archiveColumns.widthPercent(column.id) }} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
-                <th>Ubicazione</th>
-                <th>Foglio</th>
-                <th>Part.</th>
-                <th>Sub</th>
-                <th>Azienda</th>
-                <th>Categoria</th>
-                <th>Rendita attuale</th>
-                <th>Esito</th>
-                <th>Studio</th>
-                <th>Planimetria</th>
+                {renderHeader("location")}
+                {renderHeader("sheet")}
+                {renderHeader("parcel")}
+                {renderHeader("sub")}
+                {renderHeader("category")}
+                {renderHeader("company")}
+                {renderHeader("currentRendita")}
+                {renderHeader("outcome")}
+                {renderHeader("study")}
+                {renderHeader("documents")}
               </tr>
             </thead>
             <tbody>
-              {properties.map(({ property, study }) => (
-                <tr key={`${study.id}-${property.id}`}>
-                  <td>
+              {filteredProperties.map(({ property, study }) => (
+                <tr
+                  key={`${study.id}-${property.id}`}
+                  className="data-row-clickable"
+                  tabIndex={0}
+                  aria-label={`Apri l'editor di ${propertyLocation(property)}`}
+                  onClick={() => onOpenEditor(study, property)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    onOpenEditor(study, property);
+                  }}
+                >
+                  {visibleColumnIds.has("location") && <td>
                     <div className="company-cell">
-                      <strong>{property.address}</strong>
-                      <span>{property.comune}</span>
+                      <strong title={propertyLocation(property)}>{property.address || propertyLocation(property)}</strong>
+                      <span>{property.comune}{property.provincia ? ` (${property.provincia})` : ""}</span>
                     </div>
-                  </td>
-                  <td>{property.foglio || "In attesa ERP"}</td>
-                  <td>{property.particella || "In attesa ERP"}</td>
-                  <td>{property.subalterno || "In attesa ERP"}</td>
-                  <td>{study.company}</td>
-                  <td>{property.categoria}</td>
-                  <td>{formatEuro(property.currentRendita)}</td>
-                  <td>
+                  </td>}
+                  {visibleColumnIds.has("sheet") && <td className="table-cell-ellipsis" title={property.foglio || "In attesa ERP"}>{property.foglio || "—"}</td>}
+                  {visibleColumnIds.has("parcel") && <td className="table-cell-ellipsis" title={property.particella || "In attesa ERP"}>{property.particella || "—"}</td>}
+                  {visibleColumnIds.has("sub") && <td className="table-cell-ellipsis" title={property.subalterno || "In attesa ERP"}>{property.subalterno || "—"}</td>}
+                  {visibleColumnIds.has("category") && <td className="table-cell-ellipsis" title={property.categoria}>{property.categoria || "—"}</td>}
+                  {visibleColumnIds.has("company") && <td className="table-cell-ellipsis" title={study.company}>{study.company}</td>}
+                  {visibleColumnIds.has("currentRendita") && <td>{formatEuro(property.currentRendita)}</td>}
+                  {visibleColumnIds.has("outcome") && <td>
                     <OutcomeSelect
                       outcome={property.outcome}
                       onChange={(outcome) => onOutcomeChange(property.id, outcome)}
                     />
-                  </td>
-                  <td>
-                    <button className="inline-link" onClick={() => onOpenStudy(study)}>
+                  </td>}
+                  {visibleColumnIds.has("study") && <td>
+                    <button
+                      className="inline-link"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenStudy(study);
+                      }}
+                    >
                       {study.id}
                     </button>
-                  </td>
-                  <td>
-                    <button className="button secondary compact-button" onClick={() => onOpenEditor(study, property)}>
-                      <File size={14} />
-                      Apri editor
-                    </button>
-                  </td>
+                  </td>}
+                  {visibleColumnIds.has("documents") && <td><PropertyDocumentAvailability property={property} compact /></td>}
                 </tr>
               ))}
             </tbody>
           </table>
+          {filteredProperties.length === 0 && (
+            <div className="empty-state">
+              <Search size={22} />
+              <strong>Nessun immobile trovato</strong>
+              <span>Modifica la ricerca o i filtri per ampliare i risultati.</span>
+            </div>
+          )}
         </div>
       </section>
     </main>
+  );
+}
+
+function ArchivePropertySortHeader({
+  label,
+  sortKey,
+  activeSort,
+  direction,
+  onSort,
+}: {
+  label: string;
+  sortKey: ArchivePropertySortKey;
+  activeSort: ArchivePropertySortKey;
+  direction: "asc" | "desc";
+  onSort: (sortKey: ArchivePropertySortKey) => void;
+}) {
+  const active = sortKey === activeSort;
+  return (
+    <button className={`sort-header ${active ? "active" : ""}`} type="button" onClick={() => onSort(sortKey)}>
+      {label}
+      {active
+        ? direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+        : <ArrowDownUp size={13} />}
+    </button>
   );
 }
 

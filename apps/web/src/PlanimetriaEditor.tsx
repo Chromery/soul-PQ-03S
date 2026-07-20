@@ -7141,7 +7141,10 @@ export default function PlanimetriaEditor({
             onToggle={(event) => setPriceListDropdownOpen(event.currentTarget.open)}
           >
             <summary>
-              <span>Prezzario</span>
+              <span className="editor-price-list-summary-copy">
+                <strong>Prezzario</strong>
+                <small>{topPriceLists[0]?.territoryName ?? "Non collegato"}</small>
+              </span>
               <ChevronDown className="dropdown-chevron" size={16} />
             </summary>
             {topPriceLists.length > 0 ? (

@@ -274,7 +274,9 @@ async function upsertPriceList(pool, priceList) {
 async function assignPriceLists(pool) {
   const { rows: priceLists } = await pool.query(`SELECT * FROM "PriceList"`);
   const { rows: properties } = await pool.query(
-    `SELECT p."id", p."address", p."comune", s."provincia", s."region"
+    `SELECT p."id", p."address", p."comune",
+            COALESCE(NULLIF(p."provincia", ''), s."provincia") AS "provincia",
+            s."region"
      FROM "Property" p
      JOIN "FeasibilityStudy" s ON s."id" = p."studyId"`,
   );
