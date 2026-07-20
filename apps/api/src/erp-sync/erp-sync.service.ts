@@ -450,9 +450,8 @@ export class ErpSyncService {
       return {
         property,
         estimatedRendita,
-        currentImu: property.currentImu === null
-          ? calculatedAmount(currentCalculation)
-          : Number(property.currentImu),
+        currentImu: calculatedAmount(currentCalculation)
+          ?? (property.currentImu === null ? null : Number(property.currentImu)),
         estimatedImu: calculatedAmount(estimatedCalculation)
           ?? (property.estimatedImu === null ? null : Number(property.estimatedImu)),
         estimatedCalculation,

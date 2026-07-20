@@ -192,7 +192,7 @@ test("la risposta studio espone un record elaborato legacy come planimetria", as
     subalterno: "3",
     categoria: "D/1",
     titolarita: null,
-    currentRendita: 0,
+    currentRendita: 1000,
     estimatedRendita: 0,
     diffPercent: 0,
     currentImu: 0,
@@ -249,10 +249,23 @@ test("la risposta studio espone un record elaborato legacy come planimetria", as
     { feasibilityStudy: { findUnique: async () => study } } as never,
     {} as never,
     {
-      calculate: () => ({
-        status: "unavailable",
-        reason: "rate_not_found",
-        targetYear: 2026,
+      calculate: ({ rendita }: { rendita: number }) => ({
+        status: "calculated",
+        amount: rendita * 0.2,
+        taxableBase: rendita * 20,
+        cadastralMultiplier: 20,
+        ratePercent: 1,
+        rateYear: 2025,
+        usedFallback: true,
+        rateKind: "group_d",
+        municipality: "MILANO",
+        province: "MI",
+        cadastralCode: "F205",
+        actNumber: "1",
+        actDate: "01/01/2025",
+        publicationDate: "01/01/2025",
+        sourcePath: "delibera.pdf",
+        sourceUrl: "/api/imu/delibere/test",
       }),
     } as never,
   );
@@ -264,4 +277,7 @@ test("la risposta studio espone un record elaborato legacy come planimetria", as
   assert.equal(apiProperty?.documentUrls.planimetria, "/api/properties/I-1/documents/planimetria/download");
   assert.equal(apiProperty?.formapsProvincia, "MI");
   assert.equal(apiProperty?.formapsComune, "MILANO");
+  assert.equal(apiProperty?.currentImu, 200);
+  assert.equal(apiProperty?.currentImuSource, "calculated");
+  assert.equal(apiProperty?.currentImuCalculation?.status, "calculated");
 });

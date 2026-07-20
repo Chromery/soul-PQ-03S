@@ -25,6 +25,10 @@ type DraftPayload = {
   totalArea?: number;
   totalEstimatedAmount?: number;
   totalEstimatedRendita?: number;
+  totalBaseAmount?: number;
+  totalLotArea?: number;
+  totalLotValue?: number;
+  lotValuation?: unknown;
   selections: unknown[];
 };
 
@@ -35,9 +39,16 @@ type NormalizedDraftPayload = DraftPayload & {
   aiSheetSize: string | null;
   aiScaleConfidence: number | null;
   aiScaleDetectedAt: string | null;
+  lotValuation: LotValuation;
 };
 
 type ScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
+
+type LotValuation = {
+  mode: "percentage" | "per_sqm";
+  percentage: number;
+  unitValuePerM2: number;
+};
 
 type DocumentUploadInput = {
   file_name: string;
@@ -90,9 +101,8 @@ export class PropertiesService {
     const estimatedImuCalculation = totalEstimatedRendita === null
       ? null
       : this.calculateImu(totalEstimatedRendita, property);
-    const currentImu = property.currentImu === null
-      ? calculatedAmount(currentImuCalculation)
-      : Number(property.currentImu);
+    const currentImu = calculatedAmount(currentImuCalculation)
+      ?? (property.currentImu === null ? null : Number(property.currentImu));
     const estimatedImu = estimatedImuCalculation === null ? null : calculatedAmount(estimatedImuCalculation);
     const data = {
       documentSource: (payload.document === null ? Prisma.JsonNull : payload.document) as Prisma.InputJsonValue,
@@ -268,8 +278,8 @@ export class PropertiesService {
     );
     const currentImu = sum(
       properties.map((property) => {
-        if (property.currentImu !== null) return Number(property.currentImu);
-        return calculatedAmount(this.calculateImu(Number(property.currentRendita), property)) ?? 0;
+        return calculatedAmount(this.calculateImu(Number(property.currentRendita), property))
+          ?? (property.currentImu === null ? 0 : Number(property.currentImu));
       }),
     );
     const estimatedImu = sum(
@@ -313,6 +323,7 @@ export class PropertiesService {
     const aiSheetSize = validateOptionalSheetSize(payload.aiSheetSize, "aiSheetSize");
     const aiScaleConfidence = validateOptionalConfidence(payload.aiScaleConfidence, "aiScaleConfidence");
     const aiScaleDetectedAt = validateOptionalDate(payload.aiScaleDetectedAt, "aiScaleDetectedAt");
+    const lotValuation = validateLotValuation(payload.lotValuation);
     if (
       payload.version !== 1 ||
       payload.propertyId !== propertyId ||
@@ -335,6 +346,7 @@ export class PropertiesService {
       aiSheetSize,
       aiScaleConfidence,
       aiScaleDetectedAt,
+      lotValuation,
     };
   }
 }
@@ -414,4 +426,28 @@ function validateOptionalString(value: unknown, field: string) {
   if (value === undefined || value === null || value === "") return null;
   if (typeof value !== "string") throw new BadRequestException(`${field} non valido`);
   return value;
+}
+
+function validateLotValuation(value: unknown): LotValuation {
+  if (value === undefined || value === null) {
+    return { mode: "percentage", percentage: 12, unitValuePerM2: 0 };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new BadRequestException("lotValuation non valido");
+  }
+  const input = value as Partial<LotValuation>;
+  if (input.mode !== "percentage" && input.mode !== "per_sqm") {
+    throw new BadRequestException("lotValuation.mode non valido");
+  }
+  if (typeof input.percentage !== "number" || !Number.isFinite(input.percentage) || input.percentage < 0) {
+    throw new BadRequestException("lotValuation.percentage non valido");
+  }
+  if (typeof input.unitValuePerM2 !== "number" || !Number.isFinite(input.unitValuePerM2) || input.unitValuePerM2 < 0) {
+    throw new BadRequestException("lotValuation.unitValuePerM2 non valido");
+  }
+  return {
+    mode: input.mode,
+    percentage: input.percentage,
+    unitValuePerM2: input.unitValuePerM2,
+  };
 }

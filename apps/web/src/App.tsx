@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -59,9 +60,11 @@ import {
   writeEditorPreferences,
 } from "./editorPreferences";
 import { openEntriesInForMaps, toForMapsEntries, toForMapsEntry } from "./formaps";
+import { lotValueForArea, normalizeLotValuation } from "./lotValuation";
+import type { LotValuation, LotValuationMode } from "./lotValuation";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.45.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.46.0";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -378,6 +381,10 @@ type PlanAreaDraft = {
   totalArea?: number;
   totalEstimatedAmount?: number;
   totalEstimatedRendita?: number;
+  totalBaseAmount?: number;
+  totalLotArea?: number;
+  totalLotValue?: number;
+  lotValuation?: LotValuation;
   estimatedImu?: number | null;
   imuCalculation?: PropertyImuCalculation | null;
   selections: PlanAreaDraftSelection[];
@@ -393,9 +400,10 @@ type PlanAreaDraftSelection = {
   rate?: number;
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
+  includedInLot?: boolean;
   opacity: number;
   totalPixels: number;
-  source?: "smart" | "polygon" | "merged" | "copy";
+  source?: "smart" | "polygon" | "merged" | "copy" | "manual";
   region: {
     count: number;
   };
@@ -1447,7 +1455,7 @@ const planAreaUsages: Array<{
     rate: 1.8,
   },
   { id: "verde", label: "Verde", shortLabel: "Verde", color: "#0f766e", rate: 0.4 },
-  { id: "lotto", label: "Lotto", shortLabel: "Lotto", color: "#64748b", rate: 0.2 },
+  { id: "lotto", label: "Lotto (legacy)", shortLabel: "Lotto legacy", color: "#64748b", rate: 0.2 },
   { id: "interrato", label: "Interrato", shortLabel: "Interrato", color: "#334155", rate: 4.5 },
   {
     id: "parcheggio-interrato",
@@ -1467,6 +1475,7 @@ const planAreaUsages: Array<{
 ];
 
 const PLAN_AREA_CUSTOM_USAGE_ID: PlanAreaUsageId = "custom";
+const planAreaSelectableUsages = planAreaUsages.filter((usage) => usage.id !== "lotto");
 
 const planAreaSheetSizes: Record<PlanAreaSheetSize, { widthMm: number; heightMm: number }> = {
   A3: { widthMm: 420, heightMm: 297 },
@@ -1615,6 +1624,38 @@ function propertyDocumentLabel(type: PropertyDocumentKind) {
   return type === "planimetria" ? "Planimetria PDF" : "Visura PDF";
 }
 
+function PropertyDocumentAvailability({
+  property,
+  compact = false,
+}: {
+  property: PropertyItem;
+  compact?: boolean;
+}) {
+  const documents: Array<{ type: PropertyDocumentKind; label: string; shortLabel: string; icon: ReactNode }> = [
+    { type: "planimetria", label: "Planimetria", shortLabel: "Plan.", icon: <File size={compact ? 11 : 13} /> },
+    { type: "visura", label: "Visura", shortLabel: "Vis.", icon: <FileText size={compact ? 11 : 13} /> },
+  ];
+  return (
+    <div className={`document-availability ${compact ? "compact" : ""}`} aria-label="Disponibilità documenti">
+      {documents.map((document) => {
+        const available = Boolean(propertyDocumentUrl(property, document.type));
+        return (
+          <span
+            key={document.type}
+            className={`document-availability-item ${available ? "available" : "missing"}`}
+            title={`${document.label}: ${available ? "disponibile" : "non disponibile"}`}
+            aria-label={`${document.label} ${available ? "disponibile" : "non disponibile"}`}
+          >
+            {document.icon}
+            {!compact && <span>{document.shortLabel}</span>}
+            {available ? <CheckCircle2 size={compact ? 10 : 12} /> : <X size={compact ? 10 : 12} />}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function openPropertyDocument(
   property: PropertyItem,
   type: PropertyDocumentKind,
@@ -1673,6 +1714,7 @@ function planAreaUsageForSelection(selection: PlanAreaDraftSelection) {
 }
 
 function planAreaSourceLabel(source?: PlanAreaDraftSelection["source"]) {
+  if (source === "manual") return "Manuale";
   if (source === "polygon") return "Poligono";
   if (source === "merged") return "Unione";
   if (source === "copy") return "Copia";
@@ -1713,6 +1755,19 @@ function planAreaEffectiveAmount(selection: PlanAreaDraftSelection, draft: PlanA
     : computedAmount;
 }
 
+function planAreaLotValue(selection: PlanAreaDraftSelection, draft: PlanAreaDraft) {
+  return lotValueForArea(
+    planAreaEffectiveAreaM2(selection, draft),
+    planAreaEffectiveAmount(selection, draft),
+    selection.includedInLot,
+    normalizeLotValuation(draft.lotValuation),
+  );
+}
+
+function planAreaTotalAmount(selection: PlanAreaDraftSelection, draft: PlanAreaDraft) {
+  return planAreaEffectiveAmount(selection, draft) + planAreaLotValue(selection, draft);
+}
+
 function planAreaEstimatedRenditaFromAmount(amount: number) {
   return amount * PLAN_AREA_FRUITFULNESS_RATE;
 }
@@ -1729,15 +1784,25 @@ function planAreaEstimatedRenditaFromDraft(draft: PlanAreaDraft) {
 function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft): PlanAreaDraft {
   const totals = draft.selections.reduce(
     (acc, selection) => {
-      acc.area += planAreaEffectiveAreaM2(selection, draft);
-      acc.amount += planAreaEffectiveAmount(selection, draft);
+      const area = planAreaEffectiveAreaM2(selection, draft);
+      const baseAmount = planAreaEffectiveAmount(selection, draft);
+      const lotValue = planAreaLotValue(selection, draft);
+      acc.area += area;
+      acc.baseAmount += baseAmount;
+      acc.lotArea += selection.includedInLot ? area : 0;
+      acc.lotValue += lotValue;
+      acc.amount += baseAmount + lotValue;
       return acc;
     },
-    { area: 0, amount: 0 },
+    { area: 0, baseAmount: 0, lotArea: 0, lotValue: 0, amount: 0 },
   );
   return {
     ...draft,
+    lotValuation: normalizeLotValuation(draft.lotValuation),
     totalArea: totals.area,
+    totalBaseAmount: totals.baseAmount,
+    totalLotArea: totals.lotArea,
+    totalLotValue: totals.lotValue,
     totalEstimatedAmount: totals.amount,
     totalEstimatedRendita: planAreaEstimatedRenditaFromAmount(totals.amount),
   };
@@ -4433,7 +4498,10 @@ function StudyRows({
                       tabIndex={0}
                       aria-label={`Dettagli immobile ${property.address}, ${property.comune}`}
                     >
-                      {property.categoria.startsWith("D/") ? <Factory size={20} /> : <Home size={20} />}
+                      <span className="property-tile-symbol">
+                        {property.categoria.startsWith("D/") ? <Factory size={20} /> : <Home size={20} />}
+                      </span>
+                      <PropertyDocumentAvailability property={property} compact />
                       <div className="property-tooltip" role="tooltip">
                         <strong>{property.address}</strong>
                         <small>{property.comune}</small>
@@ -5223,6 +5291,7 @@ function StudyDetail({
                 <PropertySortHeader label="IMU attuale" sortKey="currentImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="IMU prevista" sortKey="estimatedImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Diff. IMU" sortKey="imuDiff" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                <th>Documenti</th>
                 <PropertySortHeader label="Titolarità" sortKey="titolarita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
                 <PropertySortHeader label="Esito" sortKey="outcome" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
               </tr>
@@ -5284,11 +5353,12 @@ function StudyDetail({
                     <td>
                       <MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} favorableDirection="down" />
                     </td>
-                    <td>{property.currentImu === null || property.currentImu === undefined ? "In attesa ERP" : formatEuro(property.currentImu)}</td>
+                    <td><ImuCurrent property={property} /></td>
                     <td><ImuEstimate property={property} /></td>
                     <td>
                       <MoneyPercentStack amount={propertyImuDiffAmount(property)} percent={imuPercent} />
                     </td>
+                    <td><PropertyDocumentAvailability property={property} /></td>
                     <td>{formatTitolarita(property.titolarita)}</td>
                     <td>
                       <OutcomeSelect
@@ -5468,6 +5538,7 @@ function PropertyAreaDetail({
       const area = planAreaEffectiveAreaM2(selection, draft);
       const calculatedAmount = area * rate;
       const amount = planAreaEffectiveAmount(selection, draft);
+      const lotValue = planAreaLotValue(selection, draft);
       return {
         id: selection.id,
         index: index + 1,
@@ -5479,6 +5550,8 @@ function PropertyAreaDetail({
         calculatedArea,
         amount,
         calculatedAmount,
+        lotValue,
+        totalAmount: planAreaTotalAmount(selection, draft),
         areaOverridden: typeof selection.areaOverrideM2 === "number" && Number.isFinite(selection.areaOverrideM2),
         amountOverridden: typeof selection.amountOverride === "number" && Number.isFinite(selection.amountOverride),
         source: planAreaSourceLabel(selection.source),
@@ -5491,11 +5564,14 @@ function PropertyAreaDetail({
       rows.reduce(
         (acc, row) => {
           acc.area += row.area;
-          acc.amount += row.amount;
-          acc.rendita += planAreaEstimatedRenditaFromAmount(row.amount);
+          acc.baseAmount += row.amount;
+          acc.lotArea += row.selection.includedInLot ? row.area : 0;
+          acc.lotValue += row.lotValue;
+          acc.amount += row.totalAmount;
+          acc.rendita += planAreaEstimatedRenditaFromAmount(row.totalAmount);
           return acc;
         },
-        { area: 0, amount: 0, rendita: 0 },
+        { area: 0, baseAmount: 0, lotArea: 0, lotValue: 0, amount: 0, rendita: 0 },
       ),
     [rows],
   );
@@ -5522,6 +5598,7 @@ function PropertyAreaDetail({
         : "Nessuna bozza";
   const topPriceLists = property.priceLists?.slice(0, 5) ?? [];
   const primaryPriceList = topPriceLists[0];
+  const lotValuation = normalizeLotValuation(draft?.lotValuation);
 
   function updateEditableDraft(updater: (draft: PlanAreaDraft) => void) {
     setEditableDraft((current) => {
@@ -5620,6 +5697,27 @@ function PropertyAreaDetail({
     );
   }
 
+  function handleLotModeChange(mode: LotValuationMode) {
+    updateEditableDraft((nextDraft) => {
+      nextDraft.lotValuation = { ...normalizeLotValuation(nextDraft.lotValuation), mode };
+    });
+  }
+
+  function handleLotValueBlur(input: HTMLInputElement) {
+    const field = lotValuation.mode === "percentage" ? "percentage" : "unitValuePerM2";
+    const fallback = lotValuation[field];
+    handleNumberBlur(
+      input.value,
+      fallback,
+      (value) =>
+        updateEditableDraft((nextDraft) => {
+          nextDraft.lotValuation = { ...normalizeLotValuation(nextDraft.lotValuation), [field]: value };
+        }),
+      input,
+      "Inserisci un valore lotto valido.",
+    );
+  }
+
   async function saveAreaDraft() {
     if (!draft || saving) return;
     setSaving(true);
@@ -5670,6 +5768,11 @@ function PropertyAreaDetail({
             <p>
               {propertyLocation(property)} - {property.categoria}
             </p>
+            <div className="property-area-cadastral-reference" aria-label="Riferimenti catastali">
+              <span>Foglio <strong>{property.foglio || "—"}</strong></span>
+              <span>Part. <strong>{property.particella || "—"}</strong></span>
+              <span>Sub. <strong>{property.subalterno || "—"}</strong></span>
+            </div>
           </div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi lista aree">
             <X size={16} />
@@ -5793,10 +5896,66 @@ function PropertyAreaDetail({
           </div>
         ) : (
           <>
+            <section className="property-lot-valuation" aria-label="Valorizzazione lotto">
+              <div>
+                <h3>Valorizzazione lotto</h3>
+                <p>
+                  Il contributo si somma al valore della destinazione d’uso solo per le righe con check Lotto.
+                </p>
+              </div>
+              <div className="lot-mode-toggle" role="group" aria-label="Metodo di valorizzazione del lotto">
+                <button
+                  type="button"
+                  className={lotValuation.mode === "percentage" ? "active" : ""}
+                  onClick={() => handleLotModeChange("percentage")}
+                >
+                  Percentuale
+                </button>
+                <button
+                  type="button"
+                  className={lotValuation.mode === "per_sqm" ? "active" : ""}
+                  onClick={() => handleLotModeChange("per_sqm")}
+                >
+                  €/m²
+                </button>
+              </div>
+              <label className="lot-value-field">
+                <span>{lotValuation.mode === "percentage" ? "Incidenza sul valore destinazioni" : "Valore unitario lotto"}</span>
+                <div>
+                  <input
+                    key={`${lotValuation.mode}-${lotValuation.mode === "percentage" ? lotValuation.percentage : lotValuation.unitValuePerM2}`}
+                    type="text"
+                    inputMode="decimal"
+                    defaultValue={areaFormatter.format(
+                      lotValuation.mode === "percentage" ? lotValuation.percentage : lotValuation.unitValuePerM2,
+                    )}
+                    onBlur={(event) => handleLotValueBlur(event.currentTarget)}
+                    onKeyDown={(event) =>
+                      handleNumericInputKeyDown(
+                        event,
+                        areaFormatter.format(
+                          lotValuation.mode === "percentage" ? lotValuation.percentage : lotValuation.unitValuePerM2,
+                        ),
+                      )
+                    }
+                  />
+                  <strong>{lotValuation.mode === "percentage" ? "%" : "€/m²"}</strong>
+                </div>
+              </label>
+              <small>
+                {lotValuation.mode === "percentage"
+                  ? "La Circolare 6/2012 indica normalmente almeno il 12% del costo delle strutture quando manca una stima di dettaglio."
+                  : "Usa il valore da indagine di mercato del lotto e seleziona una sola volta le superfici fisicamente sovrapposte."}
+              </small>
+            </section>
+
             <div className="property-area-summary">
               <SummaryStat label="Aree tracciate" value={rows.length.toString()} />
               <SummaryStat label="Area totale" value={formatM2(totals.area)} />
-              <SummaryStat label="Valore totale" value={formatEuro(totals.amount)} />
+              <SummaryStat label="Area nel lotto" value={formatM2(totals.lotArea)} />
+              <SummaryStat label="Valore destinazioni" value={formatEuro(totals.baseAmount)} />
+              <SummaryStat label="Valore lotto" value={formatEuro(totals.lotValue)} />
+              <SummaryStat label="Valore complessivo" value={formatEuro(totals.amount)} />
               <SummaryStat label="Nuova rendita" value={formatEuro(totals.rendita)} />
               <SummaryStat label="Scala e foglio" value={`${draft.sheetSize} 1:${draft.scaleDenominator}`} />
               <SummaryStat label="Origine scala" value={planScaleSourceLabel(draft.scaleSource)} />
@@ -5831,9 +5990,12 @@ function PropertyAreaDetail({
                     <th>Area</th>
                     <th>Pagina</th>
                     <th>Tipologia</th>
+                    <th>Lotto</th>
                     <th>Superficie</th>
                     <th>€/m2</th>
-                    <th>Valore</th>
+                    <th>Valore destinazione</th>
+                    <th>Quota lotto</th>
+                    <th>Valore totale</th>
                     <th>Origine</th>
                   </tr>
                 </thead>
@@ -5856,7 +6018,10 @@ function PropertyAreaDetail({
                             onChange={(event) => handleUsageChange(row.id, event.target.value)}
                           >
                             <optgroup label="Predefinite">
-                              {planAreaUsages
+                              {row.selection.usageId === "lotto" && (
+                                <option value="fixed:lotto">Lotto (legacy — selezionare una destinazione)</option>
+                              )}
+                              {planAreaSelectableUsages
                                 .filter((usage) => usage.id !== PLAN_AREA_CUSTOM_USAGE_ID)
                                 .map((usage) => (
                                   <option key={usage.id} value={`fixed:${usage.id}`}>
@@ -5875,6 +6040,22 @@ function PropertyAreaDetail({
                             )}
                             {orphanCustomLabel && <option value={`orphan:${row.id}`}>{orphanCustomLabel}</option>}
                           </select>
+                        </td>
+                        <td>
+                          <label className="lot-checkbox" title="Includi questa area nel calcolo del lotto">
+                            <input
+                              type="checkbox"
+                              checked={row.selection.includedInLot === true}
+                              onChange={(event) => {
+                                const includedInLot = event.currentTarget.checked;
+                                updateEditableSelection(row.id, (selection) => {
+                                  selection.includedInLot = includedInLot;
+                                });
+                              }}
+                              aria-label={`Includi area ${row.index} nel lotto`}
+                            />
+                            <span>Lotto</span>
+                          </label>
                         </td>
                         <td>
                           <div className="property-area-edit-field">
@@ -5943,6 +6124,12 @@ function PropertyAreaDetail({
                             {row.amountOverridden && <small>Calc. {formatEuro(row.calculatedAmount)}</small>}
                           </div>
                         </td>
+                        <td>
+                          <strong className={row.selection.includedInLot ? "lot-value active" : "lot-value"}>
+                            {row.selection.includedInLot ? formatEuro(row.lotValue) : "—"}
+                          </strong>
+                        </td>
+                        <td><strong>{formatEuro(row.totalAmount)}</strong></td>
                         <td>{row.source}</td>
                       </tr>
                     );
@@ -6033,6 +6220,26 @@ function ImuEstimate({ property }: { property: PropertyItem }) {
   );
 }
 
+function ImuCurrent({ property }: { property: PropertyItem }) {
+  const calculation = property.currentImuCalculation;
+  if (property.currentImu === null || property.currentImu === undefined) {
+    return <span className="delta muted">Non calcolabile</span>;
+  }
+  if (!calculation || calculation.status !== "calculated") return <>{formatEuro(property.currentImu)}</>;
+  const formula = imuFormulaText(property.currentRendita, calculation);
+  return (
+    <div className="imu-estimate">
+      <strong
+        className="imu-estimate-value"
+        title={formula}
+        aria-label={`${formatEuro(property.currentImu)}. Formula: ${formula}`}
+      >
+        {formatEuro(property.currentImu)}
+      </strong>
+    </div>
+  );
+}
+
 function ImuCalculationBreakdown({ property }: { property: PropertyItem }) {
   const calculation = property.imuCalculation;
   const currentCalculation = property.currentImuCalculation;
@@ -6104,7 +6311,7 @@ function ImuCalculationBreakdown({ property }: { property: PropertyItem }) {
         </div>
         <p>
           {currentImuSource === "calculated"
-            ? "Calcolata da PQ dalla rendita attuale perché il dato registrato non era disponibile."
+            ? "Calcolata da PQ dalla rendita attuale con la stessa aliquota comunale e la stessa metodologia usate per l’IMU prevista."
             : currentImuSource === "stored"
               ? "Dato registrato nell’ERP o inserito manualmente: PQ non lo ha ricalcolato."
               : "Né il dato registrato né un’aliquota calcolabile sono disponibili."}
