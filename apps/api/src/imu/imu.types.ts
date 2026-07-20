@@ -22,6 +22,8 @@ export type ImuCalculation =
       taxableBase: number;
       cadastralMultiplier: number;
       ratePercent: number;
+      systemRatePercent: number | null;
+      rateOverridden: boolean;
       rateYear: number;
       usedFallback: boolean;
       rateKind: "group_d" | "rural_instrumental" | "other_buildings";
@@ -32,11 +34,11 @@ export type ImuCalculation =
       actDate: string;
       publicationDate: string;
       sourcePath: string;
-      sourceUrl: string;
+      sourceUrl: string | null;
     }
   | {
       status: "unavailable";
-      reason: "invalid_input" | "municipality_not_found" | "unsupported_document" | "rate_not_found";
+      reason: "invalid_input" | "category_not_supported" | "municipality_not_found" | "unsupported_document" | "rate_not_found";
       targetYear: number;
     };
 
@@ -46,4 +48,5 @@ export type ImuCalculationInput = {
   comune: string;
   provincia?: string | null;
   targetYear?: number;
+  rateOverridePercent?: number | null;
 };

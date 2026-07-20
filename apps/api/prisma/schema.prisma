@@ -114,6 +114,7 @@ model Property {
   currentImu         Decimal?            @db.Decimal(14, 2)
   estimatedImu       Decimal?            @db.Decimal(14, 2)
   imuDiff            Decimal             @db.Decimal(14, 2)
+  imuRateOverride    Decimal?            @db.Decimal(7, 4)
   displayOrder       Int                 @default(0)
   outcome            String
   hasStudy           Boolean             @default(false)

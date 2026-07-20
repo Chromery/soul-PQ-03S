@@ -64,7 +64,7 @@ import { lotValueForArea, normalizeLotValuation } from "./lotValuation";
 import type { LotValuation, LotValuationMode } from "./lotValuation";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.47.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.48.0";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -109,7 +109,8 @@ type PropertyItem = {
   currentImu?: number | null;
   estimatedImu?: number | null;
   imuDiff: number;
-  imuCalculation?: PropertyImuCalculation;
+  imuRateOverride?: number | null;
+  imuCalculation?: PropertyImuCalculation | null;
   currentImuCalculation?: PropertyImuCalculation | null;
   currentImuSource?: ImuValueSource;
   estimatedImuSource?: ImuValueSource;
@@ -1627,7 +1628,7 @@ function propertyDocumentUrl(property: PropertyItem, type: PropertyDocumentKind)
 }
 
 function propertyDocumentLabel(type: PropertyDocumentKind) {
-  if (type === "planimetria") return "Planimetria PDF";
+  if (type === "planimetria") return "Elab. Planimetrico";
   if (type === "visura") return "Visura PDF";
   return "Elenco subalterni PDF";
 }
@@ -2368,6 +2369,25 @@ function App() {
     );
   }
 
+  function updatePropertyImuRate(
+    propertyId: string,
+    update: {
+      imuRateOverride: number | null;
+      currentImu: number | null;
+      estimatedImu: number | null;
+      imuDiff: number;
+      currentImuCalculation: PropertyImuCalculation | null;
+      imuCalculation: PropertyImuCalculation | null;
+      currentImuSource: ImuValueSource;
+      estimatedImuSource: ImuValueSource;
+    },
+  ) {
+    updatePropertyInStudies(propertyId, (property) => ({ ...property, ...update }), true);
+    flash(update.imuRateOverride === null
+      ? "Ripristinata l’aliquota IMU predefinita dal sistema."
+      : "Aliquota IMU manuale salvata e applicata ai calcoli.");
+  }
+
   async function createStudyFromPq(form: NewStudyFormState) {
     setNewStudyBusy(true);
     try {
@@ -2678,6 +2698,7 @@ function App() {
             onBack={() => navigate({ view: "study", studyId: editorStudy.id })}
             onDirtyChange={setEditorDirty}
             onDraftSaved={updatePropertyEstimatedValue}
+            onImuRateSaved={updatePropertyImuRate}
             onDocumentSaved={updatePropertyDocument}
           />
         </Suspense>
@@ -4554,13 +4575,13 @@ function StudyRows({
                             disabled={!propertyDocumentUrl(property, "planimetria")}
                             title={
                               propertyDocumentUrl(property, "planimetria")
-                                ? "Apri planimetria PDF"
-                                : "Planimetria PDF non disponibile nello storage documentale"
+                                ? "Apri elaborato planimetrico"
+                                : "Elaborato planimetrico non disponibile nello storage documentale"
                             }
                             onClick={() => handleOpenDocument(property, "planimetria")}
                           >
                             <File size={13} />
-                            Planimetria PDF
+                            Elab. Planimetrico
                           </button>
                           <button
                             type="button"
@@ -4686,11 +4707,11 @@ function PropertyRow({
           </button>
           <button
             disabled={!planimetriaUrl || !onOpenDocument}
-            title={planimetriaUrl ? "Apri planimetria PDF" : "Planimetria PDF non disponibile nello storage documentale"}
+            title={planimetriaUrl ? "Apri elaborato planimetrico" : "Elaborato planimetrico non disponibile nello storage documentale"}
             onClick={() => onOpenDocument?.("planimetria")}
           >
             <File size={14} />
-            Planimetria PDF
+            Elab. Planimetrico
           </button>
           <button
             disabled={!visuraUrl || !onOpenDocument}
@@ -5854,13 +5875,13 @@ function PropertyAreaDetail({
             disabled={!propertyDocumentUrl(property, "planimetria")}
             title={
               propertyDocumentUrl(property, "planimetria")
-                ? "Apri planimetria PDF"
-                : "Planimetria PDF non disponibile nello storage documentale"
+                ? "Apri elaborato planimetrico"
+                : "Elaborato planimetrico non disponibile nello storage documentale"
             }
             onClick={() => onOpenDocument("planimetria")}
           >
             <File size={14} />
-            Planimetria PDF
+            Elab. Planimetrico
           </button>
           <button
             className="button secondary compact-button"
@@ -6322,27 +6343,47 @@ function ImuCalculationBreakdown({ property }: { property: PropertyItem }) {
               <span>Aliquota applicata</span>
               <strong>
                 {formatImuRate(calculation.ratePercent)} · {imuRateKindLabel(calculation.rateKind)}
+                {calculation.rateOverridden && <span className="manual-override-badge">Manuale</span>}
               </strong>
               <small>
-                {calculation.municipality} ({calculation.province}) · anno {calculation.rateYear}
-                {calculation.usedFallback ? " · fallback perché non è disponibile il 2026" : ""}
+                {calculation.rateOverridden && calculation.systemRatePercent === null
+                  ? "Nessuna aliquota comunale strutturata disponibile"
+                  : `${calculation.municipality} (${calculation.province}) · anno ${calculation.rateYear}${calculation.usedFallback ? " · fallback perché non è disponibile il 2026" : ""}`}
               </small>
+              {calculation.rateOverridden && (
+                <small>
+                  Predefinita dal sistema: {calculation.systemRatePercent === null
+                    ? "non disponibile"
+                    : formatImuRate(calculation.systemRatePercent)}
+                </small>
+              )}
             </div>
             <div>
               <span>Fonte</span>
-              <strong>
-                Delibera{calculation.actNumber ? ` n. ${calculation.actNumber}` : ""}
-                {calculation.actDate ? ` del ${calculation.actDate}` : ""}
-              </strong>
-              <small>
-                {calculation.publicationDate ? `Pubblicata il ${calculation.publicationDate} · ` : ""}
-                codice catastale {calculation.cadastralCode}
-              </small>
+              {calculation.sourceUrl ? (
+                <>
+                  <strong>
+                    Delibera{calculation.actNumber ? ` n. ${calculation.actNumber}` : ""}
+                    {calculation.actDate ? ` del ${calculation.actDate}` : ""}
+                  </strong>
+                  <small>
+                    {calculation.publicationDate ? `Pubblicata il ${calculation.publicationDate}` : ""}
+                    {calculation.cadastralCode ? ` · codice catastale ${calculation.cadastralCode}` : ""}
+                  </small>
+                </>
+              ) : (
+                <>
+                  <strong>Inserimento manuale</strong>
+                  <small>Nessuna aliquota comunale strutturata disponibile come riferimento.</small>
+                </>
+              )}
             </div>
-            <a href={calculation.sourceUrl} target="_blank" rel="noreferrer">
-              <ExternalLink size={14} />
-              Apri la delibera sorgente
-            </a>
+            {calculation.sourceUrl && (
+              <a href={calculation.sourceUrl} target="_blank" rel="noreferrer">
+                <ExternalLink size={14} />
+                Apri la delibera sorgente
+              </a>
+            )}
           </div>
           <p className="imu-calculation-assumption">
             Stima annuale ordinaria su quota imponibile 100%. Non applica mesi o quote di possesso, detrazioni o agevolazioni soggettive.
@@ -6407,7 +6448,13 @@ function ImuFormulaSteps({
         <code>
           {formatEuro(calculation.taxableBase)} × {formatImuRate(calculation.ratePercent)} = {formatEuro(calculation.amount)}
         </code>
-        {!compact && <small>Base imponibile × aliquota comunale selezionata dalla delibera.</small>}
+        {!compact && (
+          <small>
+            {calculation.rateOverridden
+              ? `Base imponibile × aliquota manuale; valore di sistema conservato: ${calculation.systemRatePercent === null ? "non disponibile" : formatImuRate(calculation.systemRatePercent)}.`
+              : "Base imponibile × aliquota comunale selezionata dalla delibera."}
+          </small>
+        )}
       </div>
     </div>
   );
@@ -6424,6 +6471,7 @@ function imuRateKindLabel(kind: Extract<PropertyImuCalculation, { status: "calcu
 }
 
 function imuUnavailableReason(reason?: Extract<PropertyImuCalculation, { status: "unavailable" }>["reason"]) {
+  if (reason === "category_not_supported") return "La categoria catastale non rientra nella tabella ufficiale dei moltiplicatori IMU per i fabbricati iscritti in catasto.";
   if (reason === "municipality_not_found") return "Non è stata trovata una delibera 2026 o 2025 per comune e provincia.";
   if (reason === "unsupported_document") return "La fonte è una delibera IMI/IMIS a formato libero e richiede una regola provinciale strutturata.";
   if (reason === "rate_not_found") return "La delibera non contiene un’aliquota ordinaria compatibile con la categoria catastale.";
@@ -6432,7 +6480,10 @@ function imuUnavailableReason(reason?: Extract<PropertyImuCalculation, { status:
 
 function imuFormulaText(rendita: number, calculation: Extract<PropertyImuCalculation, { status: "calculated" }>) {
   return `${formatEuro(rendita)} × 1,05 × ${calculation.cadastralMultiplier} = ${formatEuro(calculation.taxableBase)}; `
-    + `${formatEuro(calculation.taxableBase)} × ${formatImuRate(calculation.ratePercent)} = ${formatEuro(calculation.amount)}`;
+    + `${formatEuro(calculation.taxableBase)} × ${formatImuRate(calculation.ratePercent)} = ${formatEuro(calculation.amount)}`
+    + (calculation.rateOverridden
+      ? `; aliquota manuale, predefinita ${calculation.systemRatePercent === null ? "non disponibile" : formatImuRate(calculation.systemRatePercent)}`
+      : "");
 }
 
 function StatusBadge({ status }: { status: StudyStatus }) {

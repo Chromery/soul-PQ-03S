@@ -379,6 +379,7 @@ export class StudiesService {
       currentImu,
       estimatedImu,
       imuDiff: estimatedImu === null || currentImu === null ? 0 : estimatedImu - currentImu,
+      imuRateOverride: property.imuRateOverride === null ? null : Number(property.imuRateOverride),
       imuCalculation: estimatedImuCalculation,
       currentImuCalculation: currentImuSource === "calculated" ? currentImuCalculation : null,
       currentImuSource,
@@ -427,7 +428,10 @@ export class StudiesService {
 
   private calculateImu(
     rendita: number,
-    property: Pick<Property, "categoria" | "comune" | "provincia"> | Pick<CreatePropertyInput, "categoria" | "comune" | "provincia">,
+    property: (
+      Pick<Property, "categoria" | "comune" | "provincia" | "imuRateOverride">
+      | (Pick<CreatePropertyInput, "categoria" | "comune" | "provincia"> & { imuRateOverride?: null })
+    ),
     fallbackProvince?: string,
   ) {
     return this.imu.calculate({
@@ -435,6 +439,9 @@ export class StudiesService {
       categoria: property.categoria,
       comune: property.comune ?? "",
       provincia: property.provincia ?? fallbackProvince,
+      rateOverridePercent: property.imuRateOverride === null || property.imuRateOverride === undefined
+        ? null
+        : Number(property.imuRateOverride),
     });
   }
 }

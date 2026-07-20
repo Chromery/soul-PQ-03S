@@ -20,43 +20,64 @@ export class ImuCalculator {
   calculate(input: ImuCalculationInput): ImuCalculation {
     const targetYear = input.targetYear ?? DEFAULT_IMU_YEAR;
     const categoria = normalizeCadastralCategory(input.categoria);
-    if (!Number.isFinite(input.rendita) || input.rendita < 0 || !categoria || !input.comune.trim()) {
+    const rateOverride = input.rateOverridePercent ?? null;
+    if (
+      !Number.isFinite(input.rendita)
+      || input.rendita < 0
+      || !categoria
+      || !input.comune.trim()
+      || (rateOverride !== null && (!Number.isFinite(rateOverride) || rateOverride < 0 || rateOverride > 10))
+    ) {
       return { status: "unavailable", reason: "invalid_input", targetYear };
+    }
+
+    const cadastralMultiplier = cadastralMultiplierForCategory(categoria);
+    if (cadastralMultiplier === null) {
+      return { status: "unavailable", reason: "category_not_supported", targetYear };
     }
 
     const records = this.findMunicipalityRecords(input.comune, input.provincia);
     const record = records.find((candidate) => candidate.year === targetYear)
       ?? records.find((candidate) => candidate.year === targetYear - 1);
-    if (!record) return { status: "unavailable", reason: "municipality_not_found", targetYear };
-    if (record.documentType !== "mef_standard_prospect") {
+    if (!record && rateOverride === null) {
+      return { status: "unavailable", reason: "municipality_not_found", targetYear };
+    }
+    if (record && record.documentType !== "mef_standard_prospect" && rateOverride === null) {
       return { status: "unavailable", reason: "unsupported_document", targetYear };
     }
 
-    const rateSelection = rateForCategory(record, categoria);
-    if (rateSelection.rate === null) {
+    const rateSelection = record?.documentType === "mef_standard_prospect"
+      ? rateForCategory(record, categoria)
+      : { rate: null, kind: rateKindForCategory(categoria) };
+    if (rateSelection.rate === null && rateOverride === null) {
       return { status: "unavailable", reason: "rate_not_found", targetYear };
     }
 
-    const cadastralMultiplier = cadastralMultiplierForCategory(categoria);
+    const appliedRate = rateOverride ?? rateSelection.rate;
+    if (appliedRate === null) {
+      return { status: "unavailable", reason: "rate_not_found", targetYear };
+    }
     const taxableBase = roundCurrency(input.rendita * CADASTRAL_REVALUATION * cadastralMultiplier);
-    const amount = roundCurrency(taxableBase * (rateSelection.rate / 100));
+    const amount = roundCurrency(taxableBase * (appliedRate / 100));
     return {
       status: "calculated",
       amount,
       taxableBase,
       cadastralMultiplier,
-      ratePercent: rateSelection.rate,
-      rateYear: record.year,
-      usedFallback: record.year !== targetYear,
+      ratePercent: appliedRate,
+      systemRatePercent: rateSelection.rate,
+      rateOverridden: rateOverride !== null,
+      rateYear: record?.year ?? targetYear,
+      usedFallback: Boolean(record && record.year !== targetYear),
       rateKind: rateSelection.kind,
-      municipality: record.municipality,
-      province: record.province,
-      cadastralCode: record.cadastralCode,
-      actNumber: record.actNumber,
-      actDate: record.actDate,
-      publicationDate: record.publicationDate,
-      sourcePath: record.sourcePath,
-      sourceUrl: `/api/imu/delibere/${record.sha256}`,
+      municipality: record?.municipality ?? input.comune,
+      province: record?.province ?? input.provincia ?? "",
+      cadastralCode: record?.cadastralCode ?? "",
+      actNumber: record?.actNumber ?? "",
+      actDate: record?.actDate ?? "",
+      publicationDate: record?.publicationDate ?? "",
+      sourcePath: record?.sourcePath ?? "",
+      sourceUrl: record ? `/api/imu/delibere/${record.sha256}` : null,
     };
   }
 
@@ -72,32 +93,39 @@ export class ImuCalculator {
 }
 
 export function cadastralMultiplierForCategory(rawCategory: string) {
+  // Tabella ufficiale MEF, art. 1, comma 745, legge 160/2019:
+  // https://www.finanze.gov.it/it/fiscalita/fiscalita-regionale-e-locale/Imposta-municipale-propria-IMU/disciplina-del-tributo/base-imponibile/
   const category = normalizeCadastralCategory(rawCategory);
   if (category === "A/10" || category === "D/5") return 80;
   if (category.startsWith("D/")) return 65;
-  if (category.startsWith("B/") || ["C/3", "C/4", "C/5"].includes(category)) return 140;
+  if (category.startsWith("B/")) return 140;
   if (category === "C/1") return 55;
-  return 160;
+  if (["C/3", "C/4", "C/5"].includes(category)) return 140;
+  if (["C/2", "C/6", "C/7"].includes(category)) return 160;
+  if (category.startsWith("A/")) return 160;
+  return null;
 }
 
 export function normalizeCadastralCategory(value: string) {
-  const normalized = value
-    .replace(/^cat(?:egoria)?\.?\s*/i, "")
-    .replace(/^c\.?d\.?\s*/i, "D")
-    .replace(/[.\s_-]+/g, "")
-    .toUpperCase();
-  const match = normalized.match(/^([A-G])(\d{1,2})$/);
-  return match ? `${match[1]}/${Number(match[2])}` : normalized;
+  const normalized = value.trim().toUpperCase();
+  const afterCategoryLabel = normalized.match(/CAT(?:EGORIA)?\.?\s*([A-G])\s*[\/.]?\s*(\d{1,2})/);
+  const withSeparator = normalized.match(/([A-G])\s*[\/.]\s*(\d{1,2})/);
+  const atEnd = normalized.match(/([A-G])\s*(\d{1,2})\s*$/);
+  const match = afterCategoryLabel ?? withSeparator ?? atEnd;
+  return match ? `${match[1]}/${Number(match[2])}` : "";
 }
 
 function rateForCategory(record: ImuRateRecord, category: string) {
-  if (category === "D/10") {
-    return { rate: record.ruralInstrumentalRate, kind: "rural_instrumental" as const };
-  }
-  if (category.startsWith("D/")) {
-    return { rate: record.groupDRate, kind: "group_d" as const };
-  }
-  return { rate: record.otherBuildingsRate, kind: "other_buildings" as const };
+  const kind = rateKindForCategory(category);
+  if (kind === "rural_instrumental") return { rate: record.ruralInstrumentalRate, kind };
+  if (kind === "group_d") return { rate: record.groupDRate, kind };
+  return { rate: record.otherBuildingsRate, kind };
+}
+
+function rateKindForCategory(category: string) {
+  if (category === "D/10") return "rural_instrumental" as const;
+  if (category.startsWith("D/")) return "group_d" as const;
+  return "other_buildings" as const;
 }
 
 function municipalityKey(municipality: string, province: string) {

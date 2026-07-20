@@ -2837,6 +2837,11 @@ a.button {
   font-size: 13px;
 }
 
+.imu-calculation-source strong .manual-override-badge {
+  margin-left: 7px;
+  vertical-align: middle;
+}
+
 .imu-calculation-source a {
   min-height: 34px;
   display: inline-flex;
@@ -5597,6 +5602,48 @@ a.button {
 .area-totals-content .editor-imu-summary {
   gap: 5px;
   background: #f8fbff;
+}
+
+.area-totals-content .editor-imu-rate-control {
+  gap: 8px;
+  background: #fffaf0;
+}
+
+.editor-imu-rate-head,
+.editor-imu-rate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.editor-imu-rate-control label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.editor-imu-rate-control label input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 9px;
+  border: 1px solid #d6e0ec;
+  border-radius: 7px;
+  color: var(--text);
+  background: #fff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.editor-imu-rate-control label strong {
+  font-size: 14px;
+}
+
+.editor-imu-rate-actions {
+  justify-content: flex-start;
 }
 
 .area-totals-content .editor-lot-valuation {

@@ -53,10 +53,49 @@ test("non indovina aliquote da delibere libere non strutturate", () => {
 test("usa i moltiplicatori catastali previsti per le categorie principali", () => {
   assert.equal(cadastralMultiplierForCategory("A/2"), 160);
   assert.equal(cadastralMultiplierForCategory("A10"), 80);
+  assert.equal(cadastralMultiplierForCategory("B/4"), 140);
   assert.equal(cadastralMultiplierForCategory("C/1"), 55);
+  assert.equal(cadastralMultiplierForCategory("C/2"), 160);
   assert.equal(cadastralMultiplierForCategory("C3"), 140);
   assert.equal(cadastralMultiplierForCategory("D/5"), 80);
   assert.equal(cadastralMultiplierForCategory("D7"), 65);
+  assert.equal(cadastralMultiplierForCategory("ZONA1CAT.C/6"), 160);
+  assert.equal(cadastralMultiplierForCategory("ZONA9CAT.D/2"), 65);
+  assert.equal(cadastralMultiplierForCategory("ZONA1D/8"), 65);
+  assert.equal(cadastralMultiplierForCategory("F/1"), null);
+});
+
+test("applica l'aliquota manuale conservando quella comunale di sistema", () => {
+  const result = new ImuCalculator(records).calculate({
+    rendita: 10_000,
+    categoria: "ZONA3CAT.D/7",
+    comune: "Comune Nuovo",
+    provincia: "MI",
+    rateOverridePercent: 0.92,
+  });
+  assert.equal(result.status, "calculated");
+  if (result.status !== "calculated") return;
+  assert.equal(result.cadastralMultiplier, 65);
+  assert.equal(result.systemRatePercent, 1.06);
+  assert.equal(result.ratePercent, 0.92);
+  assert.equal(result.rateOverridden, true);
+  assert.equal(result.amount, 6_279);
+});
+
+test("consente un'aliquota manuale anche quando non esiste un valore comunale strutturato", () => {
+  const result = new ImuCalculator([]).calculate({
+    rendita: 1_000,
+    categoria: "C/1",
+    comune: "Comune senza prospetto",
+    provincia: "RM",
+    rateOverridePercent: 1,
+  });
+  assert.equal(result.status, "calculated");
+  if (result.status !== "calculated") return;
+  assert.equal(result.systemRatePercent, null);
+  assert.equal(result.ratePercent, 1);
+  assert.equal(result.rateOverridden, true);
+  assert.equal(result.amount, 577.5);
 });
 
 function rateRecord(overrides: Partial<ImuRateRecord>): ImuRateRecord {

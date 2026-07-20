@@ -160,16 +160,63 @@ export class PropertiesService {
   }
 
   async updateProperty(propertyId: string, body: unknown) {
-    await this.requireProperty(propertyId);
-    if (!body || typeof body !== "object") throw new BadRequestException("Modifica immobile non valida");
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new BadRequestException("Modifica immobile non valida");
+    }
     const input = body as Record<string, unknown>;
-    const outcome = validatePropertyOutcome(input.outcome);
+    const hasOutcome = Object.prototype.hasOwnProperty.call(input, "outcome");
+    const hasImuRateOverride = Object.prototype.hasOwnProperty.call(input, "imuRateOverride");
+    if (!hasOutcome && !hasImuRateOverride) {
+      throw new BadRequestException("Nessuna modifica immobile supportata");
+    }
+    const existing = await this.prisma.property.findUnique({
+      where: { id: propertyId },
+      include: { analysisDraft: true },
+    });
+    if (!existing) throw new NotFoundException("Immobile non trovato");
+    const outcome = hasOutcome ? validatePropertyOutcome(input.outcome) : existing.outcome;
+    const imuRateOverride = hasImuRateOverride
+      ? validateImuRateOverride(input.imuRateOverride)
+      : existing.imuRateOverride === null
+        ? null
+        : Number(existing.imuRateOverride);
     const property = await this.prisma.property.update({
       where: { id: propertyId },
-      data: { outcome },
-      select: { id: true, outcome: true },
+      data: {
+        ...(hasOutcome ? { outcome } : {}),
+        ...(hasImuRateOverride ? { imuRateOverride } : {}),
+      },
     });
-    return property;
+    if (!hasImuRateOverride) return { id: property.id, outcome: property.outcome };
+
+    const calculationProperty = { ...property, imuRateOverride };
+    const estimatedRendita = estimatedRenditaFromAnalysisDraft(existing.analysisDraft)
+      ?? Number(property.estimatedRendita);
+    const currentImuCalculation = this.calculateImu(Number(property.currentRendita), calculationProperty);
+    const estimatedImuCalculation = estimatedRendita > 0 || property.hasStudy
+      ? this.calculateImu(estimatedRendita, calculationProperty)
+      : null;
+    const currentImu = calculatedAmount(currentImuCalculation)
+      ?? (property.currentImu === null ? null : Number(property.currentImu));
+    const estimatedImu = calculatedAmount(estimatedImuCalculation)
+      ?? (property.estimatedImu === null ? null : Number(property.estimatedImu));
+    await this.refreshStudyTotals(property.studyId);
+    return {
+      id: property.id,
+      outcome: property.outcome,
+      imuRateOverride,
+      currentImu,
+      estimatedImu,
+      imuDiff: currentImu === null || estimatedImu === null ? 0 : estimatedImu - currentImu,
+      currentImuCalculation: currentImuCalculation.status === "calculated" ? currentImuCalculation : null,
+      imuCalculation: estimatedImuCalculation,
+      currentImuSource: currentImuCalculation.status === "calculated"
+        ? "calculated"
+        : property.currentImu === null ? "unavailable" : "stored",
+      estimatedImuSource: estimatedImuCalculation?.status === "calculated"
+        ? "calculated"
+        : property.estimatedImu === null ? "unavailable" : "stored",
+    };
   }
 
   async uploadDocument(propertyId: string, rawType: string, body: unknown) {
@@ -337,13 +384,21 @@ export class PropertiesService {
 
   private calculateImu(
     rendita: number,
-    property: { categoria: string; comune: string; provincia: string | null },
+    property: {
+      categoria: string;
+      comune: string;
+      provincia: string | null;
+      imuRateOverride?: Prisma.Decimal | number | null;
+    },
   ) {
     return this.imu.calculate({
       rendita,
       categoria: property.categoria,
       comune: property.comune,
       provincia: property.provincia,
+      rateOverridePercent: property.imuRateOverride === null || property.imuRateOverride === undefined
+        ? null
+        : Number(property.imuRateOverride),
     });
   }
 
@@ -411,6 +466,15 @@ function normalizeScaleSource(value: unknown): ScaleSource {
 function validatePropertyOutcome(value: unknown) {
   if (value === "Positivo" || value === "Negativo" || value === "Neutro") return value;
   throw new BadRequestException("Esito immobile non valido");
+}
+
+function validateImuRateOverride(value: unknown) {
+  if (value === null || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(String(value).replace(",", "."));
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 10) {
+    throw new BadRequestException("Aliquota IMU manuale non valida: usa una percentuale tra 0 e 10");
+  }
+  return Math.round(parsed * 10_000) / 10_000;
 }
 
 function percentageDiff(current: number, estimated: number) {

@@ -515,6 +515,7 @@ export class ErpSyncService {
         rendita_proposta: estimatedRendita.toFixed(2),
         imu_attuale: currentImu === null ? null : currentImu.toFixed(2),
         imu_prevista: estimatedImu === null ? null : estimatedImu.toFixed(2),
+        aliquota_imu_override: property.imuRateOverride === null ? null : Number(property.imuRateOverride),
         calcolo_imu: estimatedCalculation,
         scala: property.scaleDenominator,
         formato_foglio: property.sheetSize,
@@ -540,13 +541,14 @@ export class ErpSyncService {
 
   private calculateImu(
     rendita: number,
-    property: Pick<Property, "categoria" | "comune" | "provincia">,
+    property: Pick<Property, "categoria" | "comune" | "provincia" | "imuRateOverride">,
   ) {
     return this.imu.calculate({
       rendita,
       categoria: property.categoria,
       comune: property.comune,
       provincia: property.provincia,
+      rateOverridePercent: property.imuRateOverride === null ? null : Number(property.imuRateOverride),
     });
   }
 }

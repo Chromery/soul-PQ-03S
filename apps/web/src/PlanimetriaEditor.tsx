@@ -137,6 +137,7 @@ type EditorProperty = {
   estimatedRendita: number;
   currentImu?: number | null;
   estimatedImu?: number | null;
+  imuRateOverride?: number | null;
   currentImuCalculation?: PropertyImuCalculation | null;
   imuCalculation?: PropertyImuCalculation | null;
   sheetSize?: SheetSize | null;
@@ -192,6 +193,17 @@ type UploadedPropertyDocument = {
   sha256: string | null;
   sizeBytes: number | null;
   downloadUrl: string;
+};
+
+type ImuRateUpdate = {
+  imuRateOverride: number | null;
+  currentImu: number | null;
+  estimatedImu: number | null;
+  imuDiff: number;
+  currentImuCalculation: PropertyImuCalculation | null;
+  imuCalculation: PropertyImuCalculation | null;
+  currentImuSource: "calculated" | "stored" | "unavailable";
+  estimatedImuSource: "calculated" | "stored" | "unavailable";
 };
 
 type MaskBounds = {
@@ -467,6 +479,7 @@ type PlanimetriaEditorProps = {
     estimatedImu?: number | null,
     imuCalculation?: PropertyImuCalculation | null,
   ) => void;
+  onImuRateSaved?: (propertyId: string, update: ImuRateUpdate) => void;
   onDocumentSaved?: (
     propertyId: string,
     type: "planimetria" | "elenco_subalterni",
@@ -1037,6 +1050,7 @@ export default function PlanimetriaEditor({
   onBack,
   onDirtyChange,
   onDraftSaved,
+  onImuRateSaved,
   onDocumentSaved,
 }: PlanimetriaEditorProps) {
   const editorRootRef = useRef<HTMLElement | null>(null);
@@ -1125,7 +1139,19 @@ export default function PlanimetriaEditor({
   const [scaleExtractionJob, setScaleExtractionJob] = useState<ScaleExtractionJob | null>(null);
   const [scaleExtractionBusy, setScaleExtractionBusy] = useState(false);
   const [subalterniUploading, setSubalterniUploading] = useState(false);
+  const [imuRateInput, setImuRateInput] = useState("");
+  const [imuRateSaving, setImuRateSaving] = useState(false);
   const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    const calculation = property.currentImuCalculation?.status === "calculated"
+      ? property.currentImuCalculation
+      : property.imuCalculation?.status === "calculated"
+        ? property.imuCalculation
+        : null;
+    const appliedRate = property.imuRateOverride ?? calculation?.ratePercent ?? null;
+    setImuRateInput(appliedRate === null ? "" : String(appliedRate).replace(".", ","));
+  }, [property.id, property.imuRateOverride, property.currentImuCalculation, property.imuCalculation]);
 
   const linkedRemotePlan = useMemo(
     () =>
@@ -1221,6 +1247,10 @@ export default function PlanimetriaEditor({
     property.currentImuCalculation?.status === "calculated" ? property.currentImuCalculation : null;
   const estimatedImuRate =
     property.imuCalculation?.status === "calculated" ? property.imuCalculation : currentImuCalculation;
+  const systemImuRate = currentImuCalculation?.systemRatePercent
+    ?? estimatedImuRate?.systemRatePercent
+    ?? null;
+  const imuRateOverridden = property.imuRateOverride !== null && property.imuRateOverride !== undefined;
   const editorEstimatedImu = estimatedImuRate
     ? calculateImuWithRate(totals.rendita, estimatedImuRate)
     : null;
@@ -1780,6 +1810,47 @@ export default function PlanimetriaEditor({
       setSubalterniUploading(false);
       if (subalterniInputRef.current) subalterniInputRef.current.value = "";
     }
+  }
+
+  async function saveImuRateOverride(value: number | null) {
+    setImuRateSaving(true);
+    setStatus(value === null ? "Ripristino aliquota IMU di sistema" : "Salvataggio aliquota IMU manuale");
+    try {
+      const response = await fetch(`${API_BASE_URL}/properties/${encodeURIComponent(property.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imuRateOverride: value }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { message?: string } | null;
+        throw new Error(payload?.message ?? `HTTP ${response.status}`);
+      }
+      const update = (await response.json()) as ImuRateUpdate;
+      onImuRateSaved?.(property.id, update);
+      const calculation = update.currentImuCalculation?.status === "calculated"
+        ? update.currentImuCalculation
+        : update.imuCalculation?.status === "calculated"
+          ? update.imuCalculation
+          : null;
+      const appliedRate = update.imuRateOverride ?? calculation?.ratePercent ?? null;
+      setImuRateInput(appliedRate === null ? "" : String(appliedRate).replace(".", ","));
+      setStatus(value === null ? "Aliquota IMU di sistema ripristinata" : "Aliquota IMU manuale applicata");
+    } catch (error) {
+      console.error(error);
+      setStatus(error instanceof Error ? error.message : "Salvataggio aliquota IMU non riuscito");
+    } finally {
+      setImuRateSaving(false);
+    }
+  }
+
+  function applyImuRateOverride() {
+    const normalized = imuRateInput.trim();
+    const parsed = Number(normalized.replace(",", "."));
+    if (!normalized || !Number.isFinite(parsed) || parsed < 0 || parsed > 10) {
+      setStatus("Inserisci un’aliquota IMU percentuale tra 0 e 10");
+      return;
+    }
+    void saveImuRateOverride(Math.round(parsed * 10_000) / 10_000);
   }
 
   async function triggerScaleExtraction(data: ArrayBuffer, name: string) {
@@ -7142,6 +7213,56 @@ export default function PlanimetriaEditor({
                     {moneyFormatter.format(totals.amount)} × 2% = {moneyFormatter.format(totals.rendita)}
                   </small>
                 </div>
+                <div className="editor-imu-rate-control">
+                  <div className="editor-imu-rate-head">
+                    <span>Aliquota IMU applicata</span>
+                    {imuRateOverridden && <span className="manual-override-badge">Manuale</span>}
+                  </div>
+                  <label>
+                    <input
+                      aria-label="Aliquota IMU percentuale"
+                      type="text"
+                      inputMode="decimal"
+                      value={imuRateInput}
+                      placeholder={systemImuRate === null ? "Es. 1,06" : String(systemImuRate).replace(".", ",")}
+                      disabled={imuRateSaving}
+                      onChange={(event) => setImuRateInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          applyImuRateOverride();
+                        }
+                      }}
+                    />
+                    <strong>%</strong>
+                  </label>
+                  <div className="editor-imu-rate-actions">
+                    <button
+                      className="button secondary compact-button"
+                      type="button"
+                      disabled={imuRateSaving}
+                      onClick={applyImuRateOverride}
+                    >
+                      {imuRateSaving ? "Salvataggio..." : "Applica"}
+                    </button>
+                    {imuRateOverridden && (
+                      <button
+                        className="inline-reset-button"
+                        type="button"
+                        disabled={imuRateSaving}
+                        onClick={() => void saveImuRateOverride(null)}
+                      >
+                        Ripristina sistema
+                      </button>
+                    )}
+                  </div>
+                  <small>
+                    Predefinita dal sistema: {systemImuRate === null
+                      ? "non disponibile"
+                      : `${systemImuRate.toLocaleString("it-IT", { maximumFractionDigits: 4 })}%`}
+                    . Il valore predefinito resta conservato anche durante la sovrascrittura.
+                  </small>
+                </div>
                 <div className="editor-imu-summary">
                   <span>IMU attuale</span>
                   <strong>
@@ -7160,8 +7281,10 @@ export default function PlanimetriaEditor({
                         )}
                       </small>
                       <small className="editor-imu-source">
-                        Aliquota {currentImuCalculation.municipality} {currentImuCalculation.rateYear}
-                        {currentImuCalculation.usedFallback ? " (fallback)" : ""} · delibera n. {currentImuCalculation.actNumber}
+                        {currentImuCalculation.rateOverridden
+                          ? `Aliquota manuale; predefinita ${currentImuCalculation.systemRatePercent === null ? "non disponibile" : `${currentImuCalculation.systemRatePercent.toLocaleString("it-IT", { maximumFractionDigits: 4 })}%`}`
+                          : `Aliquota ${currentImuCalculation.municipality} ${currentImuCalculation.rateYear}${currentImuCalculation.usedFallback ? " (fallback)" : ""}`}
+                        {currentImuCalculation.actNumber ? ` · delibera n. ${currentImuCalculation.actNumber}` : ""}
                         {currentImuCalculation.sourceUrl && (
                           <a href={currentImuCalculation.sourceUrl} target="_blank" rel="noreferrer">
                             Apri PDF
@@ -7189,8 +7312,10 @@ export default function PlanimetriaEditor({
                         )}
                       </small>
                       <small className="editor-imu-source">
-                        Aliquota {estimatedImuRate.municipality} {estimatedImuRate.rateYear}
-                        {estimatedImuRate.usedFallback ? " (fallback)" : ""} · delibera n. {estimatedImuRate.actNumber}
+                        {estimatedImuRate.rateOverridden
+                          ? `Aliquota manuale; predefinita ${estimatedImuRate.systemRatePercent === null ? "non disponibile" : `${estimatedImuRate.systemRatePercent.toLocaleString("it-IT", { maximumFractionDigits: 4 })}%`}`
+                          : `Aliquota ${estimatedImuRate.municipality} ${estimatedImuRate.rateYear}${estimatedImuRate.usedFallback ? " (fallback)" : ""}`}
+                        {estimatedImuRate.actNumber ? ` · delibera n. ${estimatedImuRate.actNumber}` : ""}
                         {estimatedImuRate.sourceUrl && (
                           <a href={estimatedImuRate.sourceUrl} target="_blank" rel="noreferrer">
                             Apri PDF

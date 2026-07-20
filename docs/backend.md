@@ -43,7 +43,7 @@ The backup container creates a dump every day at `BACKUP_TIME_LOCAL` in `BACKUP_
 
 `FeasibilityStudy` stores one ERP-importable study per company. It contains dashboard metrics, commercial and technical ownership, deadlines, appointment state, rendita totals, and notes.
 
-`Property` stores real estate assets linked to a study and their current/prospected rendita and analysis outcome.
+`Property` stores real estate assets linked to a study, their current/prospected rendita, analysis outcome, and the optional `imuRateOverride`. The system-selected municipal IMU rate is not overwritten: it remains part of every calculation response as `systemRatePercent` and becomes active again when the override is set to `null`.
 
 `PropertyDocument` stores metadata and object-storage keys for one `PLANIMETRIA`, one `VISURA`, and one `ELENCO_SUBALTERNI` per property. The `(propertyId, type)` unique key keeps each document type singular and allows idempotent replacement.
 
@@ -58,6 +58,7 @@ The backup container creates a dump every day at `BACKUP_TIME_LOCAL` in `BACKUP_
 | `GET` | `/api/health` | Confirms API and database connectivity. |
 | `GET` | `/api/studies` | Returns dashboard studies with properties and document filenames. |
 | `GET` | `/api/studies/:id` | Returns a single study or `404`. |
+| `PATCH` | `/api/properties/:id` | Updates the outcome and/or `imuRateOverride`; `null` restores the system IMU rate. |
 | `GET` | `/api/properties/:id/analysis-draft` | Returns a saved editor draft or `null`. |
 | `PUT` | `/api/properties/:id/analysis-draft` | Upserts a validated editor draft and links it to the latest study version. |
 
