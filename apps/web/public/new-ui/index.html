@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Ricerca UX/UI e concept visuali per il restyling di Soul Prospect Qualifier."
+    />
+    <title>New UI Research · Soul PQ</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Torna all'applicazione Soul PQ">
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <span>SOUL <strong>PQ</strong></span>
+      </a>
+      <nav aria-label="Sezioni della ricerca">
+        <a href="#review">Review</a>
+        <a href="#concepts">Dashboard</a>
+        <a href="#onboarding">Onboarding</a>
+        <a href="#editor">Editor</a>
+        <a href="#backlog">Backlog</a>
+      </nav>
+      <span class="phase"><span></span> Ricerca · non implementazione</span>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="eyebrow">New UI · Direction finding</div>
+        <h1>Più chiarezza operativa.<br />La stessa profondità funzionale.</h1>
+        <p class="hero-copy">
+          Una review dell'esperienza attuale e undici esplorazioni visuali per
+          rendere Soul PQ più coerente, leggibile e moderno, senza semplificare
+          il lavoro tecnico che deve sostenere.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="#concepts">Esplora i concept</a>
+          <a class="button secondary" href="#review">Leggi la sintesi UX</a>
+        </div>
+        <dl class="hero-stats" aria-label="Contenuto della ricerca">
+          <div><dt>3</dt><dd>direzioni prodotto</dd></div>
+          <div><dt>3</dt><dd>pattern onboarding</dd></div>
+          <div><dt>5</dt><dd>architetture editor</dd></div>
+          <div><dt>10</dt><dd>epic proposte</dd></div>
+        </dl>
+      </section>
+
+      <section class="section recommendation" aria-labelledby="recommendation-title">
+        <div>
+          <span class="section-index">Raccomandazione</span>
+          <h2 id="recommendation-title">Quiet precision + Focus canvas</h2>
+        </div>
+        <p>
+          Usare <strong>Quiet precision</strong> come linguaggio generale e
+          <strong>Focus canvas</strong> come struttura dell'editor, integrando il
+          percorso <strong>Workflow rail</strong> per chi entra nel flusso per la
+          prima volta. È la combinazione con il miglior equilibrio tra continuità,
+          spazio operativo e apprendibilità.
+        </p>
+      </section>
+
+      <section class="section" id="review" aria-labelledby="review-title">
+        <div class="section-heading">
+          <div>
+            <span class="section-index">01 · Review UX/UI</span>
+            <h2 id="review-title">Il problema non è la quantità di funzioni.<br />È la loro gerarchia.</h2>
+          </div>
+          <p>
+            L'applicazione è ricca e già operativa, ma presenta quasi tutto nello
+            stesso momento. Il restyling deve organizzare la complessità, non
+            nasconderla.
+          </p>
+        </div>
+
+        <div class="finding-grid">
+          <article class="finding critical">
+            <span>P0</span>
+            <h3>Responsive non trasformativo</h3>
+            <p>Le tabelle desktop vengono compresse su mobile invece di cambiare struttura.</p>
+            <strong>→ Vista card e priorità specifiche per viewport.</strong>
+          </article>
+          <article class="finding critical">
+            <span>P0</span>
+            <h3>Gerarchia delle azioni debole</h3>
+            <p>CTA, strumenti, export e azioni rare hanno spesso lo stesso peso.</p>
+            <strong>→ Una primary action per contesto.</strong>
+          </article>
+          <article class="finding critical">
+            <span>P0</span>
+            <h3>Densità senza livelli</h3>
+            <p>Overview, lavoro operativo e controlli esperti convivono sullo stesso piano.</p>
+            <strong>→ Progressive disclosure e density mode.</strong>
+          </article>
+          <article class="finding">
+            <span>P1</span>
+            <h3>Pattern non uniformi</h3>
+            <p>Collapse, toolbar, badge, toggle e feedback non seguono un'anatomia condivisa.</p>
+            <strong>→ Design system minimo prima delle route.</strong>
+          </article>
+          <article class="finding">
+            <span>P1</span>
+            <h3>Editor frammentato</h3>
+            <p>Palette, toolbar, tabella e riepilogo competono con il documento.</p>
+            <strong>→ Canvas dominante e inspector unico.</strong>
+          </article>
+          <article class="finding">
+            <span>P1</span>
+            <h3>Stati e target deboli</h3>
+            <p>Alcuni controlli sono piccoli; focus, selezione e colore non bastano sempre.</p>
+            <strong>→ Target, focus ring e semantica condivisi.</strong>
+          </article>
+        </div>
+
+        <div class="current-state">
+          <div class="current-copy">
+            <span class="section-index">Baseline reale</span>
+            <h3>Le schermate osservate</h3>
+            <p>
+              Walkthrough a 1440×1000 e 390×844 su dashboard, lista studi,
+              dettaglio, editor e impostazioni. Gli screenshot restano come
+              confronto verificabile durante l'implementazione.
+            </p>
+          </div>
+          <div class="current-strip" aria-label="Screenshot dello stato attuale">
+            <a href="./current/studies.jpg" target="_blank"><img src="./current/studies.jpg" alt="Lista studi attuale" loading="lazy" /></a>
+            <a href="./current/study-detail.jpg" target="_blank"><img src="./current/study-detail.jpg" alt="Dettaglio studio attuale" loading="lazy" /></a>
+            <a href="./current/editor.jpg" target="_blank"><img src="./current/editor.jpg" alt="Editor attuale" loading="lazy" /></a>
+            <a href="./current/studies-mobile.jpg" target="_blank"><img src="./current/studies-mobile.jpg" alt="Lista studi attuale su mobile" loading="lazy" /></a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section gallery-section" id="concepts" aria-labelledby="concepts-title">
+        <div class="section-heading">
+          <div>
+            <span class="section-index">02 · Direzioni prodotto</span>
+            <h2 id="concepts-title">Tre modi di organizzare la stessa dashboard</h2>
+          </div>
+          <p>I concept sono ipotesi di lavoro, non mockup da implementare alla lettera. Apri un'immagine per osservarla a piena risoluzione.</p>
+        </div>
+
+        <div class="concept-list">
+          <article class="concept featured">
+            <div class="concept-copy">
+              <div class="concept-meta"><span>Direzione A</span><b>Raccomandata</b></div>
+              <h3>Quiet precision</h3>
+              <p>Continuità con il modello mentale corrente, gerarchia più forte, KPI e coda operativa prima della tabella.</p>
+              <ul><li>Adozione progressiva</li><li>Riduce il rumore senza perdere densità</li><li>Adatta a utenti nuovi ed esperti</li></ul>
+            </div>
+            <a class="image-frame" href="./concepts/dashboard-quiet-precision.png" target="_blank">
+              <img src="./concepts/dashboard-quiet-precision.png" alt="Concept dashboard Quiet precision" loading="lazy" />
+              <span>Apri a piena risoluzione ↗</span>
+            </a>
+          </article>
+
+          <article class="concept">
+            <div class="concept-copy">
+              <div class="concept-meta"><span>Direzione B</span></div>
+              <h3>Command center</h3>
+              <p>Più analitica e densa: mette in primo piano eccezioni, attività e metriche operative per utenti esperti.</p>
+              <ul><li>Scansione rapida delle anomalie</li><li>Alta densità informativa</li><li>Richiede metriche molto curate</li></ul>
+            </div>
+            <a class="image-frame" href="./concepts/dashboard-command-center.png" target="_blank">
+              <img src="./concepts/dashboard-command-center.png" alt="Concept dashboard Command center" loading="lazy" />
+              <span>Apri a piena risoluzione ↗</span>
+            </a>
+          </article>
+
+          <article class="concept">
+            <div class="concept-copy">
+              <div class="concept-meta"><span>Direzione C</span></div>
+              <h3>Workspace</h3>
+              <p>Navigazione superiore, viste salvate e quick detail: la più spaziosa e contemporanea, ma anche la più distante dall'attuale.</p>
+              <ul><li>Filtri sempre contestuali</li><li>Dettaglio senza cambio pagina</li><li>Migrazione più impegnativa</li></ul>
+            </div>
+            <a class="image-frame" href="./concepts/dashboard-workspace.png" target="_blank">
+              <img src="./concepts/dashboard-workspace.png" alt="Concept dashboard Workspace" loading="lazy" />
+              <span>Apri a piena risoluzione ↗</span>
+            </a>
+          </article>
+        </div>
+      </section>
+
+      <section class="section gallery-section" id="onboarding" aria-labelledby="onboarding-title">
+        <div class="section-heading">
+          <div>
+            <span class="section-index">03 · Onboarding</span>
+            <h2 id="onboarding-title">Aiuto proporzionato al momento</h2>
+          </div>
+          <p>Tre versioni della stessa schermata: valore al primo accesso, percorso operativo e aiuto contestuale per una singola azione.</p>
+        </div>
+        <div class="card-grid three">
+          <article class="visual-card">
+            <a href="./onboarding/onboarding-benefits-modal.png" target="_blank"><img src="./onboarding/onboarding-benefits-modal.png" alt="Onboarding con modale dei benefici" loading="lazy" /></a>
+            <div><span>Primo accesso</span><h3>Benefits modal</h3><p>Due o tre benefici, ignorabile e riapribile.</p></div>
+          </article>
+          <article class="visual-card">
+            <a href="./onboarding/onboarding-workflow-checklist.png" target="_blank"><img src="./onboarding/onboarding-workflow-checklist.png" alt="Onboarding con checklist operativa" loading="lazy" /></a>
+            <div><span>Prima configurazione</span><h3>Workflow checklist</h3><p>Trasforma il primo utilizzo in tre attività concrete.</p></div>
+          </article>
+          <article class="visual-card">
+            <a href="./onboarding/onboarding-context-spotlight.png" target="_blank"><img src="./onboarding/onboarding-context-spotlight.png" alt="Onboarding con spotlight contestuale" loading="lazy" /></a>
+            <div><span>Nel contesto</span><h3>Context spotlight</h3><p>Spiega una sola azione nel punto di necessità.</p></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section gallery-section editor-section" id="editor" aria-labelledby="editor-title">
+        <div class="section-heading">
+          <div>
+            <span class="section-index">04 · Editor</span>
+            <h2 id="editor-title">Cinque architetture, nessuna funzione rimossa</h2>
+          </div>
+          <p>Ogni proposta conserva documenti, strumenti canvas, aree, lotto, prezzario, nuova rendita e trasparenza dei calcoli IMU.</p>
+        </div>
+
+        <div class="editor-grid">
+          <article class="editor-card featured">
+            <div class="editor-card-copy"><span>01 · Raccomandata</span><h3>Focus canvas</h3><p>Canvas dominante, inspector unico e drawer aree adattivo. Il miglior punto di partenza.</p></div>
+            <a href="./editor/editor-focus-canvas.png" target="_blank"><img src="./editor/editor-focus-canvas.png" alt="Concept editor Focus canvas" loading="lazy" /></a>
+          </article>
+          <article class="editor-card">
+            <div class="editor-card-copy"><span>02 · Guidata</span><h3>Workflow rail</h3><p>Documento → Scala → Aree → Valori e IMU. Riduce l'incertezza sul prossimo passo.</p></div>
+            <a href="./editor/editor-workflow-rail.png" target="_blank"><img src="./editor/editor-workflow-rail.png" alt="Concept editor Workflow rail" loading="lazy" /></a>
+          </article>
+          <article class="editor-card">
+            <div class="editor-card-copy"><span>03 · Power user</span><h3>Pro command workspace</h3><p>Command palette, shortcut e pannelli compatti per lavorare velocemente.</p></div>
+            <a href="./editor/editor-pro-command.png" target="_blank"><img src="./editor/editor-pro-command.png" alt="Concept editor Pro command workspace" loading="lazy" /></a>
+          </article>
+          <article class="editor-card">
+            <div class="editor-card-copy"><span>04 · Validazione</span><h3>Dual-pane review</h3><p>Documento e risultati affiancati per verifiche rapide e trasparenti.</p></div>
+            <a href="./editor/editor-dual-pane-review.png" target="_blank"><img src="./editor/editor-dual-pane-review.png" alt="Concept editor Dual-pane review" loading="lazy" /></a>
+          </article>
+          <article class="editor-card">
+            <div class="editor-card-copy"><span>05 · Spazio massimo</span><h3>Immersive canvas</h3><p>Pannelli richiamabili e planimetria quasi full-screen; ideale come modalità Focus.</p></div>
+            <a href="./editor/editor-immersive-canvas.png" target="_blank"><img src="./editor/editor-immersive-canvas.png" alt="Concept editor Immersive canvas" loading="lazy" /></a>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="backlog" aria-labelledby="backlog-title">
+        <div class="section-heading">
+          <div>
+            <span class="section-index">05 · Piano di lavoro</span>
+            <h2 id="backlog-title">Dalla ricerca al rilascio, senza big bang</h2>
+          </div>
+          <p>Una migrazione progressiva dietro feature flag protegge la continuità delle funzioni ERP, documenti, editor e calcoli.</p>
+        </div>
+        <ol class="roadmap">
+          <li><span>01</span><div><h3>Baseline e fondazioni</h3><p>Parità funzionale, task critici, token e componenti base.</p></div><b>Epic 0–2</b></li>
+          <li><span>02</span><div><h3>Flusso studi</h3><p>Dashboard, lista, dettaglio e responsive reale.</p></div><b>Epic 3–4</b></li>
+          <li><span>03</span><div><h3>Editor</h3><p>Architettura scelta, layout adattivo, modello aree unico.</p></div><b>Epic 5</b></li>
+          <li><span>04</span><div><h3>Guida e hardening</h3><p>Onboarding, accessibilità, tastiera e stati.</p></div><b>Epic 6–8</b></li>
+          <li><span>05</span><div><h3>Pilot e rollout</h3><p>Test con operatori, telemetria e migrazione controllata.</p></div><b>Epic 9</b></li>
+        </ol>
+      </section>
+
+      <section class="section principles" aria-labelledby="principles-title">
+        <span class="section-index">Principi guida</span>
+        <h2 id="principles-title">Quiet by default.<br />Powerful on demand.</h2>
+        <div>
+          <p><b>One task, one visual center.</b> Ogni schermata deve avere un solo centro operativo.</p>
+          <p><b>Trust through provenance.</b> Formula, fonte e override restano leggibili quando servono.</p>
+          <p><b>Same meaning, same component.</b> Stessa semantica, stessa anatomia, in tutta l'app.</p>
+          <p><b>Reversible actions.</b> Modifiche ed eccezioni espongono sempre stato e recupero.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div><span class="brand-mark" aria-hidden="true">S</span><strong>SOUL PQ · New UI research</strong></div>
+      <p>Branch <code>new-ui</code> · 20 luglio 2026 · Concept generati per esplorazione, non specifiche pixel-perfect.</p>
+    </footer>
+  </body>
+</html>
