@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   ArrowDownUp,
   BarChart3,
-  Bell,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
@@ -28,19 +27,17 @@ import {
   Globe,
   GripVertical,
   Home,
+  History,
   MapPin,
   MoreVertical,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
   Pencil,
   Presentation,
   Plus,
   RefreshCw,
   Save,
   Search,
-  Send,
   Settings,
   SlidersHorizontal,
   Trash2,
@@ -50,6 +47,12 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import {
+  ResizableTableHeader,
+  TableColumnMenu,
+  useTableColumns,
+} from "./tableColumns";
+import type { TableColumnDefinition } from "./tableColumns";
 import type { ImuValueSource, PropertyImuCalculation } from "./imu";
 import {
   DEFAULT_EDITOR_PREFERENCES,
@@ -358,6 +361,83 @@ type PropertySortKey =
   | "imuDiff"
   | "titolarita"
   | "outcome";
+
+type StudyTableColumnId =
+  | "select"
+  | "id"
+  | "company"
+  | "propertiesCount"
+  | "status"
+  | "importedAt"
+  | "deadline"
+  | "diffRendita"
+  | "diffImu"
+  | "totalRendita"
+  | "commercialOwner";
+
+type PropertyTableColumnId =
+  | "select"
+  | "drag"
+  | "location"
+  | "sheet"
+  | "parcel"
+  | "sub"
+  | "category"
+  | "currentRendita"
+  | "estimatedRendita"
+  | "renditaDiff"
+  | "currentImu"
+  | "estimatedImu"
+  | "imuDiff"
+  | "documents"
+  | "ownership"
+  | "outcome";
+
+const STUDY_TABLE_COLUMNS = [
+  { id: "select", label: "Selezione", defaultWidth: 40, minWidth: 40, hideable: false, resizable: false },
+  { id: "id", label: "ID studio", defaultWidth: 112, minWidth: 72 },
+  { id: "company", label: "Azienda", defaultWidth: 220, minWidth: 120 },
+  { id: "propertiesCount", label: "N. immobili", defaultWidth: 80, minWidth: 58 },
+  { id: "status", label: "Stato", defaultWidth: 132, minWidth: 104 },
+  { id: "importedAt", label: "Importato ERP", defaultWidth: 112, minWidth: 84 },
+  { id: "deadline", label: "Scadenza", defaultWidth: 126, minWidth: 90 },
+  { id: "diffRendita", label: "Diff. rendita", defaultWidth: 112, minWidth: 84 },
+  { id: "diffImu", label: "Diff. IMU", defaultWidth: 112, minWidth: 84 },
+  { id: "totalRendita", label: "Rendita totale", defaultWidth: 132, minWidth: 94 },
+  { id: "commercialOwner", label: "Commerciale", defaultWidth: 142, minWidth: 96 },
+] as const satisfies readonly TableColumnDefinition<StudyTableColumnId>[];
+
+const PROPERTY_TABLE_COLUMNS = [
+  { id: "select", label: "Selezione", defaultWidth: 36, minWidth: 36, hideable: false, resizable: false },
+  { id: "drag", label: "Ordine", defaultWidth: 34, minWidth: 34, hideable: false, resizable: false },
+  { id: "location", label: "Ubicazione", defaultWidth: 160, minWidth: 104 },
+  { id: "sheet", label: "Foglio", defaultWidth: 48, minWidth: 40 },
+  { id: "parcel", label: "Part.", defaultWidth: 50, minWidth: 40 },
+  { id: "sub", label: "Sub", defaultWidth: 44, minWidth: 38 },
+  { id: "category", label: "Cat.", defaultWidth: 48, minWidth: 40 },
+  { id: "currentRendita", label: "Rendita attuale", defaultWidth: 82, minWidth: 64 },
+  { id: "estimatedRendita", label: "Rendita proposta", defaultWidth: 86, minWidth: 66 },
+  { id: "renditaDiff", label: "Diff. rendita", defaultWidth: 80, minWidth: 64 },
+  { id: "currentImu", label: "IMU attuale", defaultWidth: 76, minWidth: 62 },
+  { id: "estimatedImu", label: "IMU prevista", defaultWidth: 78, minWidth: 62 },
+  { id: "imuDiff", label: "Diff. IMU", defaultWidth: 74, minWidth: 60 },
+  { id: "documents", label: "Documenti", defaultWidth: 82, minWidth: 68 },
+  { id: "ownership", label: "Titolarità", defaultWidth: 82, minWidth: 64 },
+  { id: "outcome", label: "Esito", defaultWidth: 82, minWidth: 68 },
+] as const satisfies readonly TableColumnDefinition<PropertyTableColumnId>[];
+
+function tableColumn<Id extends string>(
+  columns: readonly TableColumnDefinition<Id>[],
+  columnId: Id,
+) {
+  const column = columns.find((candidate) => candidate.id === columnId);
+  if (!column) throw new Error(`Colonna ${columnId} non configurata`);
+  return column;
+}
+
+function ariaSortState(active: boolean, direction: "asc" | "desc") {
+  return active ? (direction === "asc" ? "ascending" as const : "descending" as const) : "none" as const;
+}
 
 type PlanAreaUsageId =
   | "capannone"
@@ -2160,17 +2240,17 @@ function App() {
   const [statusFilter, setStatusFilter] = useState<StudyStatus | "Tutti">("Tutti");
   const [regionFilter, setRegionFilter] = useState("Tutte");
   const [appointmentOnly, setAppointmentOnly] = useState(false);
-  const [expandedStudy, setExpandedStudy] = useState("");
-  const [propertyDetailsStudy, setPropertyDetailsStudy] = useState("");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [selectedStudyIds, setSelectedStudyIds] = useState<string[]>([]);
-  const [sidePanelCollapsed, setSidePanelCollapsed] = useState(() => {
-    return window.localStorage.getItem("soul-summary-panel-collapsed") === "true";
-  });
   const [editorDirty, setEditorDirty] = useState(false);
   const [newStudyModalOpen, setNewStudyModalOpen] = useState(false);
   const [newStudyBusy, setNewStudyBusy] = useState(false);
   const [toast, setToast] = useState("");
+  const studyTableColumns = useTableColumns("soul-table-studies-v1", STUDY_TABLE_COLUMNS);
+  const visibleStudyColumnIds = useMemo(
+    () => new Set<StudyTableColumnId>(studyTableColumns.visibleColumns.map((column) => column.id)),
+    [studyTableColumns.visibleColumns],
+  );
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -2184,9 +2264,6 @@ function App() {
         const importedStudies = (await response.json()) as FeasibilityStudy[];
         if (!Array.isArray(importedStudies)) throw new Error("Risposta studi non valida");
         setStudies(importedStudies);
-        setExpandedStudy((current) =>
-          current && importedStudies.some((study) => study.id === current) ? current : "",
-        );
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setStudies(demoStudies);
@@ -2196,10 +2273,6 @@ function App() {
     void loadStudies();
     return () => abortController.abort();
   }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem("soul-summary-panel-collapsed", String(sidePanelCollapsed));
-  }, [sidePanelCollapsed]);
 
   useEffect(() => {
     function handleSearchShortcut(event: KeyboardEvent) {
@@ -2845,7 +2918,7 @@ function App() {
       activeSection={navSectionForRoute(route)}
       onNavigate={navigate}
     >
-      <main className={`dashboard-grid ${sidePanelCollapsed ? "summary-collapsed" : ""}`}>
+      <main className="dashboard-grid">
         <section className="workspace">
           <div className="page-heading">
             <div>
@@ -2860,6 +2933,37 @@ function App() {
               Nuovo studio
             </button>
           </div>
+
+          <section className="dashboard-summary-strip" aria-label="Riepilogo studi nella vista corrente">
+            <MetricCard
+              icon={<Clock3 size={22} />}
+              label="Studi in corso"
+              value={numberFormatter.format(totals.inProgress)}
+              tone="blue"
+              delta="Nella vista corrente"
+            />
+            <MetricCard
+              icon={<CheckCircle2 size={22} />}
+              label="Studi conclusi"
+              value={numberFormatter.format(totals.concluded)}
+              tone="green"
+              delta="Nella vista corrente"
+            />
+            <MetricCard
+              icon={<BarChart3 size={22} />}
+              label="Diff. rendita media"
+              value={formatPercent(totals.averageDiff)}
+              tone="purple"
+              delta="Nella vista corrente"
+            />
+            <MetricCard
+              icon={<Euro size={22} />}
+              label="Rendita potenziale totale"
+              value={formatEuro(totals.potentialRendita)}
+              tone="orange"
+              delta="Nella vista corrente"
+            />
+          </section>
 
           <section className="table-card">
             <div className="table-card-header">
@@ -2881,15 +2985,24 @@ function App() {
             </div>
 
             <div className="table-tools">
-              <button
-                className="filters-toggle"
-                aria-expanded={filtersExpanded}
-                onClick={() => setFiltersExpanded((expanded) => !expanded)}
-              >
-                <SlidersHorizontal size={18} />
-                <span>Filtri attivi ({activeFilterCount})</span>
-                {filtersExpanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
-              </button>
+              <div className="table-tools-primary">
+                <button
+                  className="filters-toggle"
+                  aria-expanded={filtersExpanded}
+                  onClick={() => setFiltersExpanded((expanded) => !expanded)}
+                >
+                  <SlidersHorizontal size={18} />
+                  <span>Filtri attivi ({activeFilterCount})</span>
+                  {filtersExpanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
+                </button>
+                <TableColumnMenu
+                  columns={STUDY_TABLE_COLUMNS}
+                  visibility={studyTableColumns.visibility}
+                  onToggle={studyTableColumns.toggleColumn}
+                  onShowAll={studyTableColumns.showAllColumns}
+                  onResetWidths={studyTableColumns.resetWidths}
+                />
+              </div>
 
               {filtersExpanded && (
                 <section className="filters-panel in-table" aria-label="Filtri studi di fattibilità">
@@ -3001,14 +3114,6 @@ function App() {
                     ? `${selectedStudies.length} studi selezionati`
                     : "Seleziona gli studi da elaborare"}
                 </span>
-                <button
-                  className="button primary"
-                  disabled
-                  title={selectedStudies.length > 0 ? "Disponibile dopo integrazione ERP" : "Seleziona almeno uno studio"}
-                >
-                  <Send size={17} />
-                  Invia a ERP
-                </button>
                 <button className="button secondary" disabled={selectedStudies.length === 0} onClick={downloadSelectedCsv}>
                   <FileSpreadsheet size={17} />
                   Esporta selezione CSV
@@ -3016,77 +3121,150 @@ function App() {
               </div>
             </div>
 
-            <div className="studies-table-wrap">
-              <table className="studies-table">
+            <div className="studies-table-wrap resizable-table-wrap">
+              <table className="studies-table resizable-data-table">
+                <colgroup>
+                  {studyTableColumns.visibleColumns.map((column) => (
+                    <col key={column.id} style={{ width: studyTableColumns.widthPercent(column.id) }} />
+                  ))}
+                </colgroup>
                 <thead>
                   <tr>
-                    <th className="selection-cell">
-                      <input
-                        type="checkbox"
-                        checked={allVisibleSelected}
-                        onChange={toggleVisibleSelection}
-                        aria-label="Seleziona tutti gli studi visibili"
-                      />
-                    </th>
-                    <SortableHeader
-                      label="ID studio"
-                      sortKey="id"
-                      activeSort={sortKey}
-                      direction={sortDirection}
-                      onSort={handleSort}
-                    />
-                    <th>Azienda</th>
-                    <SortableHeader
-                      label="N. immobili"
-                      sortKey="propertiesCount"
-                      activeSort={sortKey}
-                      direction={sortDirection}
-                      onSort={handleSort}
-                    />
-                    <th>Stato</th>
-                    <SortableHeader
-                      label="Importato ERP"
-                      sortKey="importedAt"
-                      activeSort={sortKey}
-                      direction={sortDirection}
-                      onSort={handleSort}
-                    />
-                    <SortableHeader
-                      label="Scadenza"
-                      sortKey="deadline"
-                      activeSort={sortKey}
-                      direction={sortDirection}
-                      onSort={handleSort}
-                    />
-                    <SortableHeader
-                      label="Diff. rendita"
-                      sortKey="diffRendita"
-                      activeSort={sortKey}
-                      direction={sortDirection}
-                      onSort={handleSort}
-                    />
-                    <SortableHeader
-                      label="Diff. IMU"
-                      sortKey="diffImu"
-                      activeSort={sortKey}
-                      direction={sortDirection}
-                      onSort={handleSort}
-                    />
-                    <SortableHeader
-                      label="Rendita totale"
-                      sortKey="totalRendita"
-                      activeSort={sortKey}
-                      direction={sortDirection}
-                      onSort={handleSort}
-                    />
-                    <SortableHeader
-                      label="Commerciale"
-                      sortKey="commercialOwner"
-                      activeSort={sortKey}
-                      direction={sortDirection}
-                      onSort={handleSort}
-                    />
-                    <th aria-label="Apri studio di fattibilità" />
+                    {visibleStudyColumnIds.has("select") && (
+                      <ResizableTableHeader
+                        column={tableColumn(STUDY_TABLE_COLUMNS, "select")}
+                        canResize={false}
+                        resizing={false}
+                        onResizeStart={studyTableColumns.startResize}
+                        onNudge={studyTableColumns.nudgeColumn}
+                        className="selection-cell"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          onChange={toggleVisibleSelection}
+                          aria-label="Seleziona tutti gli studi visibili"
+                        />
+                      </ResizableTableHeader>
+                    )}
+                    {visibleStudyColumnIds.has("id") && (
+                      <ResizableTableHeader
+                        column={tableColumn(STUDY_TABLE_COLUMNS, "id")}
+                        canResize={studyTableColumns.canResize("id")}
+                        resizing={studyTableColumns.resizingColumn === "id"}
+                        onResizeStart={studyTableColumns.startResize}
+                        onNudge={studyTableColumns.nudgeColumn}
+                        ariaSort={ariaSortState(sortKey === "id", sortDirection)}
+                      >
+                        <SortableHeader label="ID studio" sortKey="id" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
+                      </ResizableTableHeader>
+                    )}
+                    {visibleStudyColumnIds.has("company") && (
+                      <ResizableTableHeader
+                        column={tableColumn(STUDY_TABLE_COLUMNS, "company")}
+                        canResize={studyTableColumns.canResize("company")}
+                        resizing={studyTableColumns.resizingColumn === "company"}
+                        onResizeStart={studyTableColumns.startResize}
+                        onNudge={studyTableColumns.nudgeColumn}
+                      >
+                        Azienda
+                      </ResizableTableHeader>
+                    )}
+                    {visibleStudyColumnIds.has("propertiesCount") && (
+                      <ResizableTableHeader
+                        column={tableColumn(STUDY_TABLE_COLUMNS, "propertiesCount")}
+                        canResize={studyTableColumns.canResize("propertiesCount")}
+                        resizing={studyTableColumns.resizingColumn === "propertiesCount"}
+                        onResizeStart={studyTableColumns.startResize}
+                        onNudge={studyTableColumns.nudgeColumn}
+                        ariaSort={ariaSortState(sortKey === "propertiesCount", sortDirection)}
+                      >
+                        <SortableHeader label="N. immobili" sortKey="propertiesCount" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
+                      </ResizableTableHeader>
+                    )}
+                    {visibleStudyColumnIds.has("status") && (
+                      <ResizableTableHeader
+                        column={tableColumn(STUDY_TABLE_COLUMNS, "status")}
+                        canResize={studyTableColumns.canResize("status")}
+                        resizing={studyTableColumns.resizingColumn === "status"}
+                        onResizeStart={studyTableColumns.startResize}
+                        onNudge={studyTableColumns.nudgeColumn}
+                      >
+                        Stato
+                      </ResizableTableHeader>
+                    )}
+                    {visibleStudyColumnIds.has("importedAt") && (
+                      <ResizableTableHeader
+                        column={tableColumn(STUDY_TABLE_COLUMNS, "importedAt")}
+                        canResize={studyTableColumns.canResize("importedAt")}
+                        resizing={studyTableColumns.resizingColumn === "importedAt"}
+                        onResizeStart={studyTableColumns.startResize}
+                        onNudge={studyTableColumns.nudgeColumn}
+                        ariaSort={ariaSortState(sortKey === "importedAt", sortDirection)}
+                      >
+                        <SortableHeader label="Importato ERP" sortKey="importedAt" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
+                      </ResizableTableHeader>
+                    )}
+                    {visibleStudyColumnIds.has("deadline") && (
+                      <ResizableTableHeader
+                        column={tableColumn(STUDY_TABLE_COLUMNS, "deadline")}
+                        canResize={studyTableColumns.canResize("deadline")}
+                        resizing={studyTableColumns.resizingColumn === "deadline"}
+                        onResizeStart={studyTableColumns.startResize}
+                        onNudge={studyTableColumns.nudgeColumn}
+                        ariaSort={ariaSortState(sortKey === "deadline", sortDirection)}
+                      >
+                        <SortableHeader label="Scadenza" sortKey="deadline" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
+                      </ResizableTableHeader>
+                    )}
+                    {visibleStudyColumnIds.has("diffRendita") && (
+                      <ResizableTableHeader
+                        column={tableColumn(STUDY_TABLE_COLUMNS, "diffRendita")}
+                        canResize={studyTableColumns.canResize("diffRendita")}
+                        resizing={studyTableColumns.resizingColumn === "diffRendita"}
+                        onResizeStart={studyTableColumns.startResize}
+                        onNudge={studyTableColumns.nudgeColumn}
+                        ariaSort={ariaSortState(sortKey === "diffRendita", sortDirection)}
+                      >
+                        <SortableHeader label="Diff. rendita" sortKey="diffRendita" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
+                      </ResizableTableHeader>
+                    )}
+                    {visibleStudyColumnIds.has("diffImu") && (
+                      <ResizableTableHeader
+                        column={tableColumn(STUDY_TABLE_COLUMNS, "diffImu")}
+                        canResize={studyTableColumns.canResize("diffImu")}
+                        resizing={studyTableColumns.resizingColumn === "diffImu"}
+                        onResizeStart={studyTableColumns.startResize}
+                        onNudge={studyTableColumns.nudgeColumn}
+                        ariaSort={ariaSortState(sortKey === "diffImu", sortDirection)}
+                      >
+                        <SortableHeader label="Diff. IMU" sortKey="diffImu" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
+                      </ResizableTableHeader>
+                    )}
+                    {visibleStudyColumnIds.has("totalRendita") && (
+                      <ResizableTableHeader
+                        column={tableColumn(STUDY_TABLE_COLUMNS, "totalRendita")}
+                        canResize={studyTableColumns.canResize("totalRendita")}
+                        resizing={studyTableColumns.resizingColumn === "totalRendita"}
+                        onResizeStart={studyTableColumns.startResize}
+                        onNudge={studyTableColumns.nudgeColumn}
+                        ariaSort={ariaSortState(sortKey === "totalRendita", sortDirection)}
+                      >
+                        <SortableHeader label="Rendita totale" sortKey="totalRendita" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
+                      </ResizableTableHeader>
+                    )}
+                    {visibleStudyColumnIds.has("commercialOwner") && (
+                      <ResizableTableHeader
+                        column={tableColumn(STUDY_TABLE_COLUMNS, "commercialOwner")}
+                        canResize={studyTableColumns.canResize("commercialOwner")}
+                        resizing={studyTableColumns.resizingColumn === "commercialOwner"}
+                        onResizeStart={studyTableColumns.startResize}
+                        onNudge={studyTableColumns.nudgeColumn}
+                        ariaSort={ariaSortState(sortKey === "commercialOwner", sortDirection)}
+                      >
+                        <SortableHeader label="Commerciale" sortKey="commercialOwner" activeSort={sortKey} direction={sortDirection} onSort={handleSort} />
+                      </ResizableTableHeader>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -3094,24 +3272,11 @@ function App() {
                     <StudyRows
                       key={study.id}
                       study={study}
-                      expanded={expandedStudy === study.id}
                       selected={selectedStudyIds.includes(study.id)}
-                      propertyDetailsOpen={propertyDetailsStudy === study.id}
+                      visibleColumns={visibleStudyColumnIds}
                       onSelect={() => toggleStudySelection(study.id)}
-                      onToggle={() => {
-                        setExpandedStudy((current) => (current === study.id ? "" : study.id));
-                        setPropertyDetailsStudy("");
-                      }}
-                      onTogglePropertyDetails={() =>
-                        setPropertyDetailsStudy((current) => (current === study.id ? "" : study.id))
-                      }
                       onOpenDetail={() => navigate({ view: "study", studyId: study.id })}
-                      onOpenEditor={(property) =>
-                        navigate({ view: "editor", studyId: study.id, propertyId: property.id })
-                      }
                       onUpdate={(input) => updateStudy(study.id, input)}
-                      onOutcomeChange={updatePropertyOutcome}
-                      onNotice={flash}
                     />
                   ))}
                 </tbody>
@@ -3127,91 +3292,6 @@ function App() {
           </section>
         </section>
 
-        <aside className={`side-panel ${sidePanelCollapsed ? "collapsed" : ""}`}>
-          <div className="side-panel-controls">
-            {!sidePanelCollapsed && <strong>Vista sintetica</strong>}
-            <button
-              className="side-panel-toggle"
-              type="button"
-              onClick={() => setSidePanelCollapsed((collapsed) => !collapsed)}
-              title={sidePanelCollapsed ? "Mostra riepilogo e attività" : "Nascondi riepilogo e attività"}
-              aria-label={sidePanelCollapsed ? "Mostra riepilogo e attività" : "Nascondi riepilogo e attività"}
-            >
-              {sidePanelCollapsed ? <PanelRightOpen size={19} /> : <PanelRightClose size={19} />}
-              {!sidePanelCollapsed && <span>Nascondi</span>}
-            </button>
-          </div>
-          {!sidePanelCollapsed && (
-            <>
-          <section className="summary-card">
-            <h2>Riepilogo</h2>
-            <MetricCard
-              icon={<Clock3 size={24} />}
-              label="Studi in corso"
-              value={numberFormatter.format(totals.inProgress)}
-              tone="blue"
-              delta="Nella vista corrente"
-            />
-            <MetricCard
-              icon={<CheckCircle2 size={24} />}
-              label="Studi conclusi"
-              value={numberFormatter.format(totals.concluded)}
-              tone="green"
-              delta="Nella vista corrente"
-            />
-            <MetricCard
-              icon={<BarChart3 size={24} />}
-              label="Diff. rendita media"
-              value={formatPercent(totals.averageDiff)}
-              tone="purple"
-              delta="Nella vista corrente"
-            />
-            <MetricCard
-              icon={<Euro size={24} />}
-              label="Rendita potenziale totale"
-              value={formatEuro(totals.potentialRendita)}
-              tone="orange"
-              delta="Nella vista corrente"
-            />
-          </section>
-
-          <section className="activity-card">
-            <div className="activity-header">
-              <h2>Attività recenti</h2>
-              <button onClick={() => navigate({ view: "activity" })}>Vedi tutto</button>
-            </div>
-            <ActivityItem
-              tone="green"
-              title="Studio S-2026-0187 completato"
-              subtitle="Immobiliare Aurora Srl"
-              time="10:24"
-            />
-            <ActivityItem
-              tone="blue"
-              title="Importazione ERP completata"
-              subtitle="32 nuovi studi importati"
-              time="09:15"
-            />
-            <ActivityItem
-              tone="purple"
-              title="Nuovo studio creato"
-              subtitle="Green Stone Srl"
-              time="Ieri 16:48"
-            />
-            <ActivityItem
-              tone="orange"
-              title="Documenti caricati"
-              subtitle="Via Manzoni 12, Milano"
-              time="Ieri 14:02"
-            />
-            <button className="button soft full-width" onClick={() => navigate({ view: "activity" })}>
-              Vai al registro attività
-              <ChevronRight size={16} />
-            </button>
-          </section>
-            </>
-          )}
-        </aside>
       </main>
       {newStudyModalOpen && (
         <NewStudyModal
@@ -3678,10 +3758,28 @@ function Shell({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     return window.localStorage.getItem("soul-sidebar-collapsed") === "true";
   });
+  const [activityHistoryOpen, setActivityHistoryOpen] = useState(false);
+  const activityHistoryRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     window.localStorage.setItem("soul-sidebar-collapsed", String(sidebarCollapsed));
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (!activityHistoryOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (!activityHistoryRef.current?.contains(event.target as Node)) setActivityHistoryOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setActivityHistoryOpen(false);
+    }
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activityHistoryOpen]);
 
   return (
     <div
@@ -3771,10 +3869,54 @@ function Shell({
             </button>
 
             <div className="top-icons">
-              <button className="icon-button notification" title="Notifiche in preparazione" disabled aria-label="Notifiche in preparazione">
-                <Bell size={19} />
-                <span>8</span>
-              </button>
+              <div className="activity-history-menu" ref={activityHistoryRef}>
+                <button
+                  className="icon-button notification"
+                  type="button"
+                  title="Cronologia attività"
+                  aria-label="Apri cronologia attività"
+                  aria-haspopup="dialog"
+                  aria-expanded={activityHistoryOpen}
+                  onClick={() => setActivityHistoryOpen((open) => !open)}
+                >
+                  <History size={19} />
+                  <span>8</span>
+                </button>
+                {activityHistoryOpen && (
+                  <section className="activity-history-popover" role="dialog" aria-label="Attività recenti">
+                    <div className="activity-history-head">
+                      <div>
+                        <span>Cronologia</span>
+                        <h2>Attività recenti</h2>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActivityHistoryOpen(false);
+                          onNavigate({ view: "activity" });
+                        }}
+                      >
+                        Vedi tutto
+                      </button>
+                    </div>
+                    <ActivityItem tone="green" title="Studio S-2026-0187 completato" subtitle="Immobiliare Aurora Srl" time="10:24" />
+                    <ActivityItem tone="blue" title="Importazione ERP completata" subtitle="32 nuovi studi importati" time="09:15" />
+                    <ActivityItem tone="purple" title="Nuovo studio creato" subtitle="Green Stone Srl" time="Ieri 16:48" />
+                    <ActivityItem tone="orange" title="Documenti caricati" subtitle="Via Manzoni 12, Milano" time="Ieri 14:02" />
+                    <button
+                      className="activity-history-all"
+                      type="button"
+                      onClick={() => {
+                        setActivityHistoryOpen(false);
+                        onNavigate({ view: "activity" });
+                      }}
+                    >
+                      Vai al registro attività
+                      <ChevronRight size={16} />
+                    </button>
+                  </section>
+                )}
+              </div>
               <button className="icon-button" title="Aiuto in preparazione" disabled aria-label="Aiuto in preparazione">
                 <CircleHelp size={19} />
               </button>
@@ -3842,16 +3984,14 @@ function SortableHeader({
 }) {
   const active = activeSort === sortKey;
   return (
-    <th aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}>
-      <button className={`sort-header ${active ? "active" : ""}`} onClick={() => onSort(sortKey)}>
-        {label}
-        {active ? (
-          direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-        ) : (
-          <ArrowDownUp size={13} />
-        )}
-      </button>
-    </th>
+    <button className={`sort-header ${active ? "active" : ""}`} onClick={() => onSort(sortKey)}>
+      {label}
+      {active ? (
+        direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+      ) : (
+        <ArrowDownUp size={13} />
+      )}
+    </button>
   );
 }
 
@@ -4312,31 +4452,25 @@ function PendingPage({
 
 function StudyRows({
   study,
-  expanded,
   selected,
-  propertyDetailsOpen,
+  visibleColumns,
   onSelect,
-  onToggle,
-  onTogglePropertyDetails,
   onOpenDetail,
-  onOpenEditor,
   onUpdate,
-  onOutcomeChange,
-  onNotice,
 }: {
   study: FeasibilityStudy;
-  expanded: boolean;
   selected: boolean;
-  propertyDetailsOpen: boolean;
+  visibleColumns: ReadonlySet<StudyTableColumnId>;
   onSelect: () => void;
-  onToggle: () => void;
-  onTogglePropertyDetails: () => void;
   onOpenDetail: () => void;
-  onOpenEditor: (property: PropertyItem) => void;
   onUpdate: (input: StudyUpdate) => Promise<boolean>;
-  onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
-  onNotice: (message: string) => void;
 }) {
+  const expanded = false;
+  const propertyDetailsOpen = false;
+  const onTogglePropertyDetails = () => undefined;
+  const onOpenEditor = (_property: PropertyItem) => undefined;
+  const onOutcomeChange = async (_propertyId: string, _outcome: PropertyOutcome) => false;
+  const onNotice = (_message: string) => undefined;
   const counts = getCounts(study);
   const [savingStatus, setSavingStatus] = useState(false);
   const [editingNotes, setEditingNotes] = useState(false);
@@ -4368,74 +4502,63 @@ function StudyRows({
   return (
     <>
       <tr
-        className={`study-row ${expanded ? "expanded" : ""}`}
+        className="study-row data-row-clickable"
         tabIndex={0}
-        aria-expanded={expanded}
-        aria-label={`${expanded ? "Comprimi" : "Espandi"} dettagli dello studio ${study.id}`}
-        onClick={onToggle}
+        aria-label={`Apri lo studio di fattibilità ${study.id}`}
+        onClick={onOpenDetail}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            onToggle();
+            onOpenDetail();
           }
         }}
       >
-        <td className="selection-cell">
-          <input
-            type="checkbox"
-            checked={selected}
-            onClick={(event) => event.stopPropagation()}
-            onChange={onSelect}
-            aria-label={`Seleziona ${study.company}`}
-          />
-        </td>
-        <td className="strong-cell">{study.id}</td>
-        <td>
-          <div className="company-cell">
-            <strong>{study.company}</strong>
-            <span>
-              {study.comune} ({study.provincia}) - {study.vat}
-            </span>
-          </div>
-        </td>
-        <td>{study.properties.length}</td>
-        <td>
-          <StatusSelect
-            status={study.status}
-            saving={savingStatus}
-            onChange={(status) => void handleStatusChange(status)}
-          />
-        </td>
-        <td>{formatDate(study.importedAt)}</td>
-        <td>
-          <div className="date-stack">
-            <strong>{formatDate(study.deadline)}</strong>
-            {study.nextAppointment && <span>{formatDateTime(study.nextAppointment)}</span>}
-          </div>
-        </td>
-        <td>
-          <MoneyPercentStack amount={studyRenditaDiffAmount(study)} percent={studyRenditaDiffPercent(study)} favorableDirection="down" />
-        </td>
-        <td>
-          <MoneyPercentStack amount={study.diffImu} percent={studyImuDiffPercent(study)} />
-        </td>
-        <td>{formatEuro(study.totalRendita)}</td>
-        <td>
-          <Owner owner={study.commercialOwner} />
-        </td>
-        <td className="row-action-cell">
-          <button
-            className="button secondary compact-button row-detail-button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onOpenDetail();
-            }}
-          >
-            <FileText size={15} />
-            Apri studio di fattibilità
-          </button>
-        </td>
+        {visibleColumns.has("select") && (
+          <td className="selection-cell">
+            <input
+              type="checkbox"
+              checked={selected}
+              onClick={(event) => event.stopPropagation()}
+              onChange={onSelect}
+              aria-label={`Seleziona ${study.company}`}
+            />
+          </td>
+        )}
+        {visibleColumns.has("id") && <td className="strong-cell table-cell-ellipsis" title={study.id}>{study.id}</td>}
+        {visibleColumns.has("company") && (
+          <td>
+            <div className="company-cell">
+              <strong title={study.company}>{study.company}</strong>
+              <span title={`${study.comune} (${study.provincia}) - ${study.vat}`}>
+                {study.comune} ({study.provincia}) - {study.vat}
+              </span>
+            </div>
+          </td>
+        )}
+        {visibleColumns.has("propertiesCount") && <td>{study.properties.length}</td>}
+        {visibleColumns.has("status") && (
+          <td>
+            <StatusSelect status={study.status} saving={savingStatus} onChange={(status) => void handleStatusChange(status)} />
+          </td>
+        )}
+        {visibleColumns.has("importedAt") && <td>{formatDate(study.importedAt)}</td>}
+        {visibleColumns.has("deadline") && (
+          <td>
+            <div className="date-stack">
+              <strong>{formatDate(study.deadline)}</strong>
+              {study.nextAppointment && <span>{formatDateTime(study.nextAppointment)}</span>}
+            </div>
+          </td>
+        )}
+        {visibleColumns.has("diffRendita") && (
+          <td><MoneyPercentStack amount={studyRenditaDiffAmount(study)} percent={studyRenditaDiffPercent(study)} favorableDirection="down" /></td>
+        )}
+        {visibleColumns.has("diffImu") && (
+          <td><MoneyPercentStack amount={study.diffImu} percent={studyImuDiffPercent(study)} /></td>
+        )}
+        {visibleColumns.has("totalRendita") && <td className="table-cell-ellipsis" title={formatEuro(study.totalRendita)}>{formatEuro(study.totalRendita)}</td>}
+        {visibleColumns.has("commercialOwner") && <td><Owner owner={study.commercialOwner} /></td>}
       </tr>
       {expanded && (
         <tr className="study-detail-row">
@@ -5090,6 +5213,11 @@ function StudyDetail({
   const [newPropertyBusy, setNewPropertyBusy] = useState(false);
   const [deleteConfirmIds, setDeleteConfirmIds] = useState<string[]>([]);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const propertyTableColumns = useTableColumns("soul-table-study-properties-v1", PROPERTY_TABLE_COLUMNS);
+  const visiblePropertyColumnIds = useMemo(
+    () => new Set<PropertyTableColumnId>(propertyTableColumns.visibleColumns.map((column) => column.id)),
+    [propertyTableColumns.visibleColumns],
+  );
 
   useEffect(() => {
     setSelectedPropertyIds([]);
@@ -5257,6 +5385,28 @@ function StudyDetail({
     }
   }
 
+  function renderPropertyHeader(
+    columnId: PropertyTableColumnId,
+    children: ReactNode,
+    sortColumn?: Exclude<PropertySortKey, "manual">,
+    className = "",
+  ) {
+    if (!visiblePropertyColumnIds.has(columnId)) return null;
+    return (
+      <ResizableTableHeader
+        column={tableColumn(PROPERTY_TABLE_COLUMNS, columnId)}
+        canResize={propertyTableColumns.canResize(columnId)}
+        resizing={propertyTableColumns.resizingColumn === columnId}
+        onResizeStart={propertyTableColumns.startResize}
+        onNudge={propertyTableColumns.nudgeColumn}
+        ariaSort={sortColumn ? ariaSortState(propertySortKey === sortColumn, propertySortDirection) : undefined}
+        className={className}
+      >
+        {children}
+      </ResizableTableHeader>
+    );
+  }
+
   return (
     <main className="detail-page">
       <button className="back-link" onClick={onBack}>
@@ -5292,10 +5442,6 @@ function StudyDetail({
             <ExternalLink size={17} />
             Link allo studio sull'ERP
           </a>
-          <button className="button primary" disabled title="Disponibile dopo integrazione ERP">
-            <Send size={17} />
-            Invia a ERP
-          </button>
         </div>
       </section>
 
@@ -5310,6 +5456,13 @@ function StudyDetail({
               <GripVertical size={15} />
               {propertySortKey === "manual" ? "Ordine manuale" : "Trascina per salvare un nuovo ordine"}
             </span>
+            <TableColumnMenu
+              columns={PROPERTY_TABLE_COLUMNS}
+              visibility={propertyTableColumns.visibility}
+              onToggle={propertyTableColumns.toggleColumn}
+              onShowAll={propertyTableColumns.showAllColumns}
+              onResetWidths={propertyTableColumns.resetWidths}
+            />
             <button className="button primary compact-button" type="button" onClick={() => setNewPropertyModalOpen(true)}>
               <Plus size={15} />
               Aggiungi immobile
@@ -5358,33 +5511,41 @@ function StudyDetail({
           </button>
         </div>
 
-        <div className="compact-table-wrap">
-          <table className="compact-table property-operational-table">
+        <div className="compact-table-wrap resizable-table-wrap">
+          <table className="compact-table property-operational-table resizable-data-table">
+            <colgroup>
+              {propertyTableColumns.visibleColumns.map((column) => (
+                <col key={column.id} style={{ width: propertyTableColumns.widthPercent(column.id) }} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
-                <th className="property-select-cell">
+                {renderPropertyHeader(
+                  "select",
                   <input
                     type="checkbox"
                     checked={allPropertiesSelected}
                     onChange={toggleAllProperties}
                     aria-label="Seleziona tutti gli immobili"
-                  />
-                </th>
-                <th className="property-drag-cell" aria-label="Ordine manuale" />
-                <PropertySortHeader label="Ubicazione" sortKey="ubicazione" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="Foglio" sortKey="foglio" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="Part." sortKey="particella" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="Sub" sortKey="subalterno" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="Categoria" sortKey="categoria" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="Rendita attuale" sortKey="currentRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="Rendita proposta" sortKey="estimatedRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="Diff. rendita" sortKey="renditaDiff" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="IMU attuale" sortKey="currentImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="IMU prevista" sortKey="estimatedImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="Diff. IMU" sortKey="imuDiff" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <th>Documenti</th>
-                <PropertySortHeader label="Titolarità" sortKey="titolarita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
-                <PropertySortHeader label="Esito" sortKey="outcome" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />
+                  />,
+                  undefined,
+                  "property-select-cell",
+                )}
+                {renderPropertyHeader("drag", <span className="sr-only">Ordine manuale</span>, undefined, "property-drag-cell")}
+                {renderPropertyHeader("location", <PropertySortHeader label="Ubicazione" sortKey="ubicazione" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "ubicazione")}
+                {renderPropertyHeader("sheet", <PropertySortHeader label="Foglio" sortKey="foglio" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "foglio")}
+                {renderPropertyHeader("parcel", <PropertySortHeader label="Part." sortKey="particella" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "particella")}
+                {renderPropertyHeader("sub", <PropertySortHeader label="Sub" sortKey="subalterno" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "subalterno")}
+                {renderPropertyHeader("category", <PropertySortHeader label="Cat." sortKey="categoria" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "categoria")}
+                {renderPropertyHeader("currentRendita", <PropertySortHeader label="Rendita attuale" sortKey="currentRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "currentRendita")}
+                {renderPropertyHeader("estimatedRendita", <PropertySortHeader label="Rendita proposta" sortKey="estimatedRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "estimatedRendita")}
+                {renderPropertyHeader("renditaDiff", <PropertySortHeader label="Diff. rendita" sortKey="renditaDiff" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "renditaDiff")}
+                {renderPropertyHeader("currentImu", <PropertySortHeader label="IMU attuale" sortKey="currentImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "currentImu")}
+                {renderPropertyHeader("estimatedImu", <PropertySortHeader label="IMU prevista" sortKey="estimatedImu" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "estimatedImu")}
+                {renderPropertyHeader("imuDiff", <PropertySortHeader label="Diff. IMU" sortKey="imuDiff" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "imuDiff")}
+                {renderPropertyHeader("documents", <>Documenti</>)}
+                {renderPropertyHeader("ownership", <PropertySortHeader label="Titolarità" sortKey="titolarita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "titolarita")}
+                {renderPropertyHeader("outcome", <PropertySortHeader label="Esito" sortKey="outcome" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "outcome")}
               </tr>
             </thead>
             <tbody>
@@ -5393,9 +5554,16 @@ function StudyDetail({
                 return (
                   <tr
                     key={property.id}
-                    className={`${draggedPropertyId === property.id ? "dragging" : ""} ${activePropertyId === property.id ? "active-property-detail" : ""}`}
+                    className={`data-row-clickable ${draggedPropertyId === property.id ? "dragging" : ""} ${activePropertyId === property.id ? "active-property-detail" : ""}`}
                     onClick={() => setActivePropertyId(property.id)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      setActivePropertyId(property.id);
+                    }}
+                    tabIndex={0}
                     aria-selected={activePropertyId === property.id}
+                    aria-label={`Apri il riepilogo aree di ${propertyLocation(property)}`}
                     title="Apri dettaglio lista aree"
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => {
@@ -5403,60 +5571,68 @@ function StudyDetail({
                       handleDrop(property.id);
                     }}
                   >
-                    <td className="property-select-cell">
-                      <input
-                        type="checkbox"
-                        checked={selectedPropertyIds.includes(property.id)}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={() => togglePropertySelection(property.id)}
-                        aria-label={`Seleziona ${propertyLocation(property)}`}
-                      />
-                    </td>
-                    <td className="property-drag-cell">
-                      <button
-                        className="drag-handle"
-                        type="button"
-                        draggable
-                        onClick={(event) => event.stopPropagation()}
-                        onDragStart={(event) => {
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", property.id);
-                          setDraggedPropertyId(property.id);
-                        }}
-                        onDragEnd={() => setDraggedPropertyId("")}
-                        aria-label={`Riordina ${propertyLocation(property)}`}
-                        title="Trascina per riordinare"
-                      >
-                        <GripVertical size={17} />
-                      </button>
-                    </td>
-                    <td className="location-cell">
-                      <strong>{propertyLocation(property)}</strong>
-                    </td>
-                    <td>{property.foglio || "In attesa ERP"}</td>
-                    <td>{property.particella || "In attesa ERP"}</td>
-                    <td>{property.subalterno || "In attesa ERP"}</td>
-                    <td>{property.categoria}</td>
-                    <td>{formatEuro(property.currentRendita)}</td>
-                    <td>
-                      {formatEstimatedValue(property.estimatedRendita)}
-                    </td>
-                    <td>
-                      <MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} favorableDirection="down" />
-                    </td>
-                    <td><ImuCurrent property={property} /></td>
-                    <td><ImuEstimate property={property} /></td>
-                    <td>
-                      <MoneyPercentStack amount={propertyImuDiffAmount(property)} percent={imuPercent} />
-                    </td>
-                    <td><PropertyDocumentAvailability property={property} /></td>
-                    <td>{formatTitolarita(property.titolarita)}</td>
-                    <td>
-                      <OutcomeSelect
-                        outcome={property.outcome}
-                        onChange={(outcome) => onOutcomeChange(property.id, outcome)}
-                      />
-                    </td>
+                    {visiblePropertyColumnIds.has("select") && (
+                      <td className="property-select-cell">
+                        <input
+                          type="checkbox"
+                          checked={selectedPropertyIds.includes(property.id)}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={() => togglePropertySelection(property.id)}
+                          aria-label={`Seleziona ${propertyLocation(property)}`}
+                        />
+                      </td>
+                    )}
+                    {visiblePropertyColumnIds.has("drag") && (
+                      <td className="property-drag-cell">
+                        <button
+                          className="drag-handle"
+                          type="button"
+                          draggable
+                          onClick={(event) => event.stopPropagation()}
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("text/plain", property.id);
+                            setDraggedPropertyId(property.id);
+                          }}
+                          onDragEnd={() => setDraggedPropertyId("")}
+                          aria-label={`Riordina ${propertyLocation(property)}`}
+                          title="Trascina per riordinare"
+                        >
+                          <GripVertical size={17} />
+                        </button>
+                      </td>
+                    )}
+                    {visiblePropertyColumnIds.has("location") && (
+                      <td className="location-cell table-cell-ellipsis" title={propertyLocation(property)}>
+                        <strong>{propertyLocation(property)}</strong>
+                      </td>
+                    )}
+                    {visiblePropertyColumnIds.has("sheet") && <td className="table-cell-ellipsis" title={property.foglio || "In attesa ERP"}>{property.foglio || "—"}</td>}
+                    {visiblePropertyColumnIds.has("parcel") && <td className="table-cell-ellipsis" title={property.particella || "In attesa ERP"}>{property.particella || "—"}</td>}
+                    {visiblePropertyColumnIds.has("sub") && <td className="table-cell-ellipsis" title={property.subalterno || "In attesa ERP"}>{property.subalterno || "—"}</td>}
+                    {visiblePropertyColumnIds.has("category") && <td className="table-cell-ellipsis" title={property.categoria}>{property.categoria || "—"}</td>}
+                    {visiblePropertyColumnIds.has("currentRendita") && <td>{formatEuro(property.currentRendita)}</td>}
+                    {visiblePropertyColumnIds.has("estimatedRendita") && <td>{formatEstimatedValue(property.estimatedRendita)}</td>}
+                    {visiblePropertyColumnIds.has("renditaDiff") && (
+                      <td><MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} favorableDirection="down" /></td>
+                    )}
+                    {visiblePropertyColumnIds.has("currentImu") && <td><ImuCurrent property={property} /></td>}
+                    {visiblePropertyColumnIds.has("estimatedImu") && <td><ImuEstimate property={property} /></td>}
+                    {visiblePropertyColumnIds.has("imuDiff") && (
+                      <td><MoneyPercentStack amount={propertyImuDiffAmount(property)} percent={imuPercent} /></td>
+                    )}
+                    {visiblePropertyColumnIds.has("documents") && <td><PropertyDocumentAvailability property={property} compact /></td>}
+                    {visiblePropertyColumnIds.has("ownership") && (
+                      <td className="table-cell-ellipsis" title={formatTitolarita(property.titolarita)}>{formatTitolarita(property.titolarita)}</td>
+                    )}
+                    {visiblePropertyColumnIds.has("outcome") && (
+                      <td>
+                        <OutcomeSelect
+                          outcome={property.outcome}
+                          onChange={(outcome) => onOutcomeChange(property.id, outcome)}
+                        />
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -6280,16 +6456,14 @@ function PropertySortHeader({
 }) {
   const active = activeSort === sortKey;
   return (
-    <th aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}>
-      <button className={`sort-header ${active ? "active" : ""}`} onClick={() => onSort(sortKey)}>
-        {label}
-        {active ? (
-          direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-        ) : (
-          <ArrowDownUp size={13} />
-        )}
-      </button>
-    </th>
+    <button className={`sort-header ${active ? "active" : ""}`} onClick={() => onSort(sortKey)}>
+      {label}
+      {active ? (
+        direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+      ) : (
+        <ArrowDownUp size={13} />
+      )}
+    </button>
   );
 }
 
