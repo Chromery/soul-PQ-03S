@@ -380,6 +380,7 @@ export class StudiesService {
       estimatedImu,
       imuDiff: estimatedImu === null || currentImu === null ? 0 : estimatedImu - currentImu,
       imuRateOverride: property.imuRateOverride === null ? null : Number(property.imuRateOverride),
+      imuMultiplierOverride: property.imuMultiplierOverride === null ? null : Number(property.imuMultiplierOverride),
       imuCalculation: estimatedImuCalculation,
       currentImuCalculation: currentImuSource === "calculated" ? currentImuCalculation : null,
       currentImuSource,
@@ -429,8 +430,11 @@ export class StudiesService {
   private calculateImu(
     rendita: number,
     property: (
-      Pick<Property, "categoria" | "comune" | "provincia" | "imuRateOverride">
-      | (Pick<CreatePropertyInput, "categoria" | "comune" | "provincia"> & { imuRateOverride?: null })
+      Pick<Property, "categoria" | "comune" | "provincia" | "imuRateOverride" | "imuMultiplierOverride">
+      | (Pick<CreatePropertyInput, "categoria" | "comune" | "provincia"> & {
+        imuRateOverride?: null;
+        imuMultiplierOverride?: null;
+      })
     ),
     fallbackProvince?: string,
   ) {
@@ -442,6 +446,10 @@ export class StudiesService {
       rateOverridePercent: property.imuRateOverride === null || property.imuRateOverride === undefined
         ? null
         : Number(property.imuRateOverride),
+      cadastralMultiplierOverride:
+        property.imuMultiplierOverride === null || property.imuMultiplierOverride === undefined
+          ? null
+          : Number(property.imuMultiplierOverride),
     });
   }
 }

@@ -138,6 +138,7 @@ type EditorProperty = {
   currentImu?: number | null;
   estimatedImu?: number | null;
   imuRateOverride?: number | null;
+  imuMultiplierOverride?: number | null;
   currentImuCalculation?: PropertyImuCalculation | null;
   imuCalculation?: PropertyImuCalculation | null;
   sheetSize?: SheetSize | null;
@@ -195,8 +196,9 @@ type UploadedPropertyDocument = {
   downloadUrl: string;
 };
 
-type ImuRateUpdate = {
+type ImuOverrideUpdate = {
   imuRateOverride: number | null;
+  imuMultiplierOverride: number | null;
   currentImu: number | null;
   estimatedImu: number | null;
   imuDiff: number;
@@ -479,7 +481,10 @@ type PlanimetriaEditorProps = {
     estimatedImu?: number | null,
     imuCalculation?: PropertyImuCalculation | null,
   ) => void;
-  onImuRateSaved?: (propertyId: string, update: ImuRateUpdate) => void;
+  onImuOverridesSave?: (
+    propertyId: string,
+    patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
+  ) => Promise<ImuOverrideUpdate>;
   onDocumentSaved?: (
     propertyId: string,
     type: "planimetria" | "elenco_subalterni",
@@ -1050,7 +1055,7 @@ export default function PlanimetriaEditor({
   onBack,
   onDirtyChange,
   onDraftSaved,
-  onImuRateSaved,
+  onImuOverridesSave,
   onDocumentSaved,
 }: PlanimetriaEditorProps) {
   const editorRootRef = useRef<HTMLElement | null>(null);
@@ -1140,7 +1145,8 @@ export default function PlanimetriaEditor({
   const [scaleExtractionBusy, setScaleExtractionBusy] = useState(false);
   const [subalterniUploading, setSubalterniUploading] = useState(false);
   const [imuRateInput, setImuRateInput] = useState("");
-  const [imuRateSaving, setImuRateSaving] = useState(false);
+  const [imuMultiplierInput, setImuMultiplierInput] = useState("");
+  const [imuOverrideSaving, setImuOverrideSaving] = useState<"rate" | "multiplier" | null>(null);
   const [revision, setRevision] = useState(0);
 
   useEffect(() => {
@@ -1150,8 +1156,16 @@ export default function PlanimetriaEditor({
         ? property.imuCalculation
         : null;
     const appliedRate = property.imuRateOverride ?? calculation?.ratePercent ?? null;
+    const appliedMultiplier = property.imuMultiplierOverride ?? calculation?.cadastralMultiplier ?? null;
     setImuRateInput(appliedRate === null ? "" : String(appliedRate).replace(".", ","));
-  }, [property.id, property.imuRateOverride, property.currentImuCalculation, property.imuCalculation]);
+    setImuMultiplierInput(appliedMultiplier === null ? "" : String(appliedMultiplier).replace(".", ","));
+  }, [
+    property.id,
+    property.imuRateOverride,
+    property.imuMultiplierOverride,
+    property.currentImuCalculation,
+    property.imuCalculation,
+  ]);
 
   const linkedRemotePlan = useMemo(
     () =>
@@ -1250,7 +1264,12 @@ export default function PlanimetriaEditor({
   const systemImuRate = currentImuCalculation?.systemRatePercent
     ?? estimatedImuRate?.systemRatePercent
     ?? null;
+  const systemImuMultiplier = currentImuCalculation?.systemCadastralMultiplier
+    ?? estimatedImuRate?.systemCadastralMultiplier
+    ?? null;
   const imuRateOverridden = property.imuRateOverride !== null && property.imuRateOverride !== undefined;
+  const imuMultiplierOverridden =
+    property.imuMultiplierOverride !== null && property.imuMultiplierOverride !== undefined;
   const editorEstimatedImu = estimatedImuRate
     ? calculateImuWithRate(totals.rendita, estimatedImuRate)
     : null;
@@ -1812,34 +1831,39 @@ export default function PlanimetriaEditor({
     }
   }
 
-  async function saveImuRateOverride(value: number | null) {
-    setImuRateSaving(true);
-    setStatus(value === null ? "Ripristino aliquota IMU di sistema" : "Salvataggio aliquota IMU manuale");
+  async function saveImuOverride(field: "rate" | "multiplier", value: number | null) {
+    setImuOverrideSaving(field);
+    const isRate = field === "rate";
+    setStatus(value === null
+      ? `Ripristino ${isRate ? "aliquota IMU" : "moltiplicatore catastale"} di sistema`
+      : `Salvataggio ${isRate ? "aliquota IMU" : "moltiplicatore catastale"} manuale`);
     try {
-      const response = await fetch(`${API_BASE_URL}/properties/${encodeURIComponent(property.id)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imuRateOverride: value }),
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null) as { message?: string } | null;
-        throw new Error(payload?.message ?? `HTTP ${response.status}`);
-      }
-      const update = (await response.json()) as ImuRateUpdate;
-      onImuRateSaved?.(property.id, update);
+      if (!onImuOverridesSave) throw new Error("Salvataggio override IMU non disponibile");
+      const update = await onImuOverridesSave(
+        property.id,
+        isRate ? { imuRateOverride: value } : { imuMultiplierOverride: value },
+      );
       const calculation = update.currentImuCalculation?.status === "calculated"
         ? update.currentImuCalculation
         : update.imuCalculation?.status === "calculated"
           ? update.imuCalculation
           : null;
       const appliedRate = update.imuRateOverride ?? calculation?.ratePercent ?? null;
+      const appliedMultiplier = update.imuMultiplierOverride ?? calculation?.cadastralMultiplier ?? null;
       setImuRateInput(appliedRate === null ? "" : String(appliedRate).replace(".", ","));
-      setStatus(value === null ? "Aliquota IMU di sistema ripristinata" : "Aliquota IMU manuale applicata");
+      setImuMultiplierInput(appliedMultiplier === null ? "" : String(appliedMultiplier).replace(".", ","));
+      setStatus(value === null
+        ? isRate
+          ? "Aliquota IMU di sistema ripristinata"
+          : "Moltiplicatore catastale di sistema ripristinato"
+        : isRate
+          ? "Aliquota IMU manuale applicata"
+          : "Moltiplicatore catastale manuale applicato");
     } catch (error) {
       console.error(error);
-      setStatus(error instanceof Error ? error.message : "Salvataggio aliquota IMU non riuscito");
+      setStatus(error instanceof Error ? error.message : "Salvataggio override IMU non riuscito");
     } finally {
-      setImuRateSaving(false);
+      setImuOverrideSaving(null);
     }
   }
 
@@ -1850,7 +1874,17 @@ export default function PlanimetriaEditor({
       setStatus("Inserisci un’aliquota IMU percentuale tra 0 e 10");
       return;
     }
-    void saveImuRateOverride(Math.round(parsed * 10_000) / 10_000);
+    void saveImuOverride("rate", Math.round(parsed * 10_000) / 10_000);
+  }
+
+  function applyImuMultiplierOverride() {
+    const normalized = imuMultiplierInput.trim();
+    const parsed = Number(normalized.replace(",", "."));
+    if (!normalized || !Number.isFinite(parsed) || parsed <= 0 || parsed > 10_000) {
+      setStatus("Inserisci un moltiplicatore catastale maggiore di 0 e non superiore a 10000");
+      return;
+    }
+    void saveImuOverride("multiplier", Math.round(parsed * 10_000) / 10_000);
   }
 
   async function triggerScaleExtraction(data: ArrayBuffer, name: string) {
@@ -7225,7 +7259,7 @@ export default function PlanimetriaEditor({
                       inputMode="decimal"
                       value={imuRateInput}
                       placeholder={systemImuRate === null ? "Es. 1,06" : String(systemImuRate).replace(".", ",")}
-                      disabled={imuRateSaving}
+                      disabled={imuOverrideSaving !== null}
                       onChange={(event) => setImuRateInput(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
@@ -7240,28 +7274,66 @@ export default function PlanimetriaEditor({
                     <button
                       className="button secondary compact-button"
                       type="button"
-                      disabled={imuRateSaving}
+                      disabled={imuOverrideSaving !== null}
                       onClick={applyImuRateOverride}
                     >
-                      {imuRateSaving ? "Salvataggio..." : "Applica"}
+                      {imuOverrideSaving === "rate" ? "Salvataggio..." : "Applica"}
                     </button>
                     {imuRateOverridden && (
                       <button
                         className="inline-reset-button"
                         type="button"
-                        disabled={imuRateSaving}
-                        onClick={() => void saveImuRateOverride(null)}
+                        disabled={imuOverrideSaving !== null}
+                        onClick={() => void saveImuOverride("rate", null)}
                       >
                         Ripristina sistema
                       </button>
                     )}
                   </div>
-                  <small>
-                    Predefinita dal sistema: {systemImuRate === null
-                      ? "non disponibile"
-                      : `${systemImuRate.toLocaleString("it-IT", { maximumFractionDigits: 4 })}%`}
-                    . Il valore predefinito resta conservato anche durante la sovrascrittura.
-                  </small>
+                </div>
+                <div className="editor-imu-rate-control">
+                  <div className="editor-imu-rate-head">
+                    <span>Moltiplicatore catastale</span>
+                    {imuMultiplierOverridden && <span className="manual-override-badge">Manuale</span>}
+                  </div>
+                  <label>
+                    <input
+                      aria-label="Moltiplicatore catastale IMU"
+                      type="text"
+                      inputMode="decimal"
+                      value={imuMultiplierInput}
+                      placeholder={systemImuMultiplier === null ? "Es. 65" : String(systemImuMultiplier).replace(".", ",")}
+                      disabled={imuOverrideSaving !== null}
+                      onChange={(event) => setImuMultiplierInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          applyImuMultiplierOverride();
+                        }
+                      }}
+                    />
+                    <strong>×</strong>
+                  </label>
+                  <div className="editor-imu-rate-actions">
+                    <button
+                      className="button secondary compact-button"
+                      type="button"
+                      disabled={imuOverrideSaving !== null}
+                      onClick={applyImuMultiplierOverride}
+                    >
+                      {imuOverrideSaving === "multiplier" ? "Salvataggio..." : "Applica"}
+                    </button>
+                    {imuMultiplierOverridden && (
+                      <button
+                        className="inline-reset-button"
+                        type="button"
+                        disabled={imuOverrideSaving !== null}
+                        onClick={() => void saveImuOverride("multiplier", null)}
+                      >
+                        Ripristina sistema
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="editor-imu-summary">
                   <span>IMU attuale</span>
@@ -7284,6 +7356,9 @@ export default function PlanimetriaEditor({
                         {currentImuCalculation.rateOverridden
                           ? `Aliquota manuale; predefinita ${currentImuCalculation.systemRatePercent === null ? "non disponibile" : `${currentImuCalculation.systemRatePercent.toLocaleString("it-IT", { maximumFractionDigits: 4 })}%`}`
                           : `Aliquota ${currentImuCalculation.municipality} ${currentImuCalculation.rateYear}${currentImuCalculation.usedFallback ? " (fallback)" : ""}`}
+                        {currentImuCalculation.cadastralMultiplierOverridden
+                          ? ` · moltiplicatore manuale; predefinito ${currentImuCalculation.systemCadastralMultiplier ?? "non disponibile"}`
+                          : ""}
                         {currentImuCalculation.actNumber ? ` · delibera n. ${currentImuCalculation.actNumber}` : ""}
                         {currentImuCalculation.sourceUrl && (
                           <a href={currentImuCalculation.sourceUrl} target="_blank" rel="noreferrer">
@@ -7315,6 +7390,9 @@ export default function PlanimetriaEditor({
                         {estimatedImuRate.rateOverridden
                           ? `Aliquota manuale; predefinita ${estimatedImuRate.systemRatePercent === null ? "non disponibile" : `${estimatedImuRate.systemRatePercent.toLocaleString("it-IT", { maximumFractionDigits: 4 })}%`}`
                           : `Aliquota ${estimatedImuRate.municipality} ${estimatedImuRate.rateYear}${estimatedImuRate.usedFallback ? " (fallback)" : ""}`}
+                        {estimatedImuRate.cadastralMultiplierOverridden
+                          ? ` · moltiplicatore manuale; predefinito ${estimatedImuRate.systemCadastralMultiplier ?? "non disponibile"}`
+                          : ""}
                         {estimatedImuRate.actNumber ? ` · delibera n. ${estimatedImuRate.actNumber}` : ""}
                         {estimatedImuRate.sourceUrl && (
                           <a href={estimatedImuRate.sourceUrl} target="_blank" rel="noreferrer">

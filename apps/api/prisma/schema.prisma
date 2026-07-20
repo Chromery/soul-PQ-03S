@@ -35,35 +35,35 @@ enum VisuraExtractionStatus {
 }
 
 model FeasibilityStudy {
-  id                 String         @id
-  companyErpId       String?
-  company            String
-  vat                String
-  comune             String
-  provincia          String
-  region             String
-  status             String
-  createdAt          DateTime       @db.Date
-  concludedAt        DateTime?      @db.Date
-  deadline           DateTime       @db.Date
-  nextAppointment    DateTime?
-  diffRendita        Decimal        @db.Decimal(12, 2)
-  diffImu            Decimal        @db.Decimal(14, 2)
-  originalRendita    Decimal        @db.Decimal(14, 2)
-  totalRendita       Decimal        @db.Decimal(14, 2)
-  catDRendita        Decimal        @db.Decimal(14, 2)
-  commercialOwner    String
-  technicalOwner     String
-  notes              String
-  erpUrl             String?
-  erpImportedAt      DateTime?
-  erpUpdatedAt       DateTime?
-  sourceSyncId       String?
-  importedAt         DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-  properties         Property[]
-  versions           StudyVersion[]
-  presentations      PresentationDeck[]
+  id              String             @id
+  companyErpId    String?
+  company         String
+  vat             String
+  comune          String
+  provincia       String
+  region          String
+  status          String
+  createdAt       DateTime           @db.Date
+  concludedAt     DateTime?          @db.Date
+  deadline        DateTime           @db.Date
+  nextAppointment DateTime?
+  diffRendita     Decimal            @db.Decimal(12, 2)
+  diffImu         Decimal            @db.Decimal(14, 2)
+  originalRendita Decimal            @db.Decimal(14, 2)
+  totalRendita    Decimal            @db.Decimal(14, 2)
+  catDRendita     Decimal            @db.Decimal(14, 2)
+  commercialOwner String
+  technicalOwner  String
+  notes           String
+  erpUrl          String?
+  erpImportedAt   DateTime?
+  erpUpdatedAt    DateTime?
+  sourceSyncId    String?
+  importedAt      DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  properties      Property[]
+  versions        StudyVersion[]
+  presentations   PresentationDeck[]
 }
 
 model PresentationDeck {
@@ -79,128 +79,129 @@ model PresentationDeck {
 }
 
 model StudyVersion {
-  id                 String              @id @default(cuid())
-  studyId            String
-  versionNumber      Int
-  status             String
-  technicalOwner     String
-  notes              String?
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  study              FeasibilityStudy    @relation(fields: [studyId], references: [id], onDelete: Cascade)
-  analysisDrafts     PlanAnalysisDraft[]
+  id             String              @id @default(cuid())
+  studyId        String
+  versionNumber  Int
+  status         String
+  technicalOwner String
+  notes          String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  study          FeasibilityStudy    @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  analysisDrafts PlanAnalysisDraft[]
 
   @@unique([studyId, versionNumber])
 }
 
 model Property {
-  id                 String              @id
-  studyId            String
-  address            String
-  comune             String
-  provincia          String?
-  ubicazione         String?
-  foglio             String?
-  particella         String?
-  subalterno         String?
-  sezioneCatastale   String?
+  id                    String                @id
+  studyId               String
+  address               String
+  comune                String
+  provincia             String?
+  ubicazione            String?
+  foglio                String?
+  particella            String?
+  subalterno            String?
+  sezioneCatastale      String?
   codiceComuneCatastale String?
   formapsMunicipalityId String?
-  categoria          String
-  titolarita         String?
-  currentRendita     Decimal             @db.Decimal(14, 2)
-  estimatedRendita   Decimal             @db.Decimal(14, 2)
-  diffPercent        Decimal             @db.Decimal(10, 2)
-  currentImu         Decimal?            @db.Decimal(14, 2)
-  estimatedImu       Decimal?            @db.Decimal(14, 2)
-  imuDiff            Decimal             @db.Decimal(14, 2)
-  imuRateOverride    Decimal?            @db.Decimal(7, 4)
-  displayOrder       Int                 @default(0)
-  outcome            String
-  hasStudy           Boolean             @default(false)
-  sheetSize          String?
-  scaleDenominator   Int?
-  scaleSource        String?
-  aiScaleDenominator Int?
-  aiScaleLabel       String?
-  aiSheetSize        String?
-  aiScaleConfidence  Decimal?            @db.Decimal(5, 4)
-  aiScaleDetectedAt  DateTime?
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  study              FeasibilityStudy    @relation(fields: [studyId], references: [id], onDelete: Cascade)
-  documents          PropertyDocument[]
-  analysisDraft      PlanAnalysisDraft?
-  scaleExtractionJobs ScaleExtractionJob[]
-  visuraExtractionJobs VisuraExtractionJob[]
-  priceLists         PropertyPriceList[]
+  categoria             String
+  titolarita            String?
+  currentRendita        Decimal               @db.Decimal(14, 2)
+  estimatedRendita      Decimal               @db.Decimal(14, 2)
+  diffPercent           Decimal               @db.Decimal(10, 2)
+  currentImu            Decimal?              @db.Decimal(14, 2)
+  estimatedImu          Decimal?              @db.Decimal(14, 2)
+  imuDiff               Decimal               @db.Decimal(14, 2)
+  imuRateOverride       Decimal?              @db.Decimal(7, 4)
+  imuMultiplierOverride Decimal?              @db.Decimal(10, 4)
+  displayOrder          Int                   @default(0)
+  outcome               String
+  hasStudy              Boolean               @default(false)
+  sheetSize             String?
+  scaleDenominator      Int?
+  scaleSource           String?
+  aiScaleDenominator    Int?
+  aiScaleLabel          String?
+  aiSheetSize           String?
+  aiScaleConfidence     Decimal?              @db.Decimal(5, 4)
+  aiScaleDetectedAt     DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  study                 FeasibilityStudy      @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  documents             PropertyDocument[]
+  analysisDraft         PlanAnalysisDraft?
+  scaleExtractionJobs   ScaleExtractionJob[]
+  visuraExtractionJobs  VisuraExtractionJob[]
+  priceLists            PropertyPriceList[]
 }
 
 model PropertyDocument {
-  id                 String        @id @default(cuid())
-  propertyId         String
-  type               DocumentType
-  erpDocumentId      String?
-  fileName           String
-  storageKey         String
-  mimeType           String        @default("application/pdf")
-  sha256             String?
-  sizeBytes          Int?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
-  property           Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  scaleExtractionJobs ScaleExtractionJob[]
+  id                   String                @id @default(cuid())
+  propertyId           String
+  type                 DocumentType
+  erpDocumentId        String?
+  fileName             String
+  storageKey           String
+  mimeType             String                @default("application/pdf")
+  sha256               String?
+  sizeBytes            Int?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  property             Property              @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  scaleExtractionJobs  ScaleExtractionJob[]
   visuraExtractionJobs VisuraExtractionJob[]
 
   @@unique([propertyId, type])
 }
 
 model PlanAnalysisDraft {
-  id                    String        @id @default(cuid())
-  propertyId            String        @unique
-  studyVersionId        String?
-  status                DraftStatus   @default(BOZZA)
-  documentSource        Json
-  payload               Json
-  sheetSize             String
-  scaleDenominator      Int
-  scaleSource           String            @default("DEFAULT")
-  aiScaleDenominator    Int?
-  aiScaleLabel          String?
-  aiSheetSize           String?
-  aiScaleConfidence     Decimal?          @db.Decimal(5, 4)
-  aiScaleDetectedAt     DateTime?
-  totalArea             Decimal?      @db.Decimal(16, 2)
-  totalEstimatedValue   Decimal?      @db.Decimal(16, 2)
-  savedAt               DateTime
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
-  property              Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  studyVersion          StudyVersion? @relation(fields: [studyVersionId], references: [id], onDelete: SetNull)
+  id                  String        @id @default(cuid())
+  propertyId          String        @unique
+  studyVersionId      String?
+  status              DraftStatus   @default(BOZZA)
+  documentSource      Json
+  payload             Json
+  sheetSize           String
+  scaleDenominator    Int
+  scaleSource         String        @default("DEFAULT")
+  aiScaleDenominator  Int?
+  aiScaleLabel        String?
+  aiSheetSize         String?
+  aiScaleConfidence   Decimal?      @db.Decimal(5, 4)
+  aiScaleDetectedAt   DateTime?
+  totalArea           Decimal?      @db.Decimal(16, 2)
+  totalEstimatedValue Decimal?      @db.Decimal(16, 2)
+  savedAt             DateTime
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  property            Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  studyVersion        StudyVersion? @relation(fields: [studyVersionId], references: [id], onDelete: SetNull)
 }
 
 model ScaleExtractionJob {
-  id                         String                 @id @default(cuid())
-  propertyId                 String
-  documentId                 String?
-  status                     ScaleExtractionStatus  @default(PENDING)
-  model                      String
-  sourceFileName             String
-  sourceSha256               String?
-  detectedScaleDenominator   Int?
-  detectedScaleLabel         String?
-  detectedSheetSize          String?
-  confidence                 Decimal?               @db.Decimal(5, 4)
-  evidence                   String?
-  warnings                   Json?
-  rawResponse                Json?
-  errorMessage               String?
-  startedAt                  DateTime?
-  completedAt                DateTime?
-  createdAt                  DateTime               @default(now())
-  updatedAt                  DateTime               @updatedAt
-  property                   Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  document                   PropertyDocument?      @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  id                       String                @id @default(cuid())
+  propertyId               String
+  documentId               String?
+  status                   ScaleExtractionStatus @default(PENDING)
+  model                    String
+  sourceFileName           String
+  sourceSha256             String?
+  detectedScaleDenominator Int?
+  detectedScaleLabel       String?
+  detectedSheetSize        String?
+  confidence               Decimal?              @db.Decimal(5, 4)
+  evidence                 String?
+  warnings                 Json?
+  rawResponse              Json?
+  errorMessage             String?
+  startedAt                DateTime?
+  completedAt              DateTime?
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+  property                 Property              @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  document                 PropertyDocument?     @relation(fields: [documentId], references: [id], onDelete: SetNull)
 
   @@index([propertyId, createdAt])
   @@index([documentId])
@@ -208,32 +209,32 @@ model ScaleExtractionJob {
 }
 
 model VisuraExtractionJob {
-  id                  String                 @id @default(cuid())
-  propertyId          String
-  documentId          String?
-  status              VisuraExtractionStatus @default(PENDING)
-  model               String
-  sourceFileName      String
-  sourceSha256        String?
-  extractedProvincia  String?
-  extractedComune     String?
-  extractedFoglio     String?
-  extractedParticella String?
-  extractedSezioneCatastale String?
+  id                             String                 @id @default(cuid())
+  propertyId                     String
+  documentId                     String?
+  status                         VisuraExtractionStatus @default(PENDING)
+  model                          String
+  sourceFileName                 String
+  sourceSha256                   String?
+  extractedProvincia             String?
+  extractedComune                String?
+  extractedFoglio                String?
+  extractedParticella            String?
+  extractedSezioneCatastale      String?
   extractedCodiceComuneCatastale String?
   extractedFormapsMunicipalityId String?
-  extractionMethod    String?
-  confidence          Decimal?               @db.Decimal(5, 4)
-  evidence            String?
-  warnings            Json?
-  rawResponse         Json?
-  errorMessage        String?
-  startedAt           DateTime?
-  completedAt         DateTime?
-  createdAt           DateTime               @default(now())
-  updatedAt           DateTime               @updatedAt
-  property            Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  document            PropertyDocument?      @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  extractionMethod               String?
+  confidence                     Decimal?               @db.Decimal(5, 4)
+  evidence                       String?
+  warnings                       Json?
+  rawResponse                    Json?
+  errorMessage                   String?
+  startedAt                      DateTime?
+  completedAt                    DateTime?
+  createdAt                      DateTime               @default(now())
+  updatedAt                      DateTime               @updatedAt
+  property                       Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  document                       PropertyDocument?      @relation(fields: [documentId], references: [id], onDelete: SetNull)
 
   @@index([propertyId, createdAt])
   @@index([documentId])

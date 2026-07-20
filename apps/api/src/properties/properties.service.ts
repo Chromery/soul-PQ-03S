@@ -166,7 +166,9 @@ export class PropertiesService {
     const input = body as Record<string, unknown>;
     const hasOutcome = Object.prototype.hasOwnProperty.call(input, "outcome");
     const hasImuRateOverride = Object.prototype.hasOwnProperty.call(input, "imuRateOverride");
-    if (!hasOutcome && !hasImuRateOverride) {
+    const hasImuMultiplierOverride = Object.prototype.hasOwnProperty.call(input, "imuMultiplierOverride");
+    const hasImuOverride = hasImuRateOverride || hasImuMultiplierOverride;
+    if (!hasOutcome && !hasImuOverride) {
       throw new BadRequestException("Nessuna modifica immobile supportata");
     }
     const existing = await this.prisma.property.findUnique({
@@ -180,16 +182,22 @@ export class PropertiesService {
       : existing.imuRateOverride === null
         ? null
         : Number(existing.imuRateOverride);
+    const imuMultiplierOverride = hasImuMultiplierOverride
+      ? validateImuMultiplierOverride(input.imuMultiplierOverride)
+      : existing.imuMultiplierOverride === null
+        ? null
+        : Number(existing.imuMultiplierOverride);
     const property = await this.prisma.property.update({
       where: { id: propertyId },
       data: {
         ...(hasOutcome ? { outcome } : {}),
         ...(hasImuRateOverride ? { imuRateOverride } : {}),
+        ...(hasImuMultiplierOverride ? { imuMultiplierOverride } : {}),
       },
     });
-    if (!hasImuRateOverride) return { id: property.id, outcome: property.outcome };
+    if (!hasImuOverride) return { id: property.id, outcome: property.outcome };
 
-    const calculationProperty = { ...property, imuRateOverride };
+    const calculationProperty = { ...property, imuRateOverride, imuMultiplierOverride };
     const estimatedRendita = estimatedRenditaFromAnalysisDraft(existing.analysisDraft)
       ?? Number(property.estimatedRendita);
     const currentImuCalculation = this.calculateImu(Number(property.currentRendita), calculationProperty);
@@ -205,6 +213,7 @@ export class PropertiesService {
       id: property.id,
       outcome: property.outcome,
       imuRateOverride,
+      imuMultiplierOverride,
       currentImu,
       estimatedImu,
       imuDiff: currentImu === null || estimatedImu === null ? 0 : estimatedImu - currentImu,
@@ -389,6 +398,7 @@ export class PropertiesService {
       comune: string;
       provincia: string | null;
       imuRateOverride?: Prisma.Decimal | number | null;
+      imuMultiplierOverride?: Prisma.Decimal | number | null;
     },
   ) {
     return this.imu.calculate({
@@ -399,6 +409,10 @@ export class PropertiesService {
       rateOverridePercent: property.imuRateOverride === null || property.imuRateOverride === undefined
         ? null
         : Number(property.imuRateOverride),
+      cadastralMultiplierOverride:
+        property.imuMultiplierOverride === null || property.imuMultiplierOverride === undefined
+          ? null
+          : Number(property.imuMultiplierOverride),
     });
   }
 
@@ -473,6 +487,15 @@ function validateImuRateOverride(value: unknown) {
   const parsed = typeof value === "number" ? value : Number(String(value).replace(",", "."));
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 10) {
     throw new BadRequestException("Aliquota IMU manuale non valida: usa una percentuale tra 0 e 10");
+  }
+  return Math.round(parsed * 10_000) / 10_000;
+}
+
+function validateImuMultiplierOverride(value: unknown) {
+  if (value === null || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(String(value).replace(",", "."));
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 10_000) {
+    throw new BadRequestException("Moltiplicatore catastale manuale non valido: usa un valore maggiore di 0 e non superiore a 10000");
   }
   return Math.round(parsed * 10_000) / 10_000;
 }

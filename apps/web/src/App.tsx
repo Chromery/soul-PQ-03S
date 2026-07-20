@@ -64,7 +64,7 @@ import { lotValueForArea, normalizeLotValuation } from "./lotValuation";
 import type { LotValuation, LotValuationMode } from "./lotValuation";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.48.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.49.0";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -110,6 +110,7 @@ type PropertyItem = {
   estimatedImu?: number | null;
   imuDiff: number;
   imuRateOverride?: number | null;
+  imuMultiplierOverride?: number | null;
   imuCalculation?: PropertyImuCalculation | null;
   currentImuCalculation?: PropertyImuCalculation | null;
   currentImuSource?: ImuValueSource;
@@ -136,6 +137,18 @@ type PropertyItem = {
     elencoSubalterni?: string | null;
   };
   priceLists?: PriceListItem[];
+};
+
+type PropertyImuOverrideUpdate = {
+  imuRateOverride: number | null;
+  imuMultiplierOverride: number | null;
+  currentImu: number | null;
+  estimatedImu: number | null;
+  imuDiff: number;
+  currentImuCalculation: PropertyImuCalculation | null;
+  imuCalculation: PropertyImuCalculation | null;
+  currentImuSource: ImuValueSource;
+  estimatedImuSource: ImuValueSource;
 };
 
 type FeasibilityStudy = {
@@ -2369,23 +2382,31 @@ function App() {
     );
   }
 
-  function updatePropertyImuRate(
+  async function savePropertyImuOverrides(
     propertyId: string,
-    update: {
-      imuRateOverride: number | null;
-      currentImu: number | null;
-      estimatedImu: number | null;
-      imuDiff: number;
-      currentImuCalculation: PropertyImuCalculation | null;
-      imuCalculation: PropertyImuCalculation | null;
-      currentImuSource: ImuValueSource;
-      estimatedImuSource: ImuValueSource;
-    },
-  ) {
+    patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
+  ): Promise<PropertyImuOverrideUpdate> {
+    const response = await fetch(`${API_BASE_URL}/properties/${encodeURIComponent(propertyId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { message?: string } | null;
+      throw new Error(payload?.message ?? `HTTP ${response.status}`);
+    }
+    const update = (await response.json()) as PropertyImuOverrideUpdate;
     updatePropertyInStudies(propertyId, (property) => ({ ...property, ...update }), true);
-    flash(update.imuRateOverride === null
-      ? "Ripristinata l’aliquota IMU predefinita dal sistema."
-      : "Aliquota IMU manuale salvata e applicata ai calcoli.");
+    if (Object.prototype.hasOwnProperty.call(patch, "imuMultiplierOverride")) {
+      flash(update.imuMultiplierOverride === null
+        ? "Ripristinato il moltiplicatore catastale di sistema."
+        : "Moltiplicatore catastale manuale salvato e applicato ai calcoli.");
+    } else {
+      flash(update.imuRateOverride === null
+        ? "Ripristinata l’aliquota IMU predefinita dal sistema."
+        : "Aliquota IMU manuale salvata e applicata ai calcoli.");
+    }
+    return update;
   }
 
   async function createStudyFromPq(form: NewStudyFormState) {
@@ -2698,7 +2719,7 @@ function App() {
             onBack={() => navigate({ view: "study", studyId: editorStudy.id })}
             onDirtyChange={setEditorDirty}
             onDraftSaved={updatePropertyEstimatedValue}
-            onImuRateSaved={updatePropertyImuRate}
+            onImuOverridesSave={savePropertyImuOverrides}
             onDocumentSaved={updatePropertyDocument}
           />
         </Suspense>
@@ -2725,6 +2746,7 @@ function App() {
           onCreateProperty={(form) => createPropertyForStudy(activeStudy.id, form)}
           onDeleteProperties={(propertyIds) => deletePropertiesFromStudy(activeStudy.id, propertyIds)}
           onPropertyEstimateChange={updatePropertyEstimatedValue}
+          onImuOverridesSave={savePropertyImuOverrides}
           onOutcomeChange={updatePropertyOutcome}
           onOpenEditor={(property) =>
             navigate({ view: "editor", studyId: activeStudy.id, propertyId: property.id })
@@ -5031,6 +5053,7 @@ function StudyDetail({
   onCreateProperty,
   onDeleteProperties,
   onPropertyEstimateChange,
+  onImuOverridesSave,
   onOutcomeChange,
 }: {
   study: FeasibilityStudy;
@@ -5048,6 +5071,10 @@ function StudyDetail({
     estimatedImu?: number | null,
     imuCalculation?: PropertyImuCalculation | null,
   ) => void;
+  onImuOverridesSave: (
+    propertyId: string,
+    patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
+  ) => Promise<PropertyImuOverrideUpdate>;
   onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
 }) {
   const counts = getCounts(study);
@@ -5480,6 +5507,7 @@ function StudyDetail({
           canOpenForMaps={Boolean(toForMapsEntry(propertyForMapsPayload(activeProperty)))}
           onOpenForMaps={() => openPropertyInForMaps(activeProperty)}
           onOpenDocument={(type) => handleOpenDocument(activeProperty, type)}
+          onImuOverridesSave={onImuOverridesSave}
           onMissing={onNotice}
           onClose={() => setActivePropertyId(null)}
         />
@@ -5568,6 +5596,7 @@ function PropertyAreaDetail({
   canOpenForMaps,
   onOpenForMaps,
   onOpenDocument,
+  onImuOverridesSave,
   onMissing,
   onClose,
 }: {
@@ -5578,6 +5607,10 @@ function PropertyAreaDetail({
   canOpenForMaps: boolean;
   onOpenForMaps: () => void;
   onOpenDocument: (type: PropertyDocumentKind) => void;
+  onImuOverridesSave: (
+    propertyId: string,
+    patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
+  ) => Promise<PropertyImuOverrideUpdate>;
   onMissing: (message: string) => void;
   onClose: () => void;
 }) {
@@ -5955,7 +5988,7 @@ function PropertyAreaDetail({
           </details>
         )}
 
-        <ImuCalculationBreakdown property={property} />
+        <ImuCalculationBreakdown property={property} onImuOverridesSave={onImuOverridesSave} />
 
         {!draft && draftState.loading ? (
           <div className="property-area-empty">
@@ -6318,7 +6351,16 @@ function ImuCurrent({ property }: { property: PropertyItem }) {
   );
 }
 
-function ImuCalculationBreakdown({ property }: { property: PropertyItem }) {
+function ImuCalculationBreakdown({
+  property,
+  onImuOverridesSave,
+}: {
+  property: PropertyItem;
+  onImuOverridesSave: (
+    propertyId: string,
+    patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
+  ) => Promise<PropertyImuOverrideUpdate>;
+}) {
   const calculation = property.imuCalculation;
   const currentCalculation = property.currentImuCalculation;
   const currentImuSource = property.currentImuSource
@@ -6402,6 +6444,13 @@ function ImuCalculationBreakdown({ property }: { property: PropertyItem }) {
         </div>
       )}
 
+      <ImuOverrideControls
+        property={property}
+        calculation={calculation}
+        contextLabel="IMU prevista"
+        onSave={onImuOverridesSave}
+      />
+
       <div className="imu-current-source">
         <div>
           <span>IMU attuale</span>
@@ -6414,6 +6463,13 @@ function ImuCalculationBreakdown({ property }: { property: PropertyItem }) {
               ? "Dato registrato nell’ERP o inserito manualmente: PQ non lo ha ricalcolato."
               : "Né il dato registrato né un’aliquota calcolabile sono disponibili."}
         </p>
+        <ImuOverrideControls
+          property={property}
+          calculation={currentCalculation}
+          contextLabel="IMU attuale"
+          onSave={onImuOverridesSave}
+          compact
+        />
         {currentImuSource === "calculated" && currentCalculation?.status === "calculated" && (
           <details>
             <summary>Mostra formula IMU attuale</summary>
@@ -6423,6 +6479,173 @@ function ImuCalculationBreakdown({ property }: { property: PropertyItem }) {
       </div>
     </section>
   );
+}
+
+function ImuOverrideControls({
+  property,
+  calculation,
+  contextLabel,
+  onSave,
+  compact = false,
+}: {
+  property: PropertyItem;
+  calculation: PropertyImuCalculation | null | undefined;
+  contextLabel: string;
+  onSave: (
+    propertyId: string,
+    patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
+  ) => Promise<PropertyImuOverrideUpdate>;
+  compact?: boolean;
+}) {
+  const calculated = calculation?.status === "calculated" ? calculation : null;
+  const [rateInput, setRateInput] = useState("");
+  const [multiplierInput, setMultiplierInput] = useState("");
+  const [savingField, setSavingField] = useState<"rate" | "multiplier" | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const rate = property.imuRateOverride ?? calculated?.ratePercent ?? null;
+    const multiplier = property.imuMultiplierOverride ?? calculated?.cadastralMultiplier ?? null;
+    setRateInput(rate === null ? "" : formatImuOverrideInput(rate));
+    setMultiplierInput(multiplier === null ? "" : formatImuOverrideInput(multiplier));
+    setError("");
+  }, [
+    property.id,
+    property.imuRateOverride,
+    property.imuMultiplierOverride,
+    calculated?.ratePercent,
+    calculated?.cadastralMultiplier,
+  ]);
+
+  async function saveOverride(field: "rate" | "multiplier", value: number | null) {
+    setSavingField(field);
+    setError("");
+    try {
+      await onSave(
+        property.id,
+        field === "rate" ? { imuRateOverride: value } : { imuMultiplierOverride: value },
+      );
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Salvataggio override IMU non riuscito");
+    } finally {
+      setSavingField(null);
+    }
+  }
+
+  function applyRate() {
+    const parsed = parseImuOverrideInput(rateInput);
+    if (parsed === null || parsed < 0 || parsed > 10) {
+      setError("Inserisci un’aliquota percentuale tra 0 e 10");
+      return;
+    }
+    void saveOverride("rate", parsed);
+  }
+
+  function applyMultiplier() {
+    const parsed = parseImuOverrideInput(multiplierInput);
+    if (parsed === null || parsed <= 0 || parsed > 10_000) {
+      setError("Inserisci un moltiplicatore maggiore di 0 e non superiore a 10000");
+      return;
+    }
+    void saveOverride("multiplier", parsed);
+  }
+
+  return (
+    <div className={`imu-override-controls ${compact ? "compact" : ""}`} aria-label={`Override ${contextLabel}`}>
+      <div className="imu-override-field">
+        <div>
+          <span>Aliquota IMU</span>
+          {property.imuRateOverride !== null && property.imuRateOverride !== undefined && (
+            <span className="manual-override-badge">Manuale</span>
+          )}
+        </div>
+        <label>
+          <input
+            aria-label={`Aliquota percentuale ${contextLabel}`}
+            inputMode="decimal"
+            value={rateInput}
+            disabled={savingField !== null}
+            onChange={(event) => setRateInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                applyRate();
+              }
+            }}
+          />
+          <strong>%</strong>
+        </label>
+        <div className="imu-override-actions">
+          <button type="button" disabled={savingField !== null} onClick={applyRate}>
+            {savingField === "rate" ? "Salvataggio..." : "Applica"}
+          </button>
+          {property.imuRateOverride !== null && property.imuRateOverride !== undefined && (
+            <button type="button" disabled={savingField !== null} onClick={() => void saveOverride("rate", null)}>
+              Ripristina
+            </button>
+          )}
+        </div>
+        <small>
+          Sistema: {calculated?.systemRatePercent === null || calculated?.systemRatePercent === undefined
+            ? "non disponibile"
+            : formatImuRate(calculated.systemRatePercent)}
+        </small>
+      </div>
+
+      <div className="imu-override-field">
+        <div>
+          <span>Moltiplicatore catastale</span>
+          {property.imuMultiplierOverride !== null && property.imuMultiplierOverride !== undefined && (
+            <span className="manual-override-badge">Manuale</span>
+          )}
+        </div>
+        <label>
+          <input
+            aria-label={`Moltiplicatore catastale ${contextLabel}`}
+            inputMode="decimal"
+            value={multiplierInput}
+            disabled={savingField !== null}
+            onChange={(event) => setMultiplierInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                applyMultiplier();
+              }
+            }}
+          />
+          <strong>×</strong>
+        </label>
+        <div className="imu-override-actions">
+          <button type="button" disabled={savingField !== null} onClick={applyMultiplier}>
+            {savingField === "multiplier" ? "Salvataggio..." : "Applica"}
+          </button>
+          {property.imuMultiplierOverride !== null && property.imuMultiplierOverride !== undefined && (
+            <button type="button" disabled={savingField !== null} onClick={() => void saveOverride("multiplier", null)}>
+              Ripristina
+            </button>
+          )}
+        </div>
+        <small>
+          Sistema: {calculated?.systemCadastralMultiplier === null
+            || calculated?.systemCadastralMultiplier === undefined
+            ? "non disponibile"
+            : formatImuOverrideInput(calculated.systemCadastralMultiplier)}
+        </small>
+      </div>
+      {error && <p className="imu-override-error">{error}</p>}
+    </div>
+  );
+}
+
+function parseImuOverrideInput(value: string) {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  const parsed = Number(normalized.replace(",", "."));
+  return Number.isFinite(parsed) ? Math.round(parsed * 10_000) / 10_000 : null;
+}
+
+function formatImuOverrideInput(value: number) {
+  return value.toLocaleString("it-IT", { maximumFractionDigits: 4, useGrouping: false });
 }
 
 function ImuFormulaSteps({
@@ -6437,11 +6660,20 @@ function ImuFormulaSteps({
   return (
     <div className={`imu-formula-steps ${compact ? "compact" : ""}`}>
       <div>
-        <span>1. Base imponibile</span>
+        <span>
+          1. Base imponibile
+          {calculation.cadastralMultiplierOverridden && <em className="manual-override-badge">Manuale</em>}
+        </span>
         <code>
           {formatEuro(rendita)} × 1,05 × {calculation.cadastralMultiplier} = {formatEuro(calculation.taxableBase)}
         </code>
-        {!compact && <small>Rendita × rivalutazione del 5% × moltiplicatore della categoria catastale.</small>}
+        {!compact && (
+          <small>
+            {calculation.cadastralMultiplierOverridden
+              ? `Rendita × rivalutazione del 5% × moltiplicatore manuale; valore di sistema conservato: ${calculation.systemCadastralMultiplier ?? "non disponibile"}.`
+              : "Rendita × rivalutazione del 5% × moltiplicatore della categoria catastale."}
+          </small>
+        )}
       </div>
       <div>
         <span>2. Imposta annua</span>
@@ -6481,6 +6713,9 @@ function imuUnavailableReason(reason?: Extract<PropertyImuCalculation, { status:
 function imuFormulaText(rendita: number, calculation: Extract<PropertyImuCalculation, { status: "calculated" }>) {
   return `${formatEuro(rendita)} × 1,05 × ${calculation.cadastralMultiplier} = ${formatEuro(calculation.taxableBase)}; `
     + `${formatEuro(calculation.taxableBase)} × ${formatImuRate(calculation.ratePercent)} = ${formatEuro(calculation.amount)}`
+    + (calculation.cadastralMultiplierOverridden
+      ? `; moltiplicatore manuale, predefinito ${calculation.systemCadastralMultiplier ?? "non disponibile"}`
+      : "")
     + (calculation.rateOverridden
       ? `; aliquota manuale, predefinita ${calculation.systemRatePercent === null ? "non disponibile" : formatImuRate(calculation.systemRatePercent)}`
       : "");

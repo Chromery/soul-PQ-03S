@@ -76,6 +76,8 @@ test("applica l'aliquota manuale conservando quella comunale di sistema", () => 
   assert.equal(result.status, "calculated");
   if (result.status !== "calculated") return;
   assert.equal(result.cadastralMultiplier, 65);
+  assert.equal(result.systemCadastralMultiplier, 65);
+  assert.equal(result.cadastralMultiplierOverridden, false);
   assert.equal(result.systemRatePercent, 1.06);
   assert.equal(result.ratePercent, 0.92);
   assert.equal(result.rateOverridden, true);
@@ -96,6 +98,39 @@ test("consente un'aliquota manuale anche quando non esiste un valore comunale st
   assert.equal(result.ratePercent, 1);
   assert.equal(result.rateOverridden, true);
   assert.equal(result.amount, 577.5);
+});
+
+test("applica un moltiplicatore manuale conservando quello ufficiale della categoria", () => {
+  const result = new ImuCalculator(records).calculate({
+    rendita: 1_000,
+    categoria: "ZONA1CAT.D/7",
+    comune: "Comune Nuovo",
+    provincia: "MI",
+    cadastralMultiplierOverride: 70,
+  });
+  assert.equal(result.status, "calculated");
+  if (result.status !== "calculated") return;
+  assert.equal(result.systemCadastralMultiplier, 65);
+  assert.equal(result.cadastralMultiplier, 70);
+  assert.equal(result.cadastralMultiplierOverridden, true);
+  assert.equal(result.taxableBase, 73_500);
+  assert.equal(result.amount, 779.1);
+});
+
+test("consente un moltiplicatore manuale per una categoria senza coefficiente ufficiale", () => {
+  const result = new ImuCalculator(records).calculate({
+    rendita: 1_000,
+    categoria: "F/1",
+    comune: "Comune Test",
+    provincia: "MI",
+    cadastralMultiplierOverride: 100,
+  });
+  assert.equal(result.status, "calculated");
+  if (result.status !== "calculated") return;
+  assert.equal(result.systemCadastralMultiplier, null);
+  assert.equal(result.cadastralMultiplier, 100);
+  assert.equal(result.cadastralMultiplierOverridden, true);
+  assert.equal(result.amount, 1_008);
 });
 
 function rateRecord(overrides: Partial<ImuRateRecord>): ImuRateRecord {

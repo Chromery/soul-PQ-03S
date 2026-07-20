@@ -4,6 +4,8 @@ export type PropertyImuCalculation =
       amount: number;
       taxableBase: number;
       cadastralMultiplier: number;
+      systemCadastralMultiplier: number | null;
+      cadastralMultiplierOverridden: boolean;
       ratePercent: number;
       systemRatePercent: number | null;
       rateOverridden: boolean;

@@ -34,6 +34,7 @@ test("salva e ripristina l'aliquota IMU manuale conservando il valore comunale",
     currentImu: null,
     estimatedImu: null,
     imuRateOverride: null as number | null,
+    imuMultiplierOverride: null as number | null,
     hasStudy: true,
     analysisDraft: null,
   };
@@ -61,19 +62,37 @@ test("salva e ripristina l'aliquota IMU manuale conservando il valore comunale",
     {} as never,
   );
 
-  const overridden = await service.updateProperty("I-1", { imuRateOverride: "0,9" });
+  const overridden = await service.updateProperty("I-1", {
+    imuRateOverride: "0,9",
+    imuMultiplierOverride: "70",
+  });
   assert.equal(overridden.imuRateOverride, 0.9);
-  assert.equal(overridden.currentImu, 614.25);
-  assert.equal(overridden.estimatedImu, 1_228.5);
+  assert.equal(overridden.imuMultiplierOverride, 70);
+  assert.equal(overridden.currentImu, 661.5);
+  assert.equal(overridden.estimatedImu, 1_323);
   assert.equal(overridden.currentImuCalculation?.status, "calculated");
   if (overridden.currentImuCalculation?.status === "calculated") {
     assert.equal(overridden.currentImuCalculation.rateOverridden, true);
     assert.equal(overridden.currentImuCalculation.ratePercent, 0.9);
     assert.equal(overridden.currentImuCalculation.systemRatePercent, 1.06);
+    assert.equal(overridden.currentImuCalculation.cadastralMultiplier, 70);
+    assert.equal(overridden.currentImuCalculation.systemCadastralMultiplier, 65);
+    assert.equal(overridden.currentImuCalculation.cadastralMultiplierOverridden, true);
+  }
+
+  const restoredMultiplier = await service.updateProperty("I-1", { imuMultiplierOverride: null });
+  assert.equal(restoredMultiplier.imuRateOverride, 0.9);
+  assert.equal(restoredMultiplier.imuMultiplierOverride, null);
+  assert.equal(restoredMultiplier.currentImu, 614.25);
+  if (restoredMultiplier.currentImuCalculation?.status === "calculated") {
+    assert.equal(restoredMultiplier.currentImuCalculation.rateOverridden, true);
+    assert.equal(restoredMultiplier.currentImuCalculation.cadastralMultiplierOverridden, false);
+    assert.equal(restoredMultiplier.currentImuCalculation.cadastralMultiplier, 65);
   }
 
   const restored = await service.updateProperty("I-1", { imuRateOverride: null });
   assert.equal(restored.imuRateOverride, null);
+  assert.equal(restored.imuMultiplierOverride, null);
   assert.equal(restored.currentImu, 723.45);
   assert.equal(restored.estimatedImu, 1_446.9);
   assert.equal(restored.currentImuCalculation?.status, "calculated");
@@ -82,5 +101,5 @@ test("salva e ripristina l'aliquota IMU manuale conservando il valore comunale",
     assert.equal(restored.currentImuCalculation.ratePercent, 1.06);
     assert.equal(restored.currentImuCalculation.systemRatePercent, 1.06);
   }
-  assert.equal(studyUpdates.length, 2);
+  assert.equal(studyUpdates.length, 3);
 });

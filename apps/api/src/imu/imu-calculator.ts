@@ -21,17 +21,24 @@ export class ImuCalculator {
     const targetYear = input.targetYear ?? DEFAULT_IMU_YEAR;
     const categoria = normalizeCadastralCategory(input.categoria);
     const rateOverride = input.rateOverridePercent ?? null;
+    const multiplierOverride = input.cadastralMultiplierOverride ?? null;
     if (
       !Number.isFinite(input.rendita)
       || input.rendita < 0
       || !categoria
       || !input.comune.trim()
       || (rateOverride !== null && (!Number.isFinite(rateOverride) || rateOverride < 0 || rateOverride > 10))
+      || (multiplierOverride !== null
+        && (!Number.isFinite(multiplierOverride) || multiplierOverride <= 0 || multiplierOverride > 10_000))
     ) {
       return { status: "unavailable", reason: "invalid_input", targetYear };
     }
 
-    const cadastralMultiplier = cadastralMultiplierForCategory(categoria);
+    const systemCadastralMultiplier = cadastralMultiplierForCategory(categoria);
+    if (systemCadastralMultiplier === null && multiplierOverride === null) {
+      return { status: "unavailable", reason: "category_not_supported", targetYear };
+    }
+    const cadastralMultiplier = multiplierOverride ?? systemCadastralMultiplier;
     if (cadastralMultiplier === null) {
       return { status: "unavailable", reason: "category_not_supported", targetYear };
     }
@@ -64,6 +71,8 @@ export class ImuCalculator {
       amount,
       taxableBase,
       cadastralMultiplier,
+      systemCadastralMultiplier,
+      cadastralMultiplierOverridden: multiplierOverride !== null,
       ratePercent: appliedRate,
       systemRatePercent: rateSelection.rate,
       rateOverridden: rateOverride !== null,

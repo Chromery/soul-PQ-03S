@@ -2862,6 +2862,107 @@ a.button {
   border-color: var(--primary);
 }
 
+.imu-override-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dce9f8;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.imu-override-controls.compact {
+  margin: 10px 0 0;
+  background: #fbfdff;
+}
+
+.imu-override-field {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 9px;
+  align-items: center;
+}
+
+.imu-override-field > div:first-child {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.imu-override-field label {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.imu-override-field input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid #cddbeb;
+  border-radius: 7px;
+  color: var(--text);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.imu-override-field label strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.imu-override-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.imu-override-actions button {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid #c9d9ec;
+  border-radius: 6px;
+  color: #173154;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.imu-override-actions button:hover:not(:disabled) {
+  color: var(--primary);
+  border-color: #9fc5f5;
+  background: #f2f7ff;
+}
+
+.imu-override-field > small {
+  grid-column: 1 / -1;
+}
+
+.imu-override-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #b42318;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.imu-formula-steps span .manual-override-badge {
+  margin-left: 7px;
+  font-style: normal;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
 .imu-calculation-assumption {
   margin: 10px 2px 0;
   color: #64748b;
@@ -6215,7 +6316,8 @@ a.button {
   }
 
   .imu-formula-steps,
-  .imu-calculation-source {
+  .imu-calculation-source,
+  .imu-override-controls {
     grid-template-columns: 1fr;
   }
 

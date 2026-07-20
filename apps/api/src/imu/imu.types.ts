@@ -21,6 +21,8 @@ export type ImuCalculation =
       amount: number;
       taxableBase: number;
       cadastralMultiplier: number;
+      systemCadastralMultiplier: number | null;
+      cadastralMultiplierOverridden: boolean;
       ratePercent: number;
       systemRatePercent: number | null;
       rateOverridden: boolean;
@@ -49,4 +51,5 @@ export type ImuCalculationInput = {
   provincia?: string | null;
   targetYear?: number;
   rateOverridePercent?: number | null;
+  cadastralMultiplierOverride?: number | null;
 };
