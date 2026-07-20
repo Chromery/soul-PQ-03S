@@ -45,7 +45,7 @@ The backup container creates a dump every day at `BACKUP_TIME_LOCAL` in `BACKUP_
 
 `Property` stores real estate assets linked to a study and their current/prospected rendita and analysis outcome.
 
-`PropertyDocument` stores the metadata and future object-storage key for one `PLANIMETRIA` and one `VISURA` per property.
+`PropertyDocument` stores metadata and object-storage keys for one `PLANIMETRIA`, one `VISURA`, and one `ELENCO_SUBALTERNI` per property. The `(propertyId, type)` unique key keeps each document type singular and allows idempotent replacement.
 
 `StudyVersion` establishes the versioning boundary for technical analysis revisions.
 

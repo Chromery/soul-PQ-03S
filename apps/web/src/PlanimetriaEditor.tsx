@@ -5,6 +5,7 @@ import pdfWorker from "pdfjs-dist/build/pdf.worker.js?url";
 import {
   ArrowLeft,
   Building2,
+  ClipboardList,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -149,10 +150,12 @@ type EditorProperty = {
   documents: {
     planimetria: string;
     visura: string;
+    elencoSubalterni?: string;
   };
   documentUrls?: {
     planimetria?: string | null;
     visura?: string | null;
+    elencoSubalterni?: string | null;
   };
   priceLists?: EditorPriceList[];
 };
@@ -183,7 +186,7 @@ type ScaleExtractionJob = {
 type UploadedPropertyDocument = {
   id: string;
   propertyId: string;
-  type: "planimetria" | "visura";
+  type: "planimetria" | "visura" | "elenco_subalterni";
   fileName: string;
   mimeType: string;
   sha256: string | null;
@@ -464,7 +467,12 @@ type PlanimetriaEditorProps = {
     estimatedImu?: number | null,
     imuCalculation?: PropertyImuCalculation | null,
   ) => void;
-  onDocumentSaved?: (propertyId: string, fileName: string, downloadUrl: string) => void;
+  onDocumentSaved?: (
+    propertyId: string,
+    type: "planimetria" | "elenco_subalterni",
+    fileName: string,
+    downloadUrl: string,
+  ) => void;
 };
 
 const USAGES: UsageDefinition[] = [
@@ -1038,6 +1046,7 @@ export default function PlanimetriaEditor({
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasShellRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const subalterniInputRef = useRef<HTMLInputElement | null>(null);
   const runtimeRef = useRef<Runtime>(createRuntime());
   const pendingDraftRef = useRef<SavedDraft | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
@@ -1115,6 +1124,7 @@ export default function PlanimetriaEditor({
   const [clipboardCount, setClipboardCount] = useState(0);
   const [scaleExtractionJob, setScaleExtractionJob] = useState<ScaleExtractionJob | null>(null);
   const [scaleExtractionBusy, setScaleExtractionBusy] = useState(false);
+  const [subalterniUploading, setSubalterniUploading] = useState(false);
   const [revision, setRevision] = useState(0);
 
   const linkedRemotePlan = useMemo(
@@ -1724,7 +1734,7 @@ export default function PlanimetriaEditor({
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const uploaded = (await response.json()) as UploadedPropertyDocument;
       setDocumentSource({ kind: "remote", fileName: uploaded.fileName, url: uploaded.downloadUrl });
-      onDocumentSaved?.(property.id, uploaded.fileName, uploaded.downloadUrl);
+      onDocumentSaved?.(property.id, "planimetria", uploaded.fileName, uploaded.downloadUrl);
       markDirty();
       setStatus("Planimetria salvata nello storage documentale");
       return uploaded;
@@ -1732,6 +1742,43 @@ export default function PlanimetriaEditor({
       console.error(error);
       setStatus("Planimetria caricata localmente; salvataggio storage non riuscito");
       return null;
+    }
+  }
+
+  async function uploadElencoSubalterni(file: File | undefined) {
+    if (!file) return;
+    const name = file.name || "elenco-subalterni.pdf";
+    if (file.type && file.type !== "application/pdf" && !name.toLowerCase().endsWith(".pdf")) {
+      setStatus("Seleziona un PDF per l'elenco subalterni");
+      if (subalterniInputRef.current) subalterniInputRef.current.value = "";
+      return;
+    }
+    setSubalterniUploading(true);
+    setStatus("Salvataggio elenco subalterni nello storage");
+    try {
+      const data = await file.arrayBuffer();
+      const response = await fetch(
+        `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/documents/elenco_subalterni`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            file_name: name,
+            file_base64: `data:application/pdf;base64,${arrayBufferToBase64(data)}`,
+            mime_type: "application/pdf",
+          }),
+        },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const uploaded = (await response.json()) as UploadedPropertyDocument;
+      onDocumentSaved?.(property.id, "elenco_subalterni", uploaded.fileName, uploaded.downloadUrl);
+      setStatus("Elenco subalterni salvato nello storage documentale");
+    } catch (error) {
+      console.error(error);
+      setStatus("Salvataggio elenco subalterni non riuscito");
+    } finally {
+      setSubalterniUploading(false);
+      if (subalterniInputRef.current) subalterniInputRef.current.value = "";
     }
   }
 
@@ -5968,6 +6015,36 @@ export default function PlanimetriaEditor({
               <Upload size={17} />
               Carica planimetria
             </button>
+            <div className="editor-map-actions editor-document-actions" aria-label="Documento elenco subalterni">
+              <span>Subalterni</span>
+              <button
+                className="button secondary compact-button"
+                type="button"
+                disabled={subalterniUploading}
+                onClick={() => subalterniInputRef.current?.click()}
+              >
+                <Upload size={15} />
+                {subalterniUploading ? "Caricamento..." : "Carica PDF"}
+              </button>
+              <button
+                className="button secondary compact-button"
+                type="button"
+                disabled={!property.documentUrls?.elencoSubalterni}
+                title={
+                  property.documentUrls?.elencoSubalterni
+                    ? "Apri elenco subalterni PDF in una nuova scheda"
+                    : "Elenco subalterni PDF non disponibile"
+                }
+                onClick={() => {
+                  if (property.documentUrls?.elencoSubalterni) {
+                    window.open(property.documentUrls.elencoSubalterni, "_blank", "noopener,noreferrer");
+                  }
+                }}
+              >
+                <ClipboardList size={15} />
+                Apri PDF
+              </button>
+            </div>
             <div className="editor-map-actions" aria-label={`Apri indirizzo ${propertyLocation(property)} in mappe`}>
               <span>Apri in</span>
               <button
@@ -6018,6 +6095,13 @@ export default function PlanimetriaEditor({
         accept="application/pdf"
         hidden
         onChange={(event) => void loadPdfFile(event.target.files?.[0])}
+      />
+      <input
+        ref={subalterniInputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        hidden
+        onChange={(event) => void uploadElencoSubalterni(event.target.files?.[0])}
       />
 
       <section

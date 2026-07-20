@@ -336,6 +336,7 @@ export class StudiesService {
       property.documents.find((document) => document.type === DocumentType.PLANIMETRIA)
       ?? property.documents.find((document) => document.type === DocumentType.ELABORATO_PLANIMETRICO);
     const visura = property.documents.find((document) => document.type === DocumentType.VISURA);
+    const elencoSubalterni = property.documents.find((document) => document.type === DocumentType.ELENCO_SUBALTERNI);
     const currentRendita = Number(property.currentRendita);
     const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft) ?? Number(property.estimatedRendita);
     const currentImuCalculation = this.calculateImu(currentRendita, property);
@@ -396,10 +397,12 @@ export class StudiesService {
       documents: {
         planimetria: planimetria?.fileName ?? "",
         visura: visura?.fileName ?? "",
+        elencoSubalterni: elencoSubalterni?.fileName ?? "",
       },
       documentUrls: {
         planimetria: documentDownloadUrl(property.id, "planimetria", planimetria),
         visura: documentDownloadUrl(property.id, "visura", visura),
+        elencoSubalterni: documentDownloadUrl(property.id, "elenco_subalterni", elencoSubalterni),
       },
       priceLists: property.priceLists
         .sort((a, b) => a.rank - b.rank)
@@ -453,7 +456,11 @@ function normalizePropertyOutcome(value: string | null | undefined) {
   return "Neutro";
 }
 
-function documentDownloadUrl(propertyId: string, type: "planimetria" | "visura", document?: PropertyDocument) {
+function documentDownloadUrl(
+  propertyId: string,
+  type: "planimetria" | "visura" | "elenco_subalterni",
+  document?: PropertyDocument,
+) {
   if (!document || document.storageKey.startsWith("demo/")) return null;
   return `/api/properties/${encodeURIComponent(propertyId)}/documents/${type}/download`;
 }

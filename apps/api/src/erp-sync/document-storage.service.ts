@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import type { GetObjectCommandOutput } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -66,6 +66,15 @@ export class DocumentStorageService {
 
   async readPdfObject(storageKey: string) {
     return this.readObject(storageKey, "application/pdf");
+  }
+
+  async deleteObject(storageKey: string) {
+    await this.client().send(
+      new DeleteObjectCommand({
+        Bucket: this.requireBucket(),
+        Key: storageKey,
+      }),
+    );
   }
 
   async readObject(storageKey: string, fallbackContentType = "application/octet-stream") {

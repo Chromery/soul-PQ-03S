@@ -1,6 +1,6 @@
 # ERP/PQ Sync API Spec
 
-Versione proposta: `v1.1`
+Versione: `v1.2` (estensione retrocompatibile del path `/v1`)
 
 Questo documento definisce il contratto minimo di integrazione tra ERP Soul e Soul Prospect Qualifier (`PQ`).
 
@@ -13,6 +13,8 @@ PQ espone API server-to-server chiamate dall'ERP. L'autenticazione utenti intern
 - Gli upload documento non usano piu presigned URL e conferma successiva: l'ERP invia i PDF in base64 nello stesso `POST /studi/sync`; PQ salva i file su Backblaze B2 tramite API S3-compatible.
 - Non esiste push PQ verso ERP in questa fase: quando l'ERP vuole aggiornarsi, chiama un endpoint PQ di pull delle ultime modifiche.
 - Gli endpoint sono ridotti a quelli strettamente necessari alla sincronizzazione.
+- Dalla v1.2 ogni immobile puo includere un PDF opzionale `elenco_subalterni`.
+  L'endpoint di sync, i campi esistenti e i payload senza questo documento non cambiano.
 
 ## Convenzioni
 
@@ -133,6 +135,13 @@ Request:
               "file_nome": "planimetria_162502.pdf",
               "mime_type": "application/pdf",
               "file_base64": "JVBERi0xLjQKJ..."
+            },
+            {
+              "tipo": "elenco_subalterni",
+              "documento_erp_id": "DOC-993",
+              "file_nome": "elenco_subalterni_162502.pdf",
+              "mime_type": "application/pdf",
+              "file_base64": "JVBERi0xLjQKJ..."
             }
           ]
         }
@@ -157,7 +166,7 @@ Response `200 OK`:
       "studio_erp_id": "SF-47824-2026-001",
       "azione": "created",
       "immobili_upserted": 1,
-      "documenti_salvati": 2,
+      "documenti_salvati": 3,
       "visure_estratte": 0,
       "visure_in_coda": 1,
       "visure_errori": []
@@ -176,6 +185,7 @@ Regole:
 - `file_base64` puo essere una stringa base64 pura o una data URL `data:application/pdf;base64,...`.
 - Se viene passato `sha256`, PQ lo verifica sul file decodificato.
 - PQ salva i file nel bucket Backblaze B2 configurato e registra `storage_key`, `sha256` e dimensione.
+- Per ogni immobile esiste al massimo un documento per tipo. Reinviare `elenco_subalterni` sostituisce il record corrente senza creare duplicati.
 - `storage_key` e la object key nel bucket S3/B2, non un percorso filesystem locale.
 - L'estrazione AI dei dati da visura non blocca piu la risposta di sync: PQ salva prima studio, immobili e PDF, poi accoda un job asincrono. La response indica quanti job sono stati accodati in `visure_in_coda`.
 
@@ -255,6 +265,42 @@ Response `200 OK`:
 
 Se `modificati_dopo` non viene passato, PQ restituisce tutti gli studi.
 
+### 3. Gestione manuale dell'elenco subalterni in PQ
+
+L'interfaccia PQ usa gli endpoint applicativi seguenti. Sono documentati anche
+nello Swagger e nella collection Postman:
+
+```text
+PUT /api/properties/{immobile_erp_id}/documents/elenco_subalterni
+GET /api/properties/{immobile_erp_id}/documents/elenco_subalterni/download
+DELETE /api/properties/{immobile_erp_id}/documents/elenco_subalterni
+```
+
+Upload o sostituzione manuale:
+
+```json
+{
+  "file_name": "elenco-subalterni.pdf",
+  "mime_type": "application/pdf",
+  "file_base64": "JVBERi0xLjQKJ..."
+}
+```
+
+Response upload:
+
+```json
+{
+  "id": "cm...",
+  "propertyId": "162502",
+  "type": "elenco_subalterni",
+  "fileName": "elenco-subalterni.pdf",
+  "mimeType": "application/pdf",
+  "sha256": "a723ce3a0c9d...",
+  "sizeBytes": 810240,
+  "downloadUrl": "/api/properties/162502/documents/elenco_subalterni/download"
+}
+```
+
 ## Campi Principali
 
 Campi studio obbligatori:
@@ -317,8 +363,15 @@ Campi documento obbligatori quando un documento viene inviato:
 - `planimetria`
 - `elaborato_planimetrico`
 - `elaborato`
+- `elenco_subalterni`
+- `elenco_dei_subalterni` (alias tollerato)
+- `subalterni` (alias tollerato)
 
 `planimetria`, `elaborato_planimetrico` ed `elaborato` sono alias dello stesso documento e vengono tutti salvati nel tipo canonico `PLANIMETRIA`, usato dall'editor.
+
+`elenco_subalterni`, `elenco_dei_subalterni` e `subalterni` vengono salvati nel
+tipo canonico `ELENCO_SUBALTERNI`. Il valore consigliato per l'ERP e
+`elenco_subalterni`.
 
 ## Errori
 

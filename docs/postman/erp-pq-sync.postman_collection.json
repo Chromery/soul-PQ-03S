@@ -1,7 +1,7 @@
 {
   "info": {
     "_postman_id": "c7b11993-c22f-49fa-9ba1-d05a42847c3c",
-    "name": "Soul PQ - ERP Sync API v1.1",
+    "name": "Soul PQ - ERP Sync API v1.2",
     "description": "Collection per simulare la sincronizzazione ERP -> Soul Prospect Qualifier e il pull delle modifiche PQ -> ERP. Impostare la variabile `erpSyncToken` con il valore locale di ERP_SYNC_TOKEN.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -98,7 +98,122 @@
             "sync"
           ]
         },
-        "description": "Crea o aggiorna uno studio di fattibilita e carica un PDF base64 su Backblaze B2 tramite il backend PQ."
+        "description": "Crea o aggiorna uno studio di fattibilita e carica un PDF base64 su Backblaze B2 tramite il backend PQ. Il payload resta valido senza elenco_subalterni."
+      },
+      "response": []
+    },
+    {
+      "name": "ERP -> PQ | Sync elenco subalterni (stesso endpoint v1)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('elenco subalterni sincronizzato', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.risultati[0].documenti_salvati).to.eql(1);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sync_id_erp\": \"ERP-SUB-{{runSuffix}}\",\n  \"studi\": [\n    {\n      \"studio_erp_id\": \"SF-SUB-{{runSuffix}}\",\n      \"ragione_sociale\": \"Test elenco subalterni\",\n      \"partita_iva\": \"IT00000000000\",\n      \"immobili\": [\n        {\n          \"immobile_erp_id\": \"IMM-SUB-{{runSuffix}}\",\n          \"ubicazione\": \"MILANO(MI) VIA TEST 1\",\n          \"comune\": \"Milano\",\n          \"provincia\": \"MI\",\n          \"foglio\": \"1\",\n          \"particella\": \"2\",\n          \"categoria\": \"D/1\",\n          \"documenti\": [\n            {\n              \"tipo\": \"elenco_subalterni\",\n              \"documento_erp_id\": \"DOC-SUB-{{runSuffix}}\",\n              \"file_nome\": \"elenco-subalterni.pdf\",\n              \"mime_type\": \"application/pdf\",\n              \"file_base64\": \"JVBERi0xLjQKJUVPRgo=\"\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{apiBaseUrl}}/integrations/erp/v1/studi/sync",
+          "host": ["{{apiBaseUrl}}"],
+          "path": ["integrations", "erp", "v1", "studi", "sync"]
+        },
+        "description": "Estensione additiva: invia elenco_subalterni nello stesso endpoint v1. I payload precedenti restano invariati."
+      },
+      "response": []
+    },
+    {
+      "name": "PQ | Upload manuale elenco subalterni",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('upload manuale completato', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().type).to.eql('elenco_subalterni');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"file_name\": \"elenco-subalterni-manuale.pdf\",\n  \"mime_type\": \"application/pdf\",\n  \"file_base64\": \"JVBERi0xLjQKJUVPRgo=\"\n}",
+          "options": {"raw": {"language": "json"}}
+        },
+        "url": {
+          "raw": "{{apiBaseUrl}}/properties/IMM-SUB-{{runSuffix}}/documents/elenco_subalterni",
+          "host": ["{{apiBaseUrl}}"],
+          "path": ["properties", "IMM-SUB-{{runSuffix}}", "documents", "elenco_subalterni"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "PQ | Apri elenco subalterni PDF",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{apiBaseUrl}}/properties/IMM-SUB-{{runSuffix}}/documents/elenco_subalterni/download",
+          "host": ["{{apiBaseUrl}}"],
+          "path": ["properties", "IMM-SUB-{{runSuffix}}", "documents", "elenco_subalterni", "download"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "PQ | Elimina elenco subalterni",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('documento eliminato', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().deleted).to.eql(true);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{apiBaseUrl}}/properties/IMM-SUB-{{runSuffix}}/documents/elenco_subalterni",
+          "host": ["{{apiBaseUrl}}"],
+          "path": ["properties", "IMM-SUB-{{runSuffix}}", "documents", "elenco_subalterni"]
+        }
       },
       "response": []
     },

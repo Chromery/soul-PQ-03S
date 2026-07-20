@@ -64,7 +64,7 @@ import { lotValueForArea, normalizeLotValuation } from "./lotValuation";
 import type { LotValuation, LotValuationMode } from "./lotValuation";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.46.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.47.0";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -127,10 +127,12 @@ type PropertyItem = {
   documents: {
     planimetria: string;
     visura: string;
+    elencoSubalterni?: string;
   };
   documentUrls?: {
     planimetria?: string | null;
     visura?: string | null;
+    elencoSubalterni?: string | null;
   };
   priceLists?: PriceListItem[];
 };
@@ -1614,14 +1616,20 @@ function formatEstimatedValue(value: number | null | undefined) {
   return value === null || value === undefined || value === 0 ? "Da stimare" : formatEuro(value);
 }
 
-type PropertyDocumentKind = "planimetria" | "visura";
+type PropertyDocumentKind = "planimetria" | "visura" | "elenco_subalterni";
+
+function propertyDocumentField(type: PropertyDocumentKind) {
+  return type === "elenco_subalterni" ? "elencoSubalterni" : type;
+}
 
 function propertyDocumentUrl(property: PropertyItem, type: PropertyDocumentKind) {
-  return property.documentUrls?.[type] ?? "";
+  return property.documentUrls?.[propertyDocumentField(type)] ?? "";
 }
 
 function propertyDocumentLabel(type: PropertyDocumentKind) {
-  return type === "planimetria" ? "Planimetria PDF" : "Visura PDF";
+  if (type === "planimetria") return "Planimetria PDF";
+  if (type === "visura") return "Visura PDF";
+  return "Elenco subalterni PDF";
 }
 
 function PropertyDocumentAvailability({
@@ -1634,6 +1642,7 @@ function PropertyDocumentAvailability({
   const documents: Array<{ type: PropertyDocumentKind; label: string; shortLabel: string; icon: ReactNode }> = [
     { type: "planimetria", label: "Planimetria", shortLabel: "Plan.", icon: <File size={compact ? 11 : 13} /> },
     { type: "visura", label: "Visura", shortLabel: "Vis.", icon: <FileText size={compact ? 11 : 13} /> },
+    { type: "elenco_subalterni", label: "Elenco subalterni", shortLabel: "Sub.", icon: <ClipboardList size={compact ? 11 : 13} /> },
   ];
   return (
     <div className={`document-availability ${compact ? "compact" : ""}`} aria-label="Disponibilità documenti">
@@ -2455,19 +2464,27 @@ function App() {
     }
   }
 
-  function updatePropertyPlanimetriaDocument(propertyId: string, fileName: string, downloadUrl: string) {
+  function updatePropertyDocument(
+    propertyId: string,
+    type: "planimetria" | "elenco_subalterni",
+    fileName: string,
+    downloadUrl: string,
+  ) {
+    const field = propertyDocumentField(type);
     updatePropertyInStudies(propertyId, (property) => ({
       ...property,
       documents: {
         ...property.documents,
-        planimetria: fileName,
+        [field]: fileName,
       },
       documentUrls: {
         ...property.documentUrls,
-        planimetria: downloadUrl,
+        [field]: downloadUrl,
       },
     }));
-    flash("Planimetria salvata nei documenti dell'immobile.");
+    flash(type === "planimetria"
+      ? "Planimetria salvata nei documenti dell'immobile."
+      : "Elenco subalterni salvato nei documenti dell'immobile.");
   }
 
   async function updatePropertyOutcome(propertyId: string, outcome: PropertyOutcome) {
@@ -2661,7 +2678,7 @@ function App() {
             onBack={() => navigate({ view: "study", studyId: editorStudy.id })}
             onDirtyChange={setEditorDirty}
             onDraftSaved={updatePropertyEstimatedValue}
-            onDocumentSaved={updatePropertyPlanimetriaDocument}
+            onDocumentSaved={updatePropertyDocument}
           />
         </Suspense>
       </Shell>
@@ -4558,6 +4575,19 @@ function StudyRows({
                             <FileText size={13} />
                             Visura PDF
                           </button>
+                          <button
+                            type="button"
+                            disabled={!propertyDocumentUrl(property, "elenco_subalterni")}
+                            title={
+                              propertyDocumentUrl(property, "elenco_subalterni")
+                                ? "Apri elenco subalterni PDF"
+                                : "Elenco subalterni PDF non disponibile nello storage documentale"
+                            }
+                            onClick={() => handleOpenDocument(property, "elenco_subalterni")}
+                          >
+                            <ClipboardList size={13} />
+                            Elenco subalterni
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -4622,6 +4652,7 @@ function PropertyRow({
 }) {
   const planimetriaUrl = propertyDocumentUrl(property, "planimetria");
   const visuraUrl = propertyDocumentUrl(property, "visura");
+  const elencoSubalterniUrl = propertyDocumentUrl(property, "elenco_subalterni");
 
   return (
     <tr>
@@ -4668,6 +4699,18 @@ function PropertyRow({
           >
             <FileText size={14} />
             Visura PDF
+          </button>
+          <button
+            disabled={!elencoSubalterniUrl || !onOpenDocument}
+            title={
+              elencoSubalterniUrl
+                ? "Apri elenco subalterni PDF"
+                : "Elenco subalterni PDF non disponibile nello storage documentale"
+            }
+            onClick={() => onOpenDocument?.("elenco_subalterni")}
+          >
+            <ClipboardList size={14} />
+            Elenco subalterni
           </button>
         </div>
       </td>
@@ -5832,6 +5875,20 @@ function PropertyAreaDetail({
           >
             <FileText size={14} />
             Visura PDF
+          </button>
+          <button
+            className="button secondary compact-button"
+            type="button"
+            disabled={!propertyDocumentUrl(property, "elenco_subalterni")}
+            title={
+              propertyDocumentUrl(property, "elenco_subalterni")
+                ? "Apri elenco subalterni PDF"
+                : "Elenco subalterni PDF non disponibile nello storage documentale"
+            }
+            onClick={() => onOpenDocument("elenco_subalterni")}
+          >
+            <ClipboardList size={14} />
+            Elenco subalterni
           </button>
           <button
             className="button secondary compact-button"

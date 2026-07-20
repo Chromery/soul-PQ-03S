@@ -25,6 +25,7 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
         },
       },
       propertyDocument: {
+        findUnique: async () => null,
         upsert: async (input: Record<string, any>) => {
           documentUpserts.push(input);
           return { id: "DOC-1" };

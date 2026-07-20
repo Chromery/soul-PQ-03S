@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Soul Prospect Qualifier - ERP/PQ Sync API
-  version: 1.1.0
+  version: 1.2.0
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -9,6 +9,9 @@ info:
     API server-to-server esposte da Soul Prospect Qualifier per sincronizzare gli
     studi di fattibilita dall'ERP e permettere all'ERP di leggere le modifiche
     successive prodotte in PQ.
+
+    La v1.2 estende in modo retrocompatibile lo stesso endpoint v1 con il PDF
+    opzionale `elenco_subalterni`, uno per immobile. I payload v1/v1.1 restano validi.
 
     L'autenticazione e machine-to-machine tramite header:
     `Authorization: Bearer <ERP_SYNC_TOKEN>`.
@@ -108,6 +111,11 @@ paths:
                               file_nome: visura_162502.pdf
                               mime_type: application/pdf
                               file_base64: JVBERi0xLjQKMSAwIG9iaiA8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4gZW5kb2JqCjIgMCBvYmogPDwgL1R5cGUgL1BhZ2VzIC9Db3VudCAwID4+IGVuZG9iagp0cmFpbGVyIDw8IC9Sb290IDEgMCBSID4+CiUlRU9GCg==
+                            - tipo: elenco_subalterni
+                              documento_erp_id: DOC-SUB-991
+                              file_nome: elenco_subalterni_162502.pdf
+                              mime_type: application/pdf
+                              file_base64: JVBERi0xLjQKMSAwIG9iaiA8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4gZW5kb2JqCjIgMCBvYmogPDwgL1R5cGUgL1BhZ2VzIC9Db3VudCAwID4+IGVuZG9iagp0cmFpbGVyIDw8IC9Sb290IDEgMCBSID4+CiUlRU9GCg==
       responses:
         "200":
           description: Sincronizzazione completata
@@ -128,7 +136,7 @@ paths:
                       - studio_erp_id: SF-47824-2026-001
                         azione: created
                         immobili_upserted: 1
-                        documenti_salvati: 1
+                        documenti_salvati: 2
                         visure_estratte: 0
                         visure_in_coda: 1
                         visure_errori: []
@@ -223,12 +231,99 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalServerError"
+  /properties/{propertyId}/documents/{documentType}:
+    servers:
+      - url: /api
+        description: Endpoint applicativi PQ per gestione manuale documenti
+    put:
+      tags:
+        - Documenti immobile
+      operationId: uploadDocumentoImmobile
+      summary: Carica o sostituisce manualmente un PDF dell'immobile
+      description: |
+        Esegue upsert per coppia immobile/tipo. Per `elenco_subalterni` esiste
+        quindi al massimo un record per immobile.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PropertyId"
+        - $ref: "#/components/parameters/DocumentTypePath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualDocumentUpload"
+      responses:
+        "200":
+          description: Documento salvato o sostituito
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PropertyDocumentUploadResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Immobile non trovato
+    delete:
+      tags:
+        - Documenti immobile
+      operationId: deleteDocumentoImmobile
+      summary: Elimina il documento e il relativo oggetto nello storage
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PropertyId"
+        - $ref: "#/components/parameters/DocumentTypePath"
+      responses:
+        "200":
+          description: Documento eliminato
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentDeleteResponse"
+        "404":
+          description: Immobile o documento non trovato
+  /properties/{propertyId}/documents/{documentType}/download:
+    servers:
+      - url: /api
+        description: Endpoint applicativi PQ per gestione manuale documenti
+    get:
+      tags:
+        - Documenti immobile
+      operationId: downloadDocumentoImmobile
+      summary: Apre il PDF inline in una nuova scheda
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PropertyId"
+        - $ref: "#/components/parameters/DocumentTypePath"
+      responses:
+        "200":
+          description: Contenuto PDF
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Immobile, documento o oggetto storage non trovato
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: ERP_SYNC_TOKEN
+  parameters:
+    PropertyId:
+      name: propertyId
+      in: path
+      required: true
+      schema:
+        type: string
+    DocumentTypePath:
+      name: documentType
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/DocumentTypePath"
   schemas:
     SyncStudiRequest:
       type: object
@@ -486,13 +581,76 @@ components:
         - non_in_studio
     TipoDocumentoInput:
       type: string
-      description: planimetria, elaborato_planimetrico ed elaborato sono alias e vengono gestiti come PLANIMETRIA nell'editor.
+      description: |
+        `planimetria`, `elaborato_planimetrico` ed `elaborato` sono alias del
+        documento PLANIMETRIA. `elenco_subalterni`, `elenco_dei_subalterni` e
+        `subalterni` sono alias dello stesso elenco, unico per immobile.
       enum:
         - visura_catastale
         - visura
         - planimetria
         - elaborato_planimetrico
         - elaborato
+        - elenco_subalterni
+        - elenco_dei_subalterni
+        - subalterni
+    DocumentTypePath:
+      type: string
+      enum:
+        - planimetria
+        - visura
+        - elenco_subalterni
+    ManualDocumentUpload:
+      type: object
+      required:
+        - file_name
+        - file_base64
+      properties:
+        file_name:
+          type: string
+          example: elenco-subalterni.pdf
+        file_base64:
+          type: string
+          description: Base64 puro oppure data URL `data:application/pdf;base64,...`.
+        mime_type:
+          type: string
+          const: application/pdf
+          default: application/pdf
+    PropertyDocumentUploadResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        propertyId:
+          type: string
+        type:
+          $ref: "#/components/schemas/DocumentTypePath"
+        fileName:
+          type: string
+        mimeType:
+          type: string
+        sha256:
+          type:
+            - string
+            - "null"
+        sizeBytes:
+          type:
+            - integer
+            - "null"
+        downloadUrl:
+          type: string
+    DocumentDeleteResponse:
+      type: object
+      properties:
+        deleted:
+          type: boolean
+          const: true
+        propertyId:
+          type: string
+        type:
+          $ref: "#/components/schemas/DocumentTypePath"
+        fileName:
+          type: string
     SyncStudiResponse:
       type: object
       required:
@@ -537,7 +695,9 @@ components:
                 type: integer
               visure_estratte:
                 type: integer
-                description: Numero di visure estratte in modo sincrono. Attualmente resta 0: l'estrazione avviene via job asincrono.
+                description: |
+                  Numero di visure estratte in modo sincrono. Attualmente resta
+                  0 perché l'estrazione avviene via job asincrono.
               visure_in_coda:
                 type: integer
                 description: Numero di job asincroni accodati per estrarre dati catastali dalle visure.

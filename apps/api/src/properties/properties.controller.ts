@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Put, Res, StreamableFile } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Put, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import { PropertiesService } from "./properties.service.js";
 
@@ -40,6 +40,11 @@ export class PropertiesController {
       response.setHeader("Content-Length", String(document.contentLength));
     }
     return new StreamableFile(document.stream);
+  }
+
+  @Delete(":id/documents/:type")
+  deleteDocument(@Param("id") propertyId: string, @Param("type") documentType: string) {
+    return this.properties.deleteDocument(propertyId, documentType);
   }
 }
 

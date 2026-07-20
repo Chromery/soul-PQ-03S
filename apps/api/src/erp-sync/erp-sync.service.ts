@@ -295,6 +295,9 @@ export class ErpSyncService {
         };
 
         if (!stored.storageKey) throw new BadRequestException(`storage_key o file_base64 obbligatorio per ${document.fileName}`);
+        const previousDocument = await this.prisma.propertyDocument.findUnique({
+          where: { propertyId_type: { propertyId: property.id, type: document.type } },
+        });
         const storedDocument = await this.prisma.propertyDocument.upsert({
           where: { propertyId_type: { propertyId: property.id, type: document.type } },
           create: {
@@ -316,6 +319,17 @@ export class ErpSyncService {
             sizeBytes: stored.sizeBytes,
           },
         });
+        if (
+          previousDocument
+          && previousDocument.storageKey !== storedDocument.storageKey
+          && !previousDocument.storageKey.startsWith("demo/")
+        ) {
+          try {
+            await this.storage.deleteObject(previousDocument.storageKey);
+          } catch (error) {
+            console.error("Impossibile eliminare il precedente documento ERP sostituito", error);
+          }
+        }
         if (document.type === DocumentType.PLANIMETRIA && document.fileBase64) {
           await this.scaleExtraction.enqueueDocumentPdf({
             propertyId: property.id,

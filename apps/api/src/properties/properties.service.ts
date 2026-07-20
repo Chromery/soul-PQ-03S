@@ -176,6 +176,9 @@ export class PropertiesService {
     const type = parseDocumentType(rawType);
     const property = await this.requireProperty(propertyId);
     const input = validateDocumentUploadInput(body);
+    const previousDocument = await this.prisma.propertyDocument.findUnique({
+      where: { propertyId_type: { propertyId, type } },
+    });
     const stored = await this.storage.storeBase64Pdf({
       studioErpId: property.studyId,
       immobileErpId: property.id,
@@ -203,6 +206,17 @@ export class PropertiesService {
         sizeBytes: stored.sizeBytes,
       },
     });
+    if (
+      previousDocument
+      && previousDocument.storageKey !== document.storageKey
+      && !previousDocument.storageKey.startsWith("demo/")
+    ) {
+      try {
+        await this.storage.deleteObject(previousDocument.storageKey);
+      } catch (error) {
+        console.error("Impossibile eliminare il precedente documento sostituito", error);
+      }
+    }
     const visuraExtractionJob = type === DocumentType.VISURA
       ? await this.visuraExtraction.enqueueDocumentPdf({
         propertyId,
@@ -253,6 +267,25 @@ export class PropertiesService {
       contentType: stored.contentType || document.mimeType || "application/pdf",
       contentLength: stored.contentLength ?? document.sizeBytes ?? undefined,
       stream: stored.stream,
+    };
+  }
+
+  async deleteDocument(propertyId: string, rawType: string) {
+    const type = parseDocumentType(rawType);
+    await this.requireProperty(propertyId);
+    const document = await this.prisma.propertyDocument.findUnique({
+      where: { propertyId_type: { propertyId, type } },
+    });
+    if (!document) throw new NotFoundException("Documento non trovato");
+    if (!document.storageKey.startsWith("demo/")) {
+      await this.storage.deleteObject(document.storageKey);
+    }
+    await this.prisma.propertyDocument.delete({ where: { id: document.id } });
+    return {
+      deleted: true,
+      propertyId,
+      type: documentTypePath(type),
+      fileName: document.fileName,
     };
   }
 
