@@ -39,11 +39,6 @@
   --fixed-corner-offset: 24px;
 }
 
-html {
-  /* Equivale ai due step 100% -> 90% -> 80% del controllo zoom di Chrome. */
-  zoom: 0.8;
-}
-
 * {
   box-sizing: border-box;
 }
