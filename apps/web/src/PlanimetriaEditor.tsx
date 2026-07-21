@@ -15,6 +15,7 @@ import {
   ExternalLink,
   FileText,
   Globe,
+  LandPlot,
   Layers,
   MapPin,
   Maximize2,
@@ -51,7 +52,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 const ZOOM_MIN = 25;
-const ZOOM_MAX = 400;
+const ZOOM_MAX = 600;
 const ZOOM_BUTTON_STEP = 10;
 const ZOOM_KEYBOARD_STEP = 10;
 const ZOOM_SLIDER_STEP = 1;
@@ -87,9 +88,10 @@ type CustomUsagePreset = {
   color: string;
   rate: number;
 };
-type EditorTool = "select" | "smart" | "polygon" | "ruler";
+type EditorTool = "select" | "smart" | "polygon" | "lot" | "ruler";
 type LegacyEditorTool = EditorTool | "calibrate";
 type SelectionSource = "smart" | "polygon" | "merged" | "copy" | "manual";
+type LotInclusionMode = "auto" | "manual";
 type ScaleExtractionStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
 type ScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
 type PageRotation = 0 | 90 | 180 | 270;
@@ -236,11 +238,19 @@ type AreaSelection = {
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
   includedInLot?: boolean;
+  lotInclusionMode?: LotInclusionMode;
   totalPixels: number;
   region: Region;
   bitmap: HTMLCanvasElement;
   source: SelectionSource;
   polygon?: CanvasPoint[];
+};
+
+type LotBoundary = {
+  id: string;
+  page: number;
+  polygon: CanvasPoint[];
+  region: Region;
 };
 
 type DocumentSource =
@@ -259,6 +269,7 @@ type SavedSelection = {
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
   includedInLot?: boolean;
+  lotInclusionMode?: LotInclusionMode;
   opacity: number;
   totalPixels: number;
   source?: SelectionSource;
@@ -266,6 +277,20 @@ type SavedSelection = {
   region: {
     bounds: MaskBounds;
     seed: { x: number; y: number };
+    count: number;
+    width: number;
+    height: number;
+    alphaDataUrl: string;
+  };
+};
+
+type SavedLotBoundary = {
+  id: string;
+  page: number;
+  polygon: CanvasPoint[];
+  region: {
+    bounds: MaskBounds;
+    seed: CanvasPoint;
     count: number;
     width: number;
     height: number;
@@ -328,6 +353,7 @@ type SavedDraft = {
   totalLotArea?: number;
   totalLotValue?: number;
   lotValuation?: LotValuation;
+  lotBoundaries?: SavedLotBoundary[];
   estimatedImu?: number | null;
   imuCalculation?: PropertyImuCalculation | null;
   selections: SavedSelection[];
@@ -392,6 +418,7 @@ type ClipboardSelection = {
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
   includedInLot?: boolean;
+  lotInclusionMode?: LotInclusionMode;
   totalPixels: number;
   source: SelectionSource;
   polygon?: CanvasPoint[];
@@ -408,6 +435,7 @@ type Runtime = {
   zoom: number;
   pageRotations: Map<number, PageRotation>;
   selectionsByPage: Map<number, AreaSelection[]>;
+  lotBoundariesByPage: Map<number, LotBoundary[]>;
   history: string[];
   undoStack: EditorSnapshot[];
   redoStack: EditorSnapshot[];
@@ -424,6 +452,7 @@ type Runtime = {
 
 type EditorSnapshot = {
   selectionsByPage: Map<number, AreaSelection[]>;
+  lotBoundariesByPage: Map<number, LotBoundary[]>;
   selectedIds: string[];
   history: string[];
   calibration: SavedCalibration | null;
@@ -570,6 +599,13 @@ const TOOL_OPTIONS: Array<{
     icon: <PencilLine size={17} />,
   },
   {
+    id: "lot",
+    label: "Definizione lotto",
+    description: "Disegna la sagoma che preseleziona le aree del lotto",
+    shortcut: "L",
+    icon: <LandPlot size={17} />,
+  },
+  {
     id: "ruler",
     label: "Righello",
     description: "Misura distanza tra due punti",
@@ -587,6 +623,7 @@ const SHORTCUTS = {
   select: "V",
   smart: "S",
   polygon: "P",
+  lot: "L",
   ruler: "R",
   focus: "F",
   zoomIn: "Maiusc+Freccia su",
@@ -626,6 +663,7 @@ function createRuntime(): Runtime {
     zoom: 1,
     pageRotations: new Map(),
     selectionsByPage: new Map(),
+    lotBoundariesByPage: new Map(),
     history: [],
     undoStack: [],
     redoStack: [],
@@ -1064,6 +1102,7 @@ export default function PlanimetriaEditor({
   const waveCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasShellRef = useRef<HTMLDivElement | null>(null);
+  const areaTableDockRef = useRef<HTMLElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const subalterniInputRef = useRef<HTMLInputElement | null>(null);
   const runtimeRef = useRef<Runtime>(createRuntime());
@@ -1075,6 +1114,7 @@ export default function PlanimetriaEditor({
   const rulerDragRef = useRef<CanvasPoint | null>(null);
   const clipboardRef = useRef<ClipboardSelection[]>([]);
   const outlinePathCacheRef = useRef<WeakMap<HTMLCanvasElement, CanvasPoint[][]>>(new WeakMap());
+  const areaTableResizeRef = useRef<{ startY: number; startHeight: number; pointerId: number } | null>(null);
 
   const [status, setStatus] = useState("Caricamento planimetria");
   const [busy, setBusy] = useState(false);
@@ -1121,6 +1161,7 @@ export default function PlanimetriaEditor({
   const [clearPageConfirmOpen, setClearPageConfirmOpen] = useState(false);
   const [opacityDockOpen, setOpacityDockOpen] = useState(false);
   const [areaTableCollapsed, setAreaTableCollapsed] = useState(false);
+  const [areaTableHeight, setAreaTableHeight] = useState(310);
   const [focusMode, setFocusMode] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<ToolSectionId, boolean>>({
     usage: false,
@@ -1188,7 +1229,11 @@ export default function PlanimetriaEditor({
   const resolvedWallInclusionRadius = wallInclusionRadius ?? autoWallRadius;
   const hasPdf = pageCount > 0;
   const allSelections = Array.from(runtimeRef.current.selectionsByPage.values()).flat();
+  const allLotBoundaries = Array.from(runtimeRef.current.lotBoundariesByPage.values()).flat();
   const selections = hasPdf ? currentSelections() : [];
+  const currentLotBoundaries = hasPdf
+    ? runtimeRef.current.lotBoundariesByPage.get(runtimeRef.current.currentPage) ?? []
+    : [];
   const selectedSelections = allSelections.filter((selection) =>
     selectedSelectionIds.includes(selection.id),
   );
@@ -1199,7 +1244,8 @@ export default function PlanimetriaEditor({
   const canRedo = runtimeRef.current.redoStack.length > 0;
   const canDeleteSelectedObject = selectedSelectionIds.length > 0 || rulerSegmentSelected || Boolean(selectedPolygonVertex);
   const hasCurrentPageAreas = selections.length > 0;
-  const canSaveDraft = Boolean(documentSource || allSelections.length > 0);
+  const hasCurrentPageLotBoundary = currentLotBoundaries.length > 0;
+  const canSaveDraft = Boolean(documentSource || allSelections.length > 0 || allLotBoundaries.length > 0);
   const currentPageRotation = currentPage ? runtimeRef.current.pageRotations.get(currentPage) ?? 0 : 0;
 
   const selectedAreas = useMemo(
@@ -1423,6 +1469,7 @@ export default function PlanimetriaEditor({
         if (key === "v") selectTool("select");
         if (key === "s") selectTool("smart");
         if (key === "p") selectTool("polygon");
+        if (key === "l") selectTool("lot");
         if (key === "r") selectTool("ruler");
         if (key === "f") void toggleFocusMode();
         if (event.key === "Escape") {
@@ -1528,6 +1575,8 @@ export default function PlanimetriaEditor({
     setDash(SMART_TRACE_DEFAULTS.dash);
     setWallInclusionRadius(SMART_TRACE_DEFAULTS.wallInclusionRadius);
     setLotValuation({ ...DEFAULT_LOT_VALUATION });
+    setAreaCalibrationOpen(false);
+    setAreaTableHeight(310);
     setDirty(false);
     setSavedAt("");
     setRevision((value) => value + 1);
@@ -2109,6 +2158,7 @@ export default function PlanimetriaEditor({
             ? saved.amountOverride
             : null,
         includedInLot: saved.includedInLot === true,
+        lotInclusionMode: saved.lotInclusionMode,
         opacity: saved.opacity,
         totalPixels: saved.totalPixels,
         region,
@@ -2120,7 +2170,33 @@ export default function PlanimetriaEditor({
       pageSelections.push(selection);
       restored.set(saved.page, pageSelections);
     }
+    const restoredLotBoundaries = new Map<number, LotBoundary[]>();
+    for (const saved of draft.lotBoundaries ?? []) {
+      if (!Array.isArray(saved.polygon) || saved.polygon.length < 3) continue;
+      const alphaCanvas = await canvasFromDataUrl(
+        saved.region.alphaDataUrl,
+        saved.region.width,
+        saved.region.height,
+      );
+      const boundary: LotBoundary = {
+        id: saved.id,
+        page: saved.page,
+        polygon: saved.polygon.map((point) => ({ ...point })),
+        region: {
+          bounds: { ...saved.region.bounds },
+          seed: { ...saved.region.seed },
+          count: saved.region.count,
+          width: saved.region.width,
+          height: saved.region.height,
+          alphaCanvas,
+        },
+      };
+      const pageBoundaries = restoredLotBoundaries.get(saved.page) ?? [];
+      pageBoundaries.push(boundary);
+      restoredLotBoundaries.set(saved.page, pageBoundaries);
+    }
     runtimeRef.current.selectionsByPage = restored;
+    runtimeRef.current.lotBoundariesByPage = restoredLotBoundaries;
     runtimeRef.current.history = draft.selections.map((selection) => selection.id);
     setCollapsedAreaIds(draft.selections.map((selection) => selection.id));
     pendingDraftRef.current = null;
@@ -2144,6 +2220,7 @@ export default function PlanimetriaEditor({
         areaOverrideM2: selection.areaOverrideM2 ?? null,
         amountOverride: selection.amountOverride ?? null,
         includedInLot: selection.includedInLot === true,
+        lotInclusionMode: selection.lotInclusionMode,
         opacity: selection.opacity,
         totalPixels: selection.totalPixels,
         source: selection.source,
@@ -2155,6 +2232,21 @@ export default function PlanimetriaEditor({
           width: selection.region.width,
           height: selection.region.height,
           alphaDataUrl: selection.region.alphaCanvas.toDataURL("image/png"),
+        },
+      }));
+    const lotBoundariesToSave = Array.from(runtimeRef.current.lotBoundariesByPage.values())
+      .flat()
+      .map<SavedLotBoundary>((boundary) => ({
+        id: boundary.id,
+        page: boundary.page,
+        polygon: boundary.polygon.map((point) => ({ ...point })),
+        region: {
+          bounds: { ...boundary.region.bounds },
+          seed: { ...boundary.region.seed },
+          count: boundary.region.count,
+          width: boundary.region.width,
+          height: boundary.region.height,
+          alphaDataUrl: boundary.region.alphaCanvas.toDataURL("image/png"),
         },
       }));
     const savedTime = new Date().toISOString();
@@ -2191,6 +2283,7 @@ export default function PlanimetriaEditor({
       totalLotArea: totals.lotArea,
       totalLotValue: totals.lotValue,
       lotValuation,
+      lotBoundaries: lotBoundariesToSave,
       selections: selectionsToSave,
     };
 
@@ -3424,6 +3517,101 @@ export default function PlanimetriaEditor({
     });
   }
 
+  function regionsIntersect(first: Region, second: Region) {
+    if (!boundsIntersectRect(first.bounds, second.bounds)) return false;
+    const minX = Math.max(first.bounds.minX, second.bounds.minX);
+    const minY = Math.max(first.bounds.minY, second.bounds.minY);
+    const maxX = Math.min(first.bounds.maxX, second.bounds.maxX);
+    const maxY = Math.min(first.bounds.maxY, second.bounds.maxY);
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+    if (width <= 0 || height <= 0) return false;
+
+    const firstContext = first.alphaCanvas.getContext("2d", { willReadFrequently: true });
+    const secondContext = second.alphaCanvas.getContext("2d", { willReadFrequently: true });
+    if (!firstContext || !secondContext) return false;
+    const firstData = firstContext.getImageData(
+      minX - first.bounds.minX,
+      minY - first.bounds.minY,
+      width,
+      height,
+    ).data;
+    const secondData = secondContext.getImageData(
+      minX - second.bounds.minX,
+      minY - second.bounds.minY,
+      width,
+      height,
+    ).data;
+    for (let index = 3; index < firstData.length; index += 4) {
+      if (firstData[index] > 8 && secondData[index] > 8) return true;
+    }
+    return false;
+  }
+
+  function selectionIntersectsLotBoundary(selection: AreaSelection) {
+    const boundaries = runtimeRef.current.lotBoundariesByPage.get(selection.page) ?? [];
+    return boundaries.some((boundary) => regionsIntersect(selection.region, boundary.region));
+  }
+
+  function reconcileSelectionLot(selection: AreaSelection, forceIntersecting = false) {
+    const intersects = selectionIntersectsLotBoundary(selection);
+    if (intersects && (forceIntersecting || selection.lotInclusionMode !== "manual")) {
+      selection.includedInLot = true;
+      selection.lotInclusionMode = "auto";
+      return true;
+    }
+    if (!intersects && selection.lotInclusionMode === "auto") {
+      selection.includedInLot = false;
+      return true;
+    }
+    return false;
+  }
+
+  function reconcilePageLotSelections(page: number, forceIntersecting = false) {
+    let changed = false;
+    (runtimeRef.current.selectionsByPage.get(page) ?? []).forEach((selection) => {
+      if (reconcileSelectionLot(selection, forceIntersecting)) changed = true;
+    });
+    return changed;
+  }
+
+  function commitLotBoundary(points: CanvasPoint[]) {
+    const region = createPolygonRegion(points);
+    if (!region) return false;
+    const page = runtimeRef.current.currentPage;
+    const replacing = (runtimeRef.current.lotBoundariesByPage.get(page) ?? []).length > 0;
+    recordUndoState();
+    runtimeRef.current.lotBoundariesByPage.set(page, [
+      {
+        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+        page,
+        polygon: points.map((point) => ({ ...point })),
+        region,
+      },
+    ]);
+    reconcilePageLotSelections(page, true);
+    setSelectedSelectionIds([]);
+    setRulerSegmentSelected(false);
+    redrawMasks();
+    setStatus(replacing ? "Definizione lotto aggiornata" : "Definizione lotto completata");
+    markDirty();
+    bumpRevision();
+    return true;
+  }
+
+  function removeCurrentPageLotBoundary() {
+    const page = runtimeRef.current.currentPage;
+    if ((runtimeRef.current.lotBoundariesByPage.get(page) ?? []).length === 0) return;
+    recordUndoState();
+    runtimeRef.current.lotBoundariesByPage.delete(page);
+    reconcilePageLotSelections(page);
+    setDeleteMenuOpen(false);
+    redrawMasks();
+    setStatus("Definizione lotto rimossa");
+    markDirty();
+    bumpRevision();
+  }
+
   function createTintedCanvas(region: Region, color: string, opacity: number) {
     const canvas = document.createElement("canvas");
     canvas.width = region.width;
@@ -3471,9 +3659,26 @@ export default function PlanimetriaEditor({
     return next;
   }
 
+  function cloneLotBoundariesByPage(source: Map<number, LotBoundary[]>) {
+    const next = new Map<number, LotBoundary[]>();
+    source.forEach((items, page) => {
+      next.set(
+        page,
+        items.map((boundary) => ({
+          id: boundary.id,
+          page: boundary.page,
+          polygon: boundary.polygon.map((point) => ({ ...point })),
+          region: cloneRegion(boundary.region),
+        })),
+      );
+    });
+    return next;
+  }
+
   function takeEditorSnapshot(): EditorSnapshot {
     return {
       selectionsByPage: cloneSelectionsByPage(runtimeRef.current.selectionsByPage),
+      lotBoundariesByPage: cloneLotBoundariesByPage(runtimeRef.current.lotBoundariesByPage),
       selectedIds: [...selectedSelectionIds],
       history: [...runtimeRef.current.history],
       calibration: calibration
@@ -3519,6 +3724,7 @@ export default function PlanimetriaEditor({
 
   function restoreEditorSnapshot(snapshot: EditorSnapshot) {
     runtimeRef.current.selectionsByPage = cloneSelectionsByPage(snapshot.selectionsByPage);
+    runtimeRef.current.lotBoundariesByPage = cloneLotBoundariesByPage(snapshot.lotBoundariesByPage);
     runtimeRef.current.history = [...snapshot.history];
     const existingIds = new Set(
       Array.from(runtimeRef.current.selectionsByPage.values())
@@ -3625,6 +3831,7 @@ export default function PlanimetriaEditor({
       customUsageLabel?: string;
       color?: string;
       includedInLot?: boolean;
+      lotInclusionMode?: LotInclusionMode;
     } = {},
   ) {
     const customPreset =
@@ -3666,7 +3873,12 @@ export default function PlanimetriaEditor({
       selection.bitmap = createTintedCanvas(region, color, opacity);
       selection.source = source;
       selection.polygon = polygon;
-      if (options.includedInLot !== undefined) selection.includedInLot = options.includedInLot;
+      if (options.includedInLot !== undefined) {
+        selection.includedInLot = options.includedInLot;
+        selection.lotInclusionMode = options.lotInclusionMode ?? "manual";
+      } else {
+        reconcileSelectionLot(selection);
+      }
       redrawMasks();
       setStatus(`Area ${duplicateIndex + 1} aggiornata`);
       if (shouldSelect) setSelectedSelectionIds([selection.id]);
@@ -3677,7 +3889,7 @@ export default function PlanimetriaEditor({
     }
 
     if (shouldRecord) recordUndoState();
-    const selection = {
+    const selection: AreaSelection = {
       id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
       page: runtimeRef.current.currentPage,
       usageId,
@@ -3692,7 +3904,9 @@ export default function PlanimetriaEditor({
       source,
       polygon,
       includedInLot: options.includedInLot === true,
+      lotInclusionMode: options.includedInLot !== undefined ? options.lotInclusionMode ?? "manual" : "auto",
     };
+    if (options.includedInLot === undefined) reconcileSelectionLot(selection);
     selectionsForPage.push(selection);
     runtimeRef.current.history.push(selection.id);
     redrawMasks();
@@ -3864,6 +4078,52 @@ export default function PlanimetriaEditor({
     context.restore();
   }
 
+  function drawLotBoundary(context: CanvasRenderingContext2D, boundary: LotBoundary) {
+    const patternSize = Math.max(18, Math.round(14 * runtimeRef.current.renderScale));
+    const patternCanvas = document.createElement("canvas");
+    patternCanvas.width = patternSize;
+    patternCanvas.height = patternSize;
+    const patternContext = patternCanvas.getContext("2d");
+    if (!patternContext) return;
+    patternContext.strokeStyle = "rgba(22, 163, 74, 0.34)";
+    patternContext.lineWidth = Math.max(2, runtimeRef.current.renderScale);
+    patternContext.beginPath();
+    patternContext.moveTo(-patternSize * 0.25, patternSize);
+    patternContext.lineTo(patternSize, -patternSize * 0.25);
+    patternContext.moveTo(patternSize * 0.35, patternSize * 1.25);
+    patternContext.lineTo(patternSize * 1.25, patternSize * 0.35);
+    patternContext.stroke();
+    const pattern = context.createPattern(patternCanvas, "repeat");
+    if (!pattern) return;
+
+    context.save();
+    drawPolygonPath(context, boundary.polygon, true);
+    context.clip();
+    context.fillStyle = "rgba(22, 163, 74, 0.035)";
+    context.fillRect(
+      boundary.region.bounds.minX,
+      boundary.region.bounds.minY,
+      boundary.region.width,
+      boundary.region.height,
+    );
+    context.fillStyle = pattern;
+    context.fillRect(
+      boundary.region.bounds.minX,
+      boundary.region.bounds.minY,
+      boundary.region.width,
+      boundary.region.height,
+    );
+    context.restore();
+
+    context.save();
+    context.strokeStyle = "#16a34a";
+    context.lineWidth = Math.max(3, Math.round(2 * runtimeRef.current.renderScale));
+    context.setLineDash([14, 9]);
+    drawPolygonPath(context, boundary.polygon, true);
+    context.stroke();
+    context.restore();
+  }
+
   function drawPolygonEditHandles(context: CanvasRenderingContext2D, selection: AreaSelection) {
     if (!selection.polygon || selection.polygon.length < 3) return;
     if (activeTool !== "select" && activeTool !== "polygon") return;
@@ -3970,8 +4230,9 @@ export default function PlanimetriaEditor({
     if (polygonDraft.length > 0) {
       const points = pointerPreview ? [...polygonDraft, pointerPreview] : polygonDraft;
       context.save();
-      context.strokeStyle = activeUsageOption.color;
-      context.fillStyle = activeUsageOption.color;
+      const draftColor = activeTool === "lot" ? "#16a34a" : activeUsageOption.color;
+      context.strokeStyle = draftColor;
+      context.fillStyle = draftColor;
       context.lineWidth = 3;
       context.setLineDash([10, 8]);
       drawPolygonPath(context, points, false);
@@ -4025,6 +4286,9 @@ export default function PlanimetriaEditor({
     if (!runtimeRef.current.pdfDoc) return;
     currentSelections().forEach((selection) => {
       mask.drawImage(selection.bitmap, selection.region.bounds.minX, selection.region.bounds.minY);
+    });
+    (runtimeRef.current.lotBoundariesByPage.get(runtimeRef.current.currentPage) ?? []).forEach((boundary) => {
+      drawLotBoundary(mask, boundary);
     });
     drawEditorOverlays(mask);
   }
@@ -4527,6 +4791,7 @@ export default function PlanimetriaEditor({
     if (!selection || Boolean(selection.includedInLot) === includedInLot) return;
     recordUndoState();
     selection.includedInLot = includedInLot;
+    selection.lotInclusionMode = "manual";
     setStatus(includedInLot ? "Area inclusa nel lotto" : "Area esclusa dal lotto");
     markDirty();
     bumpRevision();
@@ -4945,6 +5210,7 @@ export default function PlanimetriaEditor({
     selection.region = region;
     selection.totalPixels = getCanvasTotalPixels();
     selection.bitmap = createTintedCanvas(region, selection.color, selection.opacity);
+    if (selection.lotInclusionMode !== "manual") reconcileSelectionLot(selection);
     redrawMasks();
     bumpRevision();
     return true;
@@ -5071,6 +5337,7 @@ export default function PlanimetriaEditor({
       areaOverrideM2: selection.areaOverrideM2,
       amountOverride: selection.amountOverride,
       includedInLot: selection.includedInLot,
+      lotInclusionMode: selection.lotInclusionMode,
       totalPixels: selection.totalPixels,
       source: selection.source === "merged" ? "merged" : "copy",
       polygon: selection.polygon?.map((point) => ({ ...point })),
@@ -5116,6 +5383,7 @@ export default function PlanimetriaEditor({
         areaOverrideM2: item.areaOverrideM2,
         amountOverride: item.amountOverride,
         includedInLot: item.includedInLot,
+        lotInclusionMode: item.lotInclusionMode,
         opacity: item.opacity,
         totalPixels: getCanvasTotalPixels(),
         region,
@@ -5123,6 +5391,7 @@ export default function PlanimetriaEditor({
         source: "copy",
         polygon: item.polygon?.map((point) => translatePoint(point, dx, dy)),
       };
+      if (selection.lotInclusionMode !== "manual") reconcileSelectionLot(selection);
       pageSelections.push(selection);
       runtimeRef.current.history.push(id);
       pastedIds.push(id);
@@ -5182,6 +5451,7 @@ export default function PlanimetriaEditor({
       customUsageId: activeCustomUsageId ?? undefined,
       customUsageLabel,
       includedInLot: selected.some((selection) => selection.includedInLot),
+      lotInclusionMode: selected.some((selection) => selection.lotInclusionMode === "manual") ? "manual" : "auto",
     });
     if (mergedId) setSelectedSelectionIds([mergedId]);
     setStatus(`${selected.length + 1} aree unite con Smart Selection`);
@@ -5213,6 +5483,7 @@ export default function PlanimetriaEditor({
       customUsageLabel: first.customUsageLabel,
       color: first.color,
       includedInLot: selected.some((selection) => selection.includedInLot),
+      lotInclusionMode: selected.some((selection) => selection.lotInclusionMode === "manual") ? "manual" : "auto",
     });
     if (mergedId) setSelectedSelectionIds([mergedId]);
     setStatus(`${selected.length} aree unite`);
@@ -5332,23 +5603,33 @@ export default function PlanimetriaEditor({
       return;
     }
 
-    if (activeTool === "polygon") {
-      if (!canUseActiveUsage()) return;
+    if (activeTool === "polygon" || activeTool === "lot") {
+      if (activeTool === "polygon" && !canUseActiveUsage()) return;
       const firstPoint = polygonDraft[0];
       const closeThreshold = Math.max(12, Math.round(12 * runtimeRef.current.renderScale));
       if (firstPoint && polygonDraft.length >= 3 && distance(point, firstPoint) <= closeThreshold) {
-        const region = createPolygonRegion(polygonDraft);
-        if (region) {
-          commitSelection(region, activeUsage, opacityPercent / 100, "polygon", polygonDraft);
+        const committed = activeTool === "lot"
+          ? commitLotBoundary(polygonDraft)
+          : (() => {
+              const region = createPolygonRegion(polygonDraft);
+              if (!region) return false;
+              commitSelection(region, activeUsage, opacityPercent / 100, "polygon", polygonDraft);
+              return true;
+            })();
+        if (committed) {
           setPolygonDraft([]);
           setPointerPreview(null);
-          setStatus("Poligono chiuso");
+          if (activeTool === "polygon") setStatus("Poligono chiuso");
         }
         return;
       }
       setPolygonDraft((current) => [...current, point]);
       setPointerPreview(point);
-      setStatus("Aggiungi vertici, poi clicca sul primo punto per chiudere");
+      setStatus(
+        activeTool === "lot"
+          ? "Definisci il lotto: aggiungi vertici e clicca sul primo per chiudere"
+          : "Aggiungi vertici, poi clicca sul primo punto per chiudere",
+      );
       return;
     }
 
@@ -5491,7 +5772,7 @@ export default function PlanimetriaEditor({
       return;
     }
 
-    if (activeTool === "polygon" && polygonDraft.length > 0) {
+    if ((activeTool === "polygon" || activeTool === "lot") && polygonDraft.length > 0) {
       setPointerPreview(point);
       return;
     }
@@ -5624,6 +5905,8 @@ export default function PlanimetriaEditor({
       applyDragDelta(dragState, dx, dy);
       dragStateRef.current = null;
       if (dx !== 0 || dy !== 0) {
+        reconcilePageLotSelections(runtimeRef.current.currentPage);
+        redrawMasks();
         setStatus(`${dragState.snapshots.length} aree spostate`);
         markDirty();
         bumpRevision();
@@ -5779,6 +6062,13 @@ export default function PlanimetriaEditor({
         rotateCanvasPoint(point, oldWidth, oldHeight, newWidth, newHeight, delta),
       );
     });
+    const pageLotBoundaries = runtimeRef.current.lotBoundariesByPage.get(pageNumber) ?? [];
+    pageLotBoundaries.forEach((boundary) => {
+      boundary.region = rotateRegion(boundary.region, oldWidth, oldHeight, newWidth, newHeight, delta);
+      boundary.polygon = boundary.polygon.map((point) =>
+        rotateCanvasPoint(point, oldWidth, oldHeight, newWidth, newHeight, delta),
+      );
+    });
 
     setRulerSegment((segment) =>
       segment ? rotateSegment(segment, pageNumber, oldWidth, oldHeight, newWidth, newHeight, delta) : segment,
@@ -5847,6 +6137,36 @@ export default function PlanimetriaEditor({
       ...current,
       [section]: !current[section],
     }));
+  }
+
+  function resizeAreaTable(event: PointerEvent<HTMLDivElement>) {
+    const resize = areaTableResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    const panelHeight = areaTableDockRef.current?.parentElement?.clientHeight ?? window.innerHeight;
+    const maximum = Math.max(220, panelHeight - 76);
+    const nextHeight = resize.startHeight + resize.startY - event.clientY;
+    setAreaTableHeight(Math.min(maximum, Math.max(180, Math.round(nextHeight))));
+  }
+
+  function finishAreaTableResize(event: PointerEvent<HTMLDivElement>) {
+    if (areaTableResizeRef.current?.pointerId !== event.pointerId) return;
+    areaTableResizeRef.current = null;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // The browser can release capture automatically when the pointer leaves the handle.
+    }
+  }
+
+  function startAreaTableResize(event: PointerEvent<HTMLDivElement>) {
+    if (areaTableCollapsed) return;
+    areaTableResizeRef.current = {
+      startY: event.clientY,
+      startHeight: areaTableDockRef.current?.getBoundingClientRect().height ?? areaTableHeight,
+      pointerId: event.pointerId,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
   }
 
   function collapseAllAreas() {
@@ -6037,7 +6357,7 @@ export default function PlanimetriaEditor({
 
   function selectTool(tool: EditorTool) {
     setActiveTool(tool);
-    if (tool !== "polygon") {
+    if (tool !== activeTool || (tool !== "polygon" && tool !== "lot")) {
       setPolygonDraft([]);
       setPointerPreview(null);
     }
@@ -6048,10 +6368,14 @@ export default function PlanimetriaEditor({
     if (tool !== "ruler") {
       rulerDragRef.current = null;
       setRulerDraft(null);
+      setAreaCalibrationOpen(false);
     }
     if (tool === "select") setStatus("Seleziona aree, trascina o usa copia/incolla");
     if (tool === "smart") setStatus("Smart selection attiva");
     if (tool === "polygon") setStatus("Disegna i vertici del poligono");
+    if (tool === "lot") {
+      setStatus(currentLotBoundaries.length > 0 ? "Ridisegna la definizione del lotto" : "Disegna la definizione del lotto");
+    }
     if (tool === "ruler") setStatus("Traccia una distanza tra due punti");
   }
 
@@ -6483,11 +6807,97 @@ export default function PlanimetriaEditor({
                     Taratura
                   </button>
                   <strong>{rulerSegment ? `${areaFormatter.format(rulerDistanceMeters)} m` : "Nessun segmento"}</strong>
+                  <button
+                    type="button"
+                    className={`mini-tool-button ruler-calibration-toggle ${areaCalibrationOpen ? "active" : ""}`}
+                    onClick={() => setAreaCalibrationOpen((open) => !open)}
+                    aria-expanded={areaCalibrationOpen}
+                    title="Apri la taratura avanzata delle aree"
+                  >
+                    Taratura aree
+                    <ChevronDown size={14} />
+                  </button>
                 </div>
               )}
             </div>
             <div className="canvas-toolbar-meta">
               <div className="canvas-edit-actions">
+                <div className="canvas-zoom-toolbar" aria-label="Zoom planimetria">
+                  <button
+                    className="icon-button"
+                    title={withShortcut("Riduci zoom", SHORTCUTS.zoomOut)}
+                    disabled={!hasPdf || zoomPercent <= ZOOM_MIN}
+                    onClick={() => updateZoom(zoomPercent - ZOOM_BUTTON_STEP, getVisibleStageCenterAnchor())}
+                  >
+                    <ZoomOut size={17} />
+                  </button>
+                  <label title={withShortcut("Zoom planimetria", SHORTCUTS.wheelZoom)}>
+                    <span>{zoomPercent}%</span>
+                    <input
+                      type="range"
+                      min={ZOOM_MIN}
+                      max={ZOOM_MAX}
+                      step={ZOOM_SLIDER_STEP}
+                      value={zoomPercent}
+                      onChange={(event) => updateZoom(Number(event.target.value), getVisibleStageCenterAnchor())}
+                    />
+                  </label>
+                  <button
+                    className="icon-button"
+                    title={withShortcut("Aumenta zoom", SHORTCUTS.zoomIn)}
+                    disabled={!hasPdf || zoomPercent >= ZOOM_MAX}
+                    onClick={() => updateZoom(zoomPercent + ZOOM_BUTTON_STEP, getVisibleStageCenterAnchor())}
+                  >
+                    <ZoomIn size={17} />
+                  </button>
+                  <button className="icon-button" title="Adatta alla vista" disabled={!hasPdf} onClick={fitPageToViewport}>
+                    <Maximize2 size={17} />
+                  </button>
+                  <div className="canvas-view-menu">
+                    <button
+                      className={`icon-button ${opacityDockOpen ? "active" : ""}`}
+                      title="Rotazione e opacità"
+                      aria-label="Rotazione e opacità"
+                      aria-expanded={opacityDockOpen}
+                      onClick={() => setOpacityDockOpen((open) => !open)}
+                    >
+                      <Layers size={17} />
+                    </button>
+                    {opacityDockOpen && (
+                      <div className="canvas-view-popover">
+                        <div>
+                          <button
+                            className="icon-button"
+                            title={withShortcut(`Ruota a sinistra (${currentPageRotation} gradi)`, SHORTCUTS.rotateLeft)}
+                            disabled={!hasPdf || busy}
+                            onClick={() => void rotateCurrentPage(-90)}
+                          >
+                            <RotateCcw size={17} />
+                          </button>
+                          <button
+                            className="icon-button"
+                            title={withShortcut(`Ruota a destra (${currentPageRotation} gradi)`, SHORTCUTS.rotateRight)}
+                            disabled={!hasPdf || busy}
+                            onClick={() => void rotateCurrentPage(90)}
+                          >
+                            <RotateCw size={17} />
+                          </button>
+                          <span>Rotazione {currentPageRotation}°</span>
+                        </div>
+                        <label>
+                          <span>Opacità {opacityPercent}%</span>
+                          <input
+                            type="range"
+                            min={15}
+                            max={75}
+                            value={opacityPercent}
+                            onChange={(event) => updateMaskOpacity(Number(event.target.value))}
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <button
                   className="icon-button"
                   title={withShortcut("Indietro", SHORTCUTS.undo)}
@@ -6516,7 +6926,7 @@ export default function PlanimetriaEditor({
                   <button
                     className="icon-button danger-icon split-chevron"
                     title="Altre azioni di cancellazione"
-                    disabled={!hasCurrentPageAreas || busy}
+                    disabled={(!hasCurrentPageAreas && !hasCurrentPageLotBoundary) || busy}
                     onClick={() => setDeleteMenuOpen((open) => !open)}
                     aria-expanded={deleteMenuOpen}
                   >
@@ -6528,11 +6938,15 @@ export default function PlanimetriaEditor({
                         <Trash2 size={15} />
                         Cancella aree pagina
                       </button>
+                      <button type="button" onClick={removeCurrentPageLotBoundary} disabled={!hasCurrentPageLotBoundary}>
+                        <LandPlot size={15} />
+                        Cancella definizione lotto
+                      </button>
                     </div>
                   )}
                 </div>
               </div>
-              <span>{canvasPixels}</span>
+              <span className="canvas-pixel-meta">{canvasPixels}</span>
               {pageCount > 1 ? (
                 <div className="page-stepper" aria-label="Navigazione pagine PDF">
                   <button
@@ -6606,78 +7020,26 @@ export default function PlanimetriaEditor({
               </div>
             </div>
           </div>
-          <div className={`canvas-zoom-dock ${opacityDockOpen ? "opacity-open" : ""}`} aria-label="Vista planimetria">
-            <div className="canvas-zoom-row">
-              <button
-                className="icon-button"
-                title={withShortcut("Riduci zoom", SHORTCUTS.zoomOut)}
-                disabled={!hasPdf || zoomPercent <= ZOOM_MIN}
-                onClick={() => updateZoom(zoomPercent - ZOOM_BUTTON_STEP, getVisibleStageCenterAnchor())}
+          <section
+            ref={areaTableDockRef}
+            className={`area-table-dock ${areaTableCollapsed ? "collapsed" : ""}`}
+            aria-label="Tabella aree selezionate"
+            style={{ "--area-table-height": `${areaTableHeight}px` } as CSSProperties}
+          >
+            {!areaTableCollapsed && (
+              <div
+                className="area-table-resize-handle"
+                role="separator"
+                aria-label="Ridimensiona altezza tabella aree"
+                aria-orientation="horizontal"
+                onPointerDown={startAreaTableResize}
+                onPointerMove={resizeAreaTable}
+                onPointerUp={finishAreaTableResize}
+                onPointerCancel={finishAreaTableResize}
               >
-                <ZoomOut size={17} />
-              </button>
-              <label title={withShortcut("Zoom planimetria", SHORTCUTS.wheelZoom)}>
-                <span>{zoomPercent}%</span>
-                <input
-                  type="range"
-                  min={ZOOM_MIN}
-                  max={ZOOM_MAX}
-                  step={ZOOM_SLIDER_STEP}
-                  value={zoomPercent}
-                  onChange={(event) => updateZoom(Number(event.target.value), getVisibleStageCenterAnchor())}
-                />
-              </label>
-              <button
-                className="icon-button"
-                title={withShortcut("Aumenta zoom", SHORTCUTS.zoomIn)}
-                disabled={!hasPdf || zoomPercent >= ZOOM_MAX}
-                onClick={() => updateZoom(zoomPercent + ZOOM_BUTTON_STEP, getVisibleStageCenterAnchor())}
-              >
-                <ZoomIn size={17} />
-              </button>
-              <button className="icon-button" title="Adatta alla vista" disabled={!hasPdf} onClick={fitPageToViewport}>
-                <Maximize2 size={17} />
-              </button>
-              <button
-                className="icon-button"
-                title={withShortcut(`Ruota a sinistra (${currentPageRotation} gradi)`, SHORTCUTS.rotateLeft)}
-                disabled={!hasPdf || busy}
-                onClick={() => void rotateCurrentPage(-90)}
-              >
-                <RotateCcw size={17} />
-              </button>
-              <button
-                className="icon-button"
-                title={withShortcut(`Ruota a destra (${currentPageRotation} gradi)`, SHORTCUTS.rotateRight)}
-                disabled={!hasPdf || busy}
-                onClick={() => void rotateCurrentPage(90)}
-              >
-                <RotateCw size={17} />
-              </button>
-              <button
-                className={`icon-button canvas-dock-toggle ${opacityDockOpen ? "active" : ""}`}
-                title="Opacita"
-                aria-label="Opacita"
-                aria-expanded={opacityDockOpen}
-                onClick={() => setOpacityDockOpen((open) => !open)}
-              >
-                <Layers size={17} />
-              </button>
-            </div>
-            {opacityDockOpen && (
-              <label className="canvas-opacity-row">
-                <span>Opacita {opacityPercent}%</span>
-                <input
-                  type="range"
-                  min={15}
-                  max={75}
-                  value={opacityPercent}
-                  onChange={(event) => updateMaskOpacity(Number(event.target.value))}
-                />
-              </label>
+                <span />
+              </div>
             )}
-          </div>
-          <section className={`area-table-dock ${areaTableCollapsed ? "collapsed" : ""}`} aria-label="Tabella aree selezionate">
             <button
               className="area-table-dock-toggle"
               type="button"
@@ -6819,7 +7181,14 @@ export default function PlanimetriaEditor({
                                   </div>
                                 </td>
                                 <td>
-                                  <label className="lot-checkbox compact" title="Includi questa area nel calcolo del lotto">
+                                  <label
+                                    className={`lot-checkbox compact ${selection.lotInclusionMode === "auto" ? "auto" : ""}`}
+                                    title={
+                                      selection.lotInclusionMode === "auto"
+                                        ? "Preselezionata dalla definizione lotto; puoi modificarla manualmente"
+                                        : "Includi questa area nel calcolo del lotto"
+                                    }
+                                  >
                                     <input
                                       type="checkbox"
                                       checked={selection.includedInLot === true}
@@ -6991,21 +7360,8 @@ export default function PlanimetriaEditor({
               </div>
             )}
           </section>
-          <details
-            className="area-calibration-dock"
-            open={areaCalibrationOpen}
-            onToggle={(event) => setAreaCalibrationOpen(event.currentTarget.open)}
-          >
-            <summary>
-              <span>
-                <Ruler size={16} />
-                Strumento taratura aree
-              </span>
-              <em>
-                Bordo {wallInclusionRadius === null ? `auto ${resolvedWallInclusionRadius}px` : `${resolvedWallInclusionRadius}px`}
-              </em>
-              <ChevronDown size={15} />
-            </summary>
+          {areaCalibrationOpen && (
+            <div className="ruler-area-calibration-popover" aria-label="Taratura aree">
             <div className="area-calibration-content">
               <div className="area-calibration-baseline">
                 <strong>Default attuali</strong>
@@ -7119,7 +7475,8 @@ export default function PlanimetriaEditor({
                 )}
               </div>
             </div>
-          </details>
+            </div>
+          )}
         </section>
 
         {rightPanelOpen && (
@@ -7591,8 +7948,12 @@ export default function PlanimetriaEditor({
                               )}
                             </div>
                             <label
-                              className="lot-checkbox compact area-row-lot"
-                              title="Includi questa area nel calcolo del lotto"
+                              className={`lot-checkbox compact area-row-lot ${selection.lotInclusionMode === "auto" ? "auto" : ""}`}
+                              title={
+                                selection.lotInclusionMode === "auto"
+                                  ? "Preselezionata dalla definizione lotto; puoi modificarla manualmente"
+                                  : "Includi questa area nel calcolo del lotto"
+                              }
                               onClick={(event) => event.stopPropagation()}
                             >
                               <input
