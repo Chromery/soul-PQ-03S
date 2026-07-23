@@ -42,6 +42,7 @@ import {
 import { DEFAULT_EDITOR_PREFERENCES, readEditorPreferences } from "./editorPreferences";
 import { openEntriesInForMaps, toForMapsEntry } from "./formaps";
 import type { PropertyImuCalculation } from "./imu";
+import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 import {
   DEFAULT_LOT_VALUATION,
   lotValueShare,
@@ -7725,17 +7726,12 @@ export default function PlanimetriaEditor({
                                         }
                                       }}
                                     />
-                                    {areaOverridden && <span className="manual-override-badge">Manuale</span>}
                                     {areaOverridden && (
-                                      <button
-                                        type="button"
-                                        className="inline-reset-button"
-                                        onClick={() => clearSelectionAreaOverride(selection.id)}
-                                      >
-                                        Annulla
-                                      </button>
+                                      <ManualOverrideIndicator
+                                        calculatedValue={formatM2(calculatedArea)}
+                                        onReset={() => clearSelectionAreaOverride(selection.id)}
+                                      />
                                     )}
-                                    {areaOverridden && <small>Calc. {areaFormatter.format(calculatedArea)}</small>}
                                   </div>
                                 </td>
                                 <td>
@@ -7763,17 +7759,12 @@ export default function PlanimetriaEditor({
                                 <td>
                                   <div className="area-table-estimate-cell">
                                     <strong>{moneyFormatter.format(amount)}</strong>
-                                    {amountOverridden && <span className="manual-override-badge">Manuale</span>}
                                     {amountOverridden && (
-                                      <button
-                                        type="button"
-                                        className="inline-reset-button"
-                                        onClick={() => clearSelectionAmountOverride(selection.id)}
-                                      >
-                                        Annulla
-                                      </button>
+                                      <ManualOverrideIndicator
+                                        calculatedValue={moneyFormatter.format(calculatedAmount)}
+                                        onReset={() => clearSelectionAmountOverride(selection.id)}
+                                      />
                                     )}
-                                    {amountOverridden && <small>Calc. {moneyFormatter.format(calculatedAmount)}</small>}
                                   </div>
                                 </td>
                                 <td>
@@ -8549,20 +8540,12 @@ export default function PlanimetriaEditor({
                                       }}
                                     />
                                     <span className="area-value-unit">m2</span>
-                                    {areaOverridden && <span className="manual-override-badge">Manuale</span>}
                                     {areaOverridden && (
-                                      <button
-                                        type="button"
-                                        className="inline-reset-button"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          clearSelectionAreaOverride(selection.id);
-                                        }}
-                                      >
-                                        Annulla
-                                      </button>
+                                      <ManualOverrideIndicator
+                                        calculatedValue={formatM2(calculatedArea)}
+                                        onReset={() => clearSelectionAreaOverride(selection.id)}
+                                      />
                                     )}
-                                    {areaOverridden && <small>Calcolata: {formatM2(calculatedArea)}</small>}
                                   </dd>
                                 </div>
                                 <div>
@@ -8594,20 +8577,12 @@ export default function PlanimetriaEditor({
                                   <dt>Valore destinazione</dt>
                                   <dd className="area-override-cell">
                                     <strong>{moneyFormatter.format(amount)}</strong>
-                                    {amountOverridden && <span className="manual-override-badge">Manuale</span>}
                                     {amountOverridden && (
-                                      <button
-                                        type="button"
-                                        className="inline-reset-button"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          clearSelectionAmountOverride(selection.id);
-                                        }}
-                                      >
-                                        Annulla
-                                      </button>
+                                      <ManualOverrideIndicator
+                                        calculatedValue={moneyFormatter.format(calculatedAmount)}
+                                        onReset={() => clearSelectionAmountOverride(selection.id)}
+                                      />
                                     )}
-                                    {amountOverridden && <small>Calcolata: {moneyFormatter.format(calculatedAmount)}</small>}
                                   </dd>
                                 </div>
                                 <div>

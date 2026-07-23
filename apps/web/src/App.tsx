@@ -65,6 +65,7 @@ import {
 import { openEntriesInForMaps, toForMapsEntries, toForMapsEntry } from "./formaps";
 import { lotValueShare, normalizeLotValuation, resolveLotValuation } from "./lotValuation";
 import type { LotValuation, LotValuationMode } from "./lotValuation";
+import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.50.0";
@@ -6654,21 +6655,16 @@ function PropertyAreaDetail({
                               onBlur={(event) => handleAreaBlur(row, event.currentTarget)}
                               onKeyDown={(event) => handleNumericInputKeyDown(event, areaFormatter.format(row.area))}
                             />
-                            {row.areaOverridden && <span className="manual-override-badge">Manuale</span>}
                             {row.areaOverridden && (
-                              <button
-                                type="button"
-                                className="inline-reset-button"
-                                onClick={() =>
+                              <ManualOverrideIndicator
+                                calculatedValue={formatM2(row.calculatedArea)}
+                                onReset={() =>
                                   updateEditableSelection(row.id, (selection) => {
                                     selection.areaOverrideM2 = null;
                                   })
                                 }
-                              >
-                                Annulla
-                              </button>
+                              />
                             )}
-                            {row.areaOverridden && <small>Calc. {formatM2(row.calculatedArea)}</small>}
                           </div>
                         </td>
                         <td>
@@ -6681,7 +6677,6 @@ function PropertyAreaDetail({
                               onBlur={(event) => handleRateBlur(row, event.currentTarget)}
                               onKeyDown={(event) => handleNumericInputKeyDown(event, areaFormatter.format(row.rate))}
                             />
-                            <small>Euro/m2</small>
                           </div>
                         </td>
                         <td>
@@ -6694,21 +6689,16 @@ function PropertyAreaDetail({
                               onBlur={(event) => handleAmountBlur(row, event.currentTarget)}
                               onKeyDown={(event) => handleNumericInputKeyDown(event, areaFormatter.format(row.amount))}
                             />
-                            {row.amountOverridden && <span className="manual-override-badge">Manuale</span>}
                             {row.amountOverridden && (
-                              <button
-                                type="button"
-                                className="inline-reset-button"
-                                onClick={() =>
+                              <ManualOverrideIndicator
+                                calculatedValue={formatEuro(row.calculatedAmount)}
+                                onReset={() =>
                                   updateEditableSelection(row.id, (selection) => {
                                     selection.amountOverride = null;
                                   })
                                 }
-                              >
-                                Annulla
-                              </button>
+                              />
                             )}
-                            {row.amountOverridden && <small>Calc. {formatEuro(row.calculatedAmount)}</small>}
                           </div>
                         </td>
                         <td>

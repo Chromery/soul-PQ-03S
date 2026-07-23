@@ -929,8 +929,8 @@ a.button {
 
 .studies-table th,
 .compact-table th {
-  height: 46px;
-  padding: 0 12px;
+  height: 38px;
+  padding: 0 9px;
   color: #173154;
   font-size: 12px;
   font-weight: 800;
@@ -938,15 +938,15 @@ a.button {
 }
 
 .studies-table td {
-  padding: 12px;
+  padding: 7px 9px;
   color: #173154;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .compact-table td {
-  padding: 11px 12px;
+  padding: 7px 9px;
   color: #173154;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .studies-table th:first-child,
@@ -1258,8 +1258,9 @@ body.is-resizing-columns {
 
 .company-cell {
   display: grid;
-  gap: 3px;
+  gap: 1px;
   min-width: 0;
+  line-height: 1.15;
 }
 
 .company-cell strong,
@@ -1271,7 +1272,7 @@ body.is-resizing-columns {
 
 .company-cell span {
   color: var(--secondary);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .sort-header {
@@ -1319,7 +1320,7 @@ body.is-resizing-columns {
 .outcome-badge,
 .outcome-select {
   display: inline-flex;
-  min-height: 28px;
+  min-height: 25px;
   align-items: center;
   justify-content: center;
   padding: 0 11px;
@@ -1360,7 +1361,7 @@ body.is-resizing-columns {
 
 .status-select {
   width: 100%;
-  min-height: 34px;
+  min-height: 29px;
   padding: 0 9px;
   border: 1px solid transparent;
   border-radius: 7px;
@@ -1418,16 +1419,17 @@ body.is-resizing-columns {
 
 .date-stack {
   display: grid;
-  gap: 2px;
+  gap: 0;
+  line-height: 1.15;
 }
 
 .date-stack strong {
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .date-stack span {
   color: #6d28d9;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -3009,12 +3011,13 @@ body.is-resizing-columns {
 }
 
 .property-operational-table th {
-  height: 52px;
+  height: 40px;
   font-size: 11px;
   line-height: 1.15;
 }
 
 .property-operational-table td {
+  padding-block: 5px;
   white-space: nowrap;
 }
 
@@ -3034,6 +3037,7 @@ body.is-resizing-columns {
 .property-operational-table .status-badge,
 .property-operational-table .outcome-select {
   width: 100%;
+  min-height: 25px;
   min-width: 0;
   padding-inline: 5px;
   font-size: 11px;
@@ -3076,8 +3080,8 @@ body.is-resizing-columns {
 }
 
 .drag-handle {
-  width: 29px;
-  height: 31px;
+  width: 27px;
+  height: 27px;
   display: inline-grid;
   place-items: center;
   border: 0;
@@ -3110,12 +3114,13 @@ body.is-resizing-columns {
 
 .money-percent-stack {
   display: grid;
-  gap: 3px;
+  gap: 0;
+  line-height: 1.15;
 }
 
 .money-percent-stack strong {
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .money-percent-stack .delta {
@@ -3868,10 +3873,18 @@ body.is-resizing-columns {
   min-width: 1500px;
 }
 
+.editable-property-area-table th {
+  height: 34px;
+}
+
+.editable-property-area-table td {
+  padding-block: 4px;
+}
+
 .property-area-input,
 .property-area-edit-field input {
   width: 100%;
-  min-height: 36px;
+  min-height: 30px;
   border: 1px solid #d6e0ec;
   border-radius: 7px;
   padding: 0 9px;
@@ -3883,14 +3896,14 @@ body.is-resizing-columns {
 
 .property-area-edit-field {
   min-width: 0;
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 5px;
 }
 
-.property-area-edit-field small {
-  color: var(--secondary);
-  font-size: 11px;
-  font-weight: 750;
+.property-area-edit-field input {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .manual-override-badge {
@@ -3922,6 +3935,110 @@ body.is-resizing-columns {
   color: var(--primary);
   border-color: #b8d7ff;
   background: #eef5ff;
+}
+
+.manual-override-dot {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: help;
+}
+
+.manual-override-dot > span {
+  width: 9px;
+  height: 9px;
+  display: block;
+  border: 1px solid #d69e00;
+  border-radius: 50%;
+  background: #facc15;
+  box-shadow: 0 0 0 2px rgb(250 204 21 / 20%);
+}
+
+.manual-override-dot:hover,
+.manual-override-dot:focus-visible,
+.manual-override-dot[aria-expanded="true"] {
+  outline: 0;
+  background: #fff8d6;
+}
+
+.manual-override-tooltip {
+  position: fixed;
+  z-index: 1000;
+  width: 238px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px 10px;
+  padding: 10px;
+  border: 1px solid #e7cf72;
+  border-radius: 8px;
+  color: #3f3210;
+  background: #fffdf3;
+  box-shadow: 0 14px 38px rgb(15 23 42 / 20%);
+}
+
+.manual-override-tooltip.top {
+  transform: translateY(-100%);
+}
+
+.manual-override-tooltip > div {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.manual-override-tooltip > div strong {
+  color: #854d0e;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.manual-override-tooltip > div span {
+  color: #7c6f4b;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.manual-override-tooltip > b {
+  min-width: 0;
+  grid-column: 1;
+  overflow: hidden;
+  color: #3f3210;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual-override-tooltip > button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid #e0c455;
+  border-radius: 6px;
+  color: #713f12;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.manual-override-tooltip > button:hover,
+.manual-override-tooltip > button:focus-visible {
+  color: #92400e;
+  border-color: #d69e00;
+  outline: 0;
+  background: #fff8d6;
 }
 
 .property-area-table th:nth-child(1),
@@ -4016,6 +4133,7 @@ body.is-resizing-columns {
 }
 
 .properties-index-table td {
+  padding-block: 5px;
   white-space: nowrap;
 }
 
@@ -4025,6 +4143,7 @@ body.is-resizing-columns {
 
 .properties-index-table .outcome-select {
   width: 100%;
+  min-height: 25px;
   min-width: 0;
   padding-inline: 6px;
 }
@@ -5494,13 +5613,13 @@ body.is-resizing-columns {
 }
 
 .area-table-dock-toggle {
-  min-height: 42px;
+  min-height: 36px;
   width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 18px;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 4px 9px;
   border: 0;
   color: #173154;
   background: transparent;
@@ -5537,8 +5656,8 @@ body.is-resizing-columns {
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 8px;
-  padding: 0 10px 10px;
+  gap: 5px;
+  padding: 0 8px 8px;
 }
 
 .area-table-actions {
@@ -5549,12 +5668,12 @@ body.is-resizing-columns {
 }
 
 .area-table-actions .icon-button {
-  width: 34px;
-  height: 34px;
+  width: 29px;
+  height: 29px;
 }
 
 .area-table-actions .compact-button {
-  min-height: 34px;
+  min-height: 29px;
 }
 
 .area-table-scroll {
@@ -5582,7 +5701,7 @@ body.is-resizing-columns {
 
 .area-selection-table th,
 .area-selection-table td {
-  padding: 7px;
+  padding: 4px 6px;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }
@@ -5617,7 +5736,7 @@ body.is-resizing-columns {
 
 .area-selection-table tfoot tr:first-child th,
 .area-selection-table tfoot tr:first-child td {
-  bottom: 31px;
+  bottom: 27px;
 }
 
 .area-selection-table tfoot th {
@@ -5636,8 +5755,8 @@ body.is-resizing-columns {
 }
 
 .area-selection-table input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   accent-color: var(--primary);
 }
 
@@ -5645,7 +5764,7 @@ body.is-resizing-columns {
 .area-table-text-input {
   width: 100%;
   min-width: 0;
-  height: 32px;
+  height: 28px;
   border: 1px solid var(--line);
   border-radius: 7px;
   color: #173154;
@@ -5663,7 +5782,7 @@ body.is-resizing-columns {
 }
 
 .area-selection-table .area-value-input {
-  height: 30px;
+  height: 27px;
   font-size: 12px;
 }
 
@@ -5696,15 +5815,15 @@ body.is-resizing-columns {
 
 .area-table-usage-cell {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) 32px;
+  grid-template-columns: minmax(160px, 1fr) 28px;
   gap: 5px;
   align-items: center;
 }
 
 .area-table-usage-cell .icon-button,
 .area-selection-table td > .icon-button {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   min-width: 0;
 }
 
@@ -5712,14 +5831,19 @@ body.is-resizing-columns {
 .area-table-estimate-cell {
   min-width: 150px;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 5px;
 }
 
+.area-table-value-cell .area-value-input {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .lot-checkbox {
   width: fit-content;
-  min-height: 30px;
+  min-height: 27px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -5741,7 +5865,7 @@ body.is-resizing-columns {
 }
 
 .lot-checkbox.compact {
-  min-height: 25px;
+  min-height: 23px;
   gap: 4px;
   padding: 0 6px;
   font-size: 10px;
