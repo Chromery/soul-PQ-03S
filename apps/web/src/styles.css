@@ -5667,6 +5667,56 @@ body.is-resizing-columns {
   gap: 6px;
 }
 
+.area-table-view-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: auto;
+  padding: 2px;
+  border: 1px solid #d8e6f7;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.area-table-view-toggle button {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  color: #526780;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.area-table-view-toggle button:hover,
+.area-table-view-toggle button:focus-visible {
+  color: var(--primary);
+  background: #eef5ff;
+}
+
+.area-table-view-toggle button.active {
+  color: #0754b8;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+}
+
+.area-table-view-toggle button span {
+  min-width: 17px;
+  height: 17px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  color: #526780;
+  background: #e9f0f8;
+  font-size: 9px;
+}
+
 .area-table-actions .icon-button {
   width: 29px;
   height: 29px;
@@ -5692,7 +5742,7 @@ body.is-resizing-columns {
 
 .area-selection-table {
   width: 100%;
-  min-width: 1540px;
+  min-width: 1450px;
   border-collapse: separate;
   border-spacing: 0;
   color: #173154;
@@ -5736,7 +5786,7 @@ body.is-resizing-columns {
 
 .area-selection-table tfoot tr:first-child th,
 .area-selection-table tfoot tr:first-child td {
-  bottom: 27px;
+  bottom: 42px;
 }
 
 .area-selection-table tfoot th {
@@ -5752,6 +5802,10 @@ body.is-resizing-columns {
 
 .area-selection-table tbody tr.selected td {
   background: #f5f9ff;
+}
+
+.area-selection-table tbody tr.partially-selected td {
+  background: #fbfdff;
 }
 
 .area-selection-table input[type="checkbox"] {
@@ -5811,6 +5865,56 @@ body.is-resizing-columns {
   color: var(--secondary);
   font-size: 11px;
   font-weight: 800;
+}
+
+.area-table-name.breakdown {
+  min-width: 190px;
+}
+
+.area-table-name.breakdown small {
+  white-space: nowrap;
+}
+
+.area-rendita-comparison {
+  min-width: 460px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  white-space: nowrap;
+}
+
+.area-rendita-comparison > span:not([aria-hidden]) {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.area-rendita-comparison small {
+  color: var(--secondary);
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.area-rendita-comparison em {
+  padding: 3px 6px;
+  border-radius: 999px;
+  color: #526780;
+  background: #dfe8f2;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.area-rendita-comparison em.increase {
+  color: #9a4f08;
+  background: #fff1d6;
+}
+
+.area-rendita-comparison em.decrease {
+  color: #08734e;
+  background: #dff8ed;
 }
 
 .area-table-usage-cell {

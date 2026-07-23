@@ -98,6 +98,7 @@ type SelectionSource = "smart" | "polygon" | "rectangle" | "ellipse" | "merged" 
 type LotInclusionMode = "auto" | "manual";
 type ScaleExtractionStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
 type ScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
+type AreaTableViewMode = "individual" | "breakdown";
 type PageRotation = 0 | 90 | 180 | 270;
 type TuningKey = "threshold" | "inflate" | "gap" | "dash";
 
@@ -737,6 +738,17 @@ const moneyFormatter = new Intl.NumberFormat("it-IT", {
   currency: "EUR",
 });
 
+function formatSignedMoney(value: number) {
+  const normalized = Math.abs(value) < 0.005 ? 0 : value;
+  return `${normalized > 0 ? "+" : ""}${moneyFormatter.format(normalized)}`;
+}
+
+function formatSignedPercent(value: number | null) {
+  if (value === null) return "n.d.";
+  const normalized = Math.abs(value) < 0.005 ? 0 : value;
+  return `${normalized > 0 ? "+" : ""}${areaFormatter.format(normalized)}%`;
+}
+
 function createRuntime(): Runtime {
   return {
     pdfDoc: null,
@@ -1327,6 +1339,7 @@ export default function PlanimetriaEditor({
   const [clearPageConfirmOpen, setClearPageConfirmOpen] = useState(false);
   const [opacityDockOpen, setOpacityDockOpen] = useState(false);
   const [areaTableCollapsed, setAreaTableCollapsed] = useState(false);
+  const [areaTableView, setAreaTableView] = useState<AreaTableViewMode>("individual");
   const [areaTableHeight, setAreaTableHeight] = useState(310);
   const [focusMode, setFocusMode] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<ToolSectionId, boolean>>({
@@ -1542,6 +1555,70 @@ export default function PlanimetriaEditor({
       rendita: estimatedRenditaFromAmount(amount),
     };
   }, [resolvedLotValuation.lotValue, selectedAreas, tracedLotArea]);
+
+  const areaBreakdowns = useMemo(() => {
+    const grouped = new Map<
+      string,
+      {
+        key: string;
+        usage: UsageDefinition;
+        rows: typeof selectedAreas;
+      }
+    >();
+    selectedAreas.forEach((row) => {
+      const customKey =
+        row.selection.customUsageId ??
+        normalizeCustomUsageLabel(row.selection.customUsageLabel).toLowerCase();
+      const key =
+        row.selection.usageId === CUSTOM_USAGE_ID
+          ? `custom:${customKey || row.usage.label.toLowerCase()}`
+          : `fixed:${row.selection.usageId}`;
+      const current = grouped.get(key);
+      if (current) current.rows.push(row);
+      else grouped.set(key, { key, usage: row.usage, rows: [row] });
+    });
+
+    return Array.from(grouped.values()).map((group, index) => {
+      const area = group.rows.reduce((sum, row) => sum + row.area, 0);
+      const calculatedArea = group.rows.reduce((sum, row) => sum + row.calculatedArea, 0);
+      const amount = group.rows.reduce((sum, row) => sum + row.amount, 0);
+      const calculatedAmount = group.rows.reduce((sum, row) => sum + row.calculatedAmount, 0);
+      const lotValue = group.rows.reduce((sum, row) => sum + row.lotValue, 0);
+      const totalAmount = group.rows.reduce((sum, row) => sum + row.totalAmount, 0);
+      const weightedRate =
+        area > 0
+          ? group.rows.reduce((sum, row) => sum + row.area * row.selection.rate, 0) / area
+          : group.rows.reduce((sum, row) => sum + row.selection.rate, 0) / group.rows.length;
+      const opacity =
+        group.rows.reduce((sum, row) => sum + row.selection.opacity, 0) / group.rows.length;
+      const selectionIds = group.rows.map((row) => row.selection.id);
+      const pages = Array.from(new Set(group.rows.map((row) => row.selection.page))).sort((a, b) => a - b);
+      const allIncludedInLot = group.rows.every((row) => row.selection.includedInLot === true);
+      const someIncludedInLot = group.rows.some((row) => row.selection.includedInLot === true);
+      return {
+        ...group,
+        index,
+        area,
+        calculatedArea,
+        amount,
+        calculatedAmount,
+        lotValue,
+        totalAmount,
+        weightedRate,
+        opacity,
+        selectionIds,
+        pages,
+        allIncludedInLot,
+        someIncludedInLot,
+        areaOverridden: group.rows.some((row) => row.areaOverridden),
+        amountOverridden: group.rows.some((row) => row.amountOverridden),
+      };
+    });
+  }, [selectedAreas]);
+
+  const renditaDelta = totals.rendita - property.currentRendita;
+  const renditaDeltaPercent =
+    property.currentRendita === 0 ? null : (renditaDelta / property.currentRendita) * 100;
 
   const currentImuCalculation =
     property.currentImuCalculation?.status === "calculated" ? property.currentImuCalculation : null;
@@ -5209,6 +5286,213 @@ export default function PlanimetriaEditor({
     return preset ? `custom:${preset.id}` : `orphan:${selection.id}`;
   }
 
+  function selectionsForIds(ids: string[]) {
+    const idSet = new Set(ids);
+    return Array.from(runtimeRef.current.selectionsByPage.values())
+      .flat()
+      .filter((selection) => idSet.has(selection.id));
+  }
+
+  function changeSelectionsUsageChoice(ids: string[], value: string) {
+    const targetSelections = selectionsForIds(ids);
+    if (targetSelections.length === 0) return;
+    const fixedUsageId = value.startsWith("fixed:")
+      ? value.slice("fixed:".length) as UsageId
+      : null;
+    const customPreset = value.startsWith("custom:")
+      ? customUsages.find((preset) => preset.id === value.slice("custom:".length))
+      : null;
+    if (!fixedUsageId && !customPreset) return;
+    const usage = fixedUsageId ? usageById(fixedUsageId) : usageFromCustomPreset(customPreset);
+    const changed = targetSelections.some((selection) =>
+      fixedUsageId
+        ? selection.usageId !== fixedUsageId
+        : selection.usageId !== CUSTOM_USAGE_ID || selection.customUsageId !== customPreset?.id,
+    );
+    if (!changed) return;
+
+    recordUndoState();
+    targetSelections.forEach((selection) => {
+      selection.usageId = fixedUsageId ?? CUSTOM_USAGE_ID;
+      selection.customUsageId = customPreset?.id;
+      selection.customUsageLabel = customPreset?.label;
+      selection.color = usage.color;
+      selection.rate = usage.rate;
+      selection.bitmap = createTintedCanvas(selection.region, usage.color, selection.opacity);
+    });
+    if (customPreset) {
+      setActiveUsage(CUSTOM_USAGE_ID);
+      setActiveCustomUsageId(customPreset.id);
+      setCustomUsageLabel(customPreset.label);
+    }
+    redrawMasks();
+    setStatus(`${targetSelections.length} aree aggiornate: ${usage.label}`);
+    markDirty();
+    bumpRevision();
+  }
+
+  function createCustomUsageForSelections(ids: string[]) {
+    const targetSelections = selectionsForIds(ids);
+    if (targetSelections.length === 0) return;
+    const first = targetSelections[0];
+    const preset = buildCustomUsagePreset({
+      color: first.usageId === CUSTOM_USAGE_ID ? first.color : undefined,
+      rate: first.usageId === CUSTOM_USAGE_ID ? first.rate : undefined,
+    });
+    recordUndoState();
+    setCustomUsages((current) => [...current, preset]);
+    targetSelections.forEach((selection) => {
+      selection.usageId = CUSTOM_USAGE_ID;
+      selection.customUsageId = preset.id;
+      selection.customUsageLabel = preset.label;
+      selection.color = preset.color;
+      selection.rate = preset.rate;
+      selection.bitmap = createTintedCanvas(selection.region, preset.color, selection.opacity);
+    });
+    setActiveUsage(CUSTOM_USAGE_ID);
+    setActiveCustomUsageId(preset.id);
+    setCustomUsageLabel(preset.label);
+    redrawMasks();
+    setStatus(`Nuova destinazione custom applicata a ${targetSelections.length} aree`);
+    markDirty();
+    bumpRevision();
+  }
+
+  function changeSelectionsColor(ids: string[], color: string) {
+    if (!isHexColor(color)) return;
+    const targetSelections = selectionsForIds(ids);
+    if (targetSelections.length === 0 || targetSelections.every((selection) => selection.color === color)) return;
+    recordUndoState();
+    targetSelections.forEach((selection) => {
+      selection.color = color;
+      selection.bitmap = createTintedCanvas(selection.region, color, selection.opacity);
+    });
+    redrawMasks();
+    setStatus(`Colore aggiornato per ${targetSelections.length} aree`);
+    markDirty();
+    bumpRevision();
+  }
+
+  function changeSelectionsOpacity(ids: string[], nextOpacityPercent: number) {
+    const opacity = Math.min(100, Math.max(5, nextOpacityPercent)) / 100;
+    const targetSelections = selectionsForIds(ids);
+    if (
+      targetSelections.length === 0 ||
+      targetSelections.every((selection) => Math.round(selection.opacity * 100) === Math.round(opacity * 100))
+    ) return;
+    recordUndoState();
+    targetSelections.forEach((selection) => {
+      selection.opacity = opacity;
+      selection.bitmap = createTintedCanvas(selection.region, selection.color, opacity);
+    });
+    redrawMasks();
+    setStatus(`Opacità aggiornata per ${targetSelections.length} aree`);
+    markDirty();
+    bumpRevision();
+  }
+
+  function changeSelectionsRate(ids: string[], rawValue: string) {
+    const parsed = parseNumberInput(rawValue);
+    if (parsed === null) {
+      setStatus("Inserisci un valore valido");
+      bumpRevision();
+      return null;
+    }
+    const nextRate = Math.max(0, parsed);
+    const targetSelections = selectionsForIds(ids);
+    if (targetSelections.length === 0) return null;
+    if (targetSelections.every((selection) => selection.rate === nextRate)) return nextRate;
+    recordUndoState();
+    targetSelections.forEach((selection) => {
+      selection.rate = nextRate;
+    });
+    setStatus(`Valore unitario aggiornato per ${targetSelections.length} aree`);
+    markDirty();
+    bumpRevision();
+    return nextRate;
+  }
+
+  function changeSelectionsLot(ids: string[], includedInLot: boolean) {
+    const targetSelections = selectionsForIds(ids);
+    if (
+      targetSelections.length === 0 ||
+      targetSelections.every((selection) => Boolean(selection.includedInLot) === includedInLot)
+    ) return;
+    recordUndoState();
+    targetSelections.forEach((selection) => {
+      selection.includedInLot = includedInLot;
+      selection.lotInclusionMode = "manual";
+    });
+    setStatus(
+      includedInLot
+        ? `${targetSelections.length} aree incluse nel lotto`
+        : `${targetSelections.length} aree escluse dal lotto`,
+    );
+    markDirty();
+    bumpRevision();
+  }
+
+  function changeBreakdownAreaOverride(
+    rows: typeof selectedAreas,
+    rawValue: string,
+    calculatedArea: number,
+  ) {
+    const parsed = parseNumberInput(rawValue);
+    if (parsed === null || parsed < 0) {
+      setStatus("Inserisci una superficie valida");
+      bumpRevision();
+      return null;
+    }
+    if (rows.length === 0) return null;
+    const resetToCalculated = Math.abs(parsed - calculatedArea) < 0.005;
+    const currentArea = rows.reduce((sum, row) => sum + row.area, 0);
+    if (
+      resetToCalculated &&
+      rows.every((row) => row.selection.areaOverrideM2 === null || row.selection.areaOverrideM2 === undefined)
+    ) return calculatedArea;
+    if (!resetToCalculated && Math.abs(parsed - currentArea) < 0.005) return currentArea;
+
+    recordUndoState();
+    const weightingTotal = currentArea > 0 ? currentArea : rows.length;
+    rows.forEach((row) => {
+      row.selection.areaOverrideM2 = resetToCalculated
+        ? null
+        : parsed * (currentArea > 0 ? row.area / weightingTotal : 1 / weightingTotal);
+    });
+    setStatus(resetToCalculated ? "Override superfici della ripartizione rimossi" : "Superficie ripartizione aggiornata");
+    markDirty();
+    bumpRevision();
+    return resetToCalculated ? calculatedArea : parsed;
+  }
+
+  function clearSelectionsAreaOverride(ids: string[]) {
+    const targetSelections = selectionsForIds(ids).filter(
+      (selection) => selection.areaOverrideM2 !== null && selection.areaOverrideM2 !== undefined,
+    );
+    if (targetSelections.length === 0) return;
+    recordUndoState();
+    targetSelections.forEach((selection) => {
+      selection.areaOverrideM2 = null;
+    });
+    setStatus("Override superfici della ripartizione rimossi");
+    markDirty();
+    bumpRevision();
+  }
+
+  function clearSelectionsAmountOverride(ids: string[]) {
+    const targetSelections = selectionsForIds(ids).filter(
+      (selection) => selection.amountOverride !== null && selection.amountOverride !== undefined,
+    );
+    if (targetSelections.length === 0) return;
+    recordUndoState();
+    targetSelections.forEach((selection) => {
+      selection.amountOverride = null;
+    });
+    setStatus("Override valori della ripartizione rimossi");
+    markDirty();
+    bumpRevision();
+  }
+
   function changeSelectionColor(id: string, color: string) {
     if (!isHexColor(color)) return;
     for (const pageSelections of runtimeRef.current.selectionsByPage.values()) {
@@ -8212,6 +8496,25 @@ export default function PlanimetriaEditor({
             {!areaTableCollapsed && (
               <div className="area-table-dock-content">
                 <div className="area-table-actions">
+                  <div className="area-table-view-toggle" role="group" aria-label="Visualizzazione aree">
+                    <button
+                      type="button"
+                      className={areaTableView === "individual" ? "active" : ""}
+                      aria-pressed={areaTableView === "individual"}
+                      onClick={() => setAreaTableView("individual")}
+                    >
+                      Singole aree
+                    </button>
+                    <button
+                      type="button"
+                      className={areaTableView === "breakdown" ? "active" : ""}
+                      aria-pressed={areaTableView === "breakdown"}
+                      onClick={() => setAreaTableView("breakdown")}
+                    >
+                      Ripartizioni
+                      <span>{areaBreakdowns.length}</span>
+                    </button>
+                  </div>
                   <button className="button secondary compact-button" type="button" onClick={addManualAreaRow}>
                     <Plus size={15} />
                     Aggiungi riga manuale
@@ -8269,14 +8572,13 @@ export default function PlanimetriaEditor({
                           <th>Valore destinazione</th>
                           <th>Quota lotto</th>
                           <th>Valore totale</th>
-                          <th>Pixel</th>
                           <th>Colore</th>
                           <th>Opacita</th>
                           <th></th>
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedAreas.map(
+                        {areaTableView === "individual" ? selectedAreas.map(
                           ({
                             selection,
                             index,
@@ -8445,7 +8747,6 @@ export default function PlanimetriaEditor({
                                   </strong>
                                 </td>
                                 <td><strong>{moneyFormatter.format(totalAmount)}</strong></td>
-                                <td>{selection.source === "manual" ? "-" : selection.region.count.toLocaleString("it-IT")}</td>
                                 <td>
                                   <input
                                     className="area-table-color-input"
@@ -8480,7 +8781,240 @@ export default function PlanimetriaEditor({
                               </tr>
                             );
                           },
-                        )}
+                        ) : areaBreakdowns.map((group) => {
+                          const firstSelection = group.rows[0].selection;
+                          const selectedCustomPreset = selectionCustomUsagePreset(firstSelection);
+                          const orphanCustomLabel =
+                            firstSelection.usageId === CUSTOM_USAGE_ID && !selectedCustomPreset
+                              ? normalizeCustomUsageLabel(firstSelection.customUsageLabel) || "Custom"
+                              : "";
+                          const allSelected = group.selectionIds.every((id) => selectedSelectionIds.includes(id));
+                          const someSelected = group.selectionIds.some((id) => selectedSelectionIds.includes(id));
+                          const pageLabel =
+                            group.pages.length === 1
+                              ? `pag. ${group.pages[0]}`
+                              : `${group.pages.length} pagine`;
+                          return (
+                            <tr
+                              key={group.key}
+                              className={allSelected ? "selected" : someSelected ? "partially-selected" : ""}
+                            >
+                              <td>
+                                <input
+                                  ref={(input) => {
+                                    if (input) input.indeterminate = someSelected && !allSelected;
+                                  }}
+                                  type="checkbox"
+                                  checked={allSelected}
+                                  onChange={() =>
+                                    setSelectedSelectionIds((current) => {
+                                      const next = new Set(current);
+                                      group.selectionIds.forEach((id) => {
+                                        if (allSelected) next.delete(id);
+                                        else next.add(id);
+                                      });
+                                      return Array.from(next);
+                                    })
+                                  }
+                                  aria-label={`Seleziona ripartizione ${group.usage.label}`}
+                                />
+                              </td>
+                              <td>
+                                <span className="area-table-name breakdown">
+                                  <i style={{ background: group.usage.color }} />
+                                  <strong>{group.usage.label}</strong>
+                                  <small>{group.rows.length} aree · {pageLabel}</small>
+                                </span>
+                              </td>
+                              <td>
+                                <div className="area-table-usage-cell">
+                                  <select
+                                    value={selectionUsageChoiceValue(firstSelection)}
+                                    onChange={(event) =>
+                                      changeSelectionsUsageChoice(group.selectionIds, event.target.value)
+                                    }
+                                  >
+                                    {renderAreaUsageOptions(
+                                      orphanCustomLabel,
+                                      `orphan:${firstSelection.id}`,
+                                      firstSelection.usageId === "lotto",
+                                    )}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    title="Crea una nuova destinazione custom per questa ripartizione"
+                                    onClick={() => createCustomUsageForSelections(group.selectionIds)}
+                                  >
+                                    <Plus size={14} />
+                                  </button>
+                                </div>
+                              </td>
+                              <td>
+                                <label className="lot-checkbox compact" title="Includi la ripartizione nel calcolo del lotto">
+                                  <input
+                                    ref={(input) => {
+                                      if (input) {
+                                        input.indeterminate =
+                                          group.someIncludedInLot && !group.allIncludedInLot;
+                                      }
+                                    }}
+                                    type="checkbox"
+                                    checked={group.allIncludedInLot}
+                                    onChange={(event) =>
+                                      changeSelectionsLot(group.selectionIds, event.currentTarget.checked)
+                                    }
+                                    aria-label={`Includi ripartizione ${group.usage.label} nel lotto`}
+                                  />
+                                  <span>Lotto</span>
+                                </label>
+                              </td>
+                              <td>
+                                {firstSelection.usageId === CUSTOM_USAGE_ID ? (
+                                  <input
+                                    key={`${group.key}-table-${group.usage.label}`}
+                                    className="area-table-text-input"
+                                    type="text"
+                                    defaultValue={group.usage.label}
+                                    onBlur={(event) => {
+                                      if (
+                                        !renameSelectionCustomUsage(
+                                          firstSelection.id,
+                                          event.currentTarget.value,
+                                        )
+                                      ) {
+                                        event.currentTarget.value = group.usage.label;
+                                      }
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter") event.currentTarget.blur();
+                                      if (event.key === "Escape") {
+                                        event.currentTarget.value = group.usage.label;
+                                        event.currentTarget.blur();
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <span className="area-table-muted">-</span>
+                                )}
+                              </td>
+                              <td>
+                                <div className="area-table-value-cell">
+                                  <input
+                                    key={`${group.key}-table-area-${group.area}`}
+                                    className="area-value-input"
+                                    type="text"
+                                    inputMode="decimal"
+                                    defaultValue={areaFormatter.format(group.area)}
+                                    onBlur={(event) => {
+                                      const nextArea = changeBreakdownAreaOverride(
+                                        group.rows,
+                                        event.currentTarget.value,
+                                        group.calculatedArea,
+                                      );
+                                      event.currentTarget.value = areaFormatter.format(nextArea ?? group.area);
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter") event.currentTarget.blur();
+                                      if (event.key === "Escape") {
+                                        event.currentTarget.value = areaFormatter.format(group.area);
+                                        event.currentTarget.blur();
+                                      }
+                                    }}
+                                  />
+                                  {group.areaOverridden && (
+                                    <ManualOverrideIndicator
+                                      calculatedValue={formatM2(group.calculatedArea)}
+                                      onReset={() => clearSelectionsAreaOverride(group.selectionIds)}
+                                    />
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <div className="area-table-value-cell compact">
+                                  <input
+                                    key={`${group.key}-table-rate-${group.weightedRate}`}
+                                    className="area-value-input"
+                                    type="text"
+                                    inputMode="decimal"
+                                    defaultValue={areaFormatter.format(group.weightedRate)}
+                                    onBlur={(event) => {
+                                      const nextRate = changeSelectionsRate(
+                                        group.selectionIds,
+                                        event.currentTarget.value,
+                                      );
+                                      event.currentTarget.value = areaFormatter.format(
+                                        nextRate ?? group.weightedRate,
+                                      );
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter") event.currentTarget.blur();
+                                      if (event.key === "Escape") {
+                                        event.currentTarget.value = areaFormatter.format(group.weightedRate);
+                                        event.currentTarget.blur();
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              </td>
+                              <td>
+                                <div className="area-table-estimate-cell">
+                                  <strong>{moneyFormatter.format(group.amount)}</strong>
+                                  {group.amountOverridden && (
+                                    <ManualOverrideIndicator
+                                      calculatedValue={moneyFormatter.format(group.calculatedAmount)}
+                                      onReset={() => clearSelectionsAmountOverride(group.selectionIds)}
+                                    />
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <strong className={group.someIncludedInLot ? "lot-value active" : "lot-value"}>
+                                  {group.someIncludedInLot ? moneyFormatter.format(group.lotValue) : "—"}
+                                </strong>
+                              </td>
+                              <td><strong>{moneyFormatter.format(group.totalAmount)}</strong></td>
+                              <td>
+                                <input
+                                  className="area-table-color-input"
+                                  type="color"
+                                  value={firstSelection.color}
+                                  onChange={(event) =>
+                                    changeSelectionsColor(group.selectionIds, event.target.value)
+                                  }
+                                  aria-label={`Colore ripartizione ${group.usage.label}`}
+                                />
+                              </td>
+                              <td>
+                                <label className="area-table-opacity">
+                                  <span>{Math.round(group.opacity * 100)}%</span>
+                                  <input
+                                    type="range"
+                                    min={5}
+                                    max={100}
+                                    value={Math.round(group.opacity * 100)}
+                                    onChange={(event) =>
+                                      changeSelectionsOpacity(
+                                        group.selectionIds,
+                                        Number(event.target.value),
+                                      )
+                                    }
+                                  />
+                                </label>
+                              </td>
+                              <td>
+                                <button
+                                  className="icon-button danger-icon"
+                                  type="button"
+                                  title={`Rimuovi ${group.rows.length} aree della ripartizione`}
+                                  onClick={() => removeSelections(group.selectionIds)}
+                                >
+                                  <X size={15} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                       <tfoot>
                         <tr>
@@ -8488,12 +9022,30 @@ export default function PlanimetriaEditor({
                           <td><strong>{moneyFormatter.format(totals.baseAmount)}</strong></td>
                           <td><strong>{moneyFormatter.format(totals.lotValue)}</strong></td>
                           <td><strong>{moneyFormatter.format(totals.amount)}</strong></td>
-                          <td colSpan={4}></td>
+                          <td colSpan={3}></td>
                         </tr>
                         <tr>
-                          <th colSpan={9}>Nuova rendita totale (valore complessivo × 2%)</th>
-                          <td><strong>{moneyFormatter.format(totals.rendita)}</strong></td>
-                          <td colSpan={4}></td>
+                          <th colSpan={7}>Rendita catastale (valore complessivo × 2%)</th>
+                          <td colSpan={3}>
+                            <div className="area-rendita-comparison">
+                              <span>
+                                <small>Rendita attuale</small>
+                                <strong>{moneyFormatter.format(property.currentRendita)}</strong>
+                              </span>
+                              <span aria-hidden="true">→</span>
+                              <span>
+                                <small>Nuova rendita</small>
+                                <strong>{moneyFormatter.format(totals.rendita)}</strong>
+                              </span>
+                              <em
+                                className={renditaDelta > 0 ? "increase" : renditaDelta < 0 ? "decrease" : ""}
+                                aria-label="Variazione rendita"
+                              >
+                                {formatSignedMoney(renditaDelta)} · {formatSignedPercent(renditaDeltaPercent)}
+                              </em>
+                            </div>
+                          </td>
+                          <td colSpan={3}></td>
                         </tr>
                       </tfoot>
                     </table>
