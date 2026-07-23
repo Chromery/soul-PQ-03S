@@ -5742,15 +5742,20 @@ body.is-resizing-columns {
 
 .area-selection-table {
   width: 100%;
-  min-width: 1450px;
+  min-width: 960px;
   border-collapse: separate;
   border-spacing: 0;
   color: #173154;
   font-size: 12px;
 }
 
+.area-selection-table.resizable-area-selection-table {
+  table-layout: fixed;
+}
+
 .area-selection-table th,
 .area-selection-table td {
+  min-width: 0;
   padding: 4px 6px;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
@@ -5766,6 +5771,12 @@ body.is-resizing-columns {
   font-weight: 900;
   text-align: left;
   text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.area-selection-table th .resizable-table-header-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -5849,6 +5860,10 @@ body.is-resizing-columns {
   white-space: nowrap;
 }
 
+.area-table-name.compact {
+  grid-template-columns: 10px minmax(0, 1fr);
+}
+
 .area-table-name i {
   width: 10px;
   height: 10px;
@@ -5867,16 +5882,8 @@ body.is-resizing-columns {
   font-weight: 800;
 }
 
-.area-table-name.breakdown {
-  min-width: 190px;
-}
-
-.area-table-name.breakdown small {
-  white-space: nowrap;
-}
-
 .area-rendita-comparison {
-  min-width: 460px;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -5919,7 +5926,7 @@ body.is-resizing-columns {
 
 .area-table-usage-cell {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) 28px;
+  grid-template-columns: minmax(64px, 1fr) 28px;
   gap: 5px;
   align-items: center;
 }
@@ -5933,7 +5940,7 @@ body.is-resizing-columns {
 
 .area-table-value-cell,
 .area-table-estimate-cell {
-  min-width: 150px;
+  min-width: 0;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -6102,7 +6109,7 @@ body.is-resizing-columns {
 }
 
 .area-table-value-cell.compact {
-  min-width: 126px;
+  min-width: 0;
 }
 
 .area-table-value-cell small,
@@ -6128,11 +6135,11 @@ body.is-resizing-columns {
 }
 
 .area-table-opacity {
-  min-width: 132px;
+  min-width: 0;
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-columns: 32px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  gap: 4px;
 }
 
 .area-table-opacity span {

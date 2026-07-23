@@ -45,6 +45,8 @@ import { DEFAULT_EDITOR_PREFERENCES, readEditorPreferences } from "./editorPrefe
 import { openEntriesInForMaps, toForMapsEntry } from "./formaps";
 import type { PropertyImuCalculation } from "./imu";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
+import { ResizableTableHeader, useTableColumns } from "./tableColumns";
+import type { TableColumnDefinition } from "./tableColumns";
 import {
   DEFAULT_LOT_VALUATION,
   lotValueShare,
@@ -99,6 +101,20 @@ type LotInclusionMode = "auto" | "manual";
 type ScaleExtractionStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
 type ScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
 type AreaTableViewMode = "individual" | "breakdown";
+type AreaSelectionTableColumnId =
+  | "select"
+  | "area"
+  | "usage"
+  | "lot"
+  | "customName"
+  | "surface"
+  | "unitValue"
+  | "destinationValue"
+  | "lotShare"
+  | "totalValue"
+  | "color"
+  | "opacity"
+  | "actions";
 type PageRotation = 0 | 90 | 180 | 270;
 type TuningKey = "threshold" | "inflate" | "gap" | "dash";
 
@@ -627,6 +643,22 @@ const CUSTOM_USAGE_ID: UsageId = "custom";
 const FIXED_USAGES = USAGES.filter((usage) => usage.id !== CUSTOM_USAGE_ID && usage.id !== "lotto");
 const CUSTOM_USAGE_COLORS = ["#0891b2", "#0e7490", "#0f766e", "#2563eb", "#9333ea", "#be123c", "#ca8a04"];
 const FRUITFULNESS_RATE = 0.02;
+
+const AREA_SELECTION_TABLE_COLUMNS = [
+  { id: "select", label: "Sel.", defaultWidth: 34, minWidth: 34, hideable: false, resizable: false },
+  { id: "area", label: "Area", defaultWidth: 74, minWidth: 58, hideable: false },
+  { id: "usage", label: "Tipologia", defaultWidth: 132, minWidth: 110, hideable: false },
+  { id: "lot", label: "Lotto", defaultWidth: 62, minWidth: 54, hideable: false },
+  { id: "customName", label: "Nome custom", defaultWidth: 82, minWidth: 64, hideable: false },
+  { id: "surface", label: "Superficie (m²)", defaultWidth: 94, minWidth: 78, hideable: false },
+  { id: "unitValue", label: "Valore unitario (€/m²)", defaultWidth: 88, minWidth: 72, hideable: false },
+  { id: "destinationValue", label: "Valore destinazione", defaultWidth: 100, minWidth: 82, hideable: false },
+  { id: "lotShare", label: "Quota lotto", defaultWidth: 88, minWidth: 72, hideable: false },
+  { id: "totalValue", label: "Valore totale", defaultWidth: 98, minWidth: 82, hideable: false },
+  { id: "color", label: "Colore", defaultWidth: 48, minWidth: 42, hideable: false },
+  { id: "opacity", label: "Opacità", defaultWidth: 90, minWidth: 72, hideable: false },
+  { id: "actions", label: "Azioni", defaultWidth: 38, minWidth: 38, hideable: false, resizable: false },
+] as const satisfies readonly TableColumnDefinition<AreaSelectionTableColumnId>[];
 
 const DRAFT_KEY_PREFIX = "soul-planimetria-draft:";
 const AREA_TUNING_TRIALS_KEY_PREFIX = "soul-area-tuning-trials:";
@@ -1341,6 +1373,10 @@ export default function PlanimetriaEditor({
   const [areaTableCollapsed, setAreaTableCollapsed] = useState(false);
   const [areaTableView, setAreaTableView] = useState<AreaTableViewMode>("individual");
   const [areaTableHeight, setAreaTableHeight] = useState(310);
+  const areaSelectionTableColumns = useTableColumns(
+    "soul-editor-area-selection-columns-v1",
+    AREA_SELECTION_TABLE_COLUMNS,
+  );
   const [focusMode, setFocusMode] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<ToolSectionId, boolean>>({
     usage: false,
@@ -1592,7 +1628,6 @@ export default function PlanimetriaEditor({
       const opacity =
         group.rows.reduce((sum, row) => sum + row.selection.opacity, 0) / group.rows.length;
       const selectionIds = group.rows.map((row) => row.selection.id);
-      const pages = Array.from(new Set(group.rows.map((row) => row.selection.page))).sort((a, b) => a - b);
       const allIncludedInLot = group.rows.every((row) => row.selection.includedInLot === true);
       const someIncludedInLot = group.rows.some((row) => row.selection.includedInLot === true);
       return {
@@ -1607,7 +1642,6 @@ export default function PlanimetriaEditor({
         weightedRate,
         opacity,
         selectionIds,
-        pages,
         allIncludedInLot,
         someIncludedInLot,
         areaOverridden: group.rows.some((row) => row.areaOverridden),
@@ -8559,22 +8593,29 @@ export default function PlanimetriaEditor({
                       <strong>Nessuna area</strong>
                     </div>
                   ) : (
-                    <table className="area-selection-table">
+                    <table className="area-selection-table resizable-area-selection-table">
+                      <colgroup>
+                        {AREA_SELECTION_TABLE_COLUMNS.map((column) => (
+                          <col
+                            key={column.id}
+                            style={{ width: areaSelectionTableColumns.widthPercent(column.id) }}
+                          />
+                        ))}
+                      </colgroup>
                       <thead>
                         <tr>
-                          <th>Sel.</th>
-                          <th>Area</th>
-                          <th>Tipologia</th>
-                          <th>Lotto</th>
-                          <th>Nome custom</th>
-                          <th>Superficie (m²)</th>
-                          <th>Valore unitario (€/m²)</th>
-                          <th>Valore destinazione</th>
-                          <th>Quota lotto</th>
-                          <th>Valore totale</th>
-                          <th>Colore</th>
-                          <th>Opacita</th>
-                          <th></th>
+                          {AREA_SELECTION_TABLE_COLUMNS.map((column) => (
+                            <ResizableTableHeader
+                              key={column.id}
+                              column={column}
+                              canResize={areaSelectionTableColumns.canResize(column.id)}
+                              resizing={areaSelectionTableColumns.resizingColumn === column.id}
+                              onResizeStart={areaSelectionTableColumns.startResize}
+                              onNudge={areaSelectionTableColumns.nudgeColumn}
+                            >
+                              {column.id === "actions" ? <span aria-hidden="true" /> : column.label}
+                            </ResizableTableHeader>
+                          ))}
                         </tr>
                       </thead>
                       <tbody>
@@ -8617,10 +8658,9 @@ export default function PlanimetriaEditor({
                                   />
                                 </td>
                                 <td>
-                                  <span className="area-table-name">
+                                  <span className="area-table-name compact">
                                     <i style={{ background: usage.color }} />
-                                    <strong>Area {index + 1}</strong>
-                                    <small>{selection.source === "manual" ? "manuale" : `pag. ${selection.page}`}</small>
+                                    <strong>{selection.source === "manual" ? "manuale" : `pag. ${selection.page}`}</strong>
                                   </span>
                                 </td>
                                 <td>
@@ -8790,10 +8830,6 @@ export default function PlanimetriaEditor({
                               : "";
                           const allSelected = group.selectionIds.every((id) => selectedSelectionIds.includes(id));
                           const someSelected = group.selectionIds.some((id) => selectedSelectionIds.includes(id));
-                          const pageLabel =
-                            group.pages.length === 1
-                              ? `pag. ${group.pages[0]}`
-                              : `${group.pages.length} pagine`;
                           return (
                             <tr
                               key={group.key}
@@ -8820,10 +8856,9 @@ export default function PlanimetriaEditor({
                                 />
                               </td>
                               <td>
-                                <span className="area-table-name breakdown">
+                                <span className="area-table-name compact">
                                   <i style={{ background: group.usage.color }} />
-                                  <strong>{group.usage.label}</strong>
-                                  <small>{group.rows.length} aree · {pageLabel}</small>
+                                  <strong>{group.rows.length} aree</strong>
                                 </span>
                               </td>
                               <td>
@@ -9025,8 +9060,8 @@ export default function PlanimetriaEditor({
                           <td colSpan={3}></td>
                         </tr>
                         <tr>
-                          <th colSpan={7}>Rendita catastale (valore complessivo × 2%)</th>
-                          <td colSpan={3}>
+                          <th colSpan={5}>Rendita catastale (valore complessivo × 2%)</th>
+                          <td colSpan={7}>
                             <div className="area-rendita-comparison">
                               <span>
                                 <small>Rendita attuale</small>
@@ -9045,7 +9080,7 @@ export default function PlanimetriaEditor({
                               </em>
                             </div>
                           </td>
-                          <td colSpan={3}></td>
+                          <td></td>
                         </tr>
                       </tfoot>
                     </table>
