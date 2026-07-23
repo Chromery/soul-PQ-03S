@@ -63,7 +63,7 @@
     panel.id = "formaps-open-status";
     panel.style.position = "fixed";
     panel.style.top = "76px";
-    panel.style.right = "24px";
+    panel.style.right = "88px";
     panel.style.zIndex = "2147483647";
     panel.style.maxWidth = "360px";
     panel.style.padding = "10px 12px";
