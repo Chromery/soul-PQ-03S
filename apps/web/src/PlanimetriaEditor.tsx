@@ -31,6 +31,8 @@ import {
   RotateCcw,
   RotateCw,
   Ruler,
+  Circle,
+  Square,
   Sparkles,
   Trash2,
   Undo2,
@@ -90,9 +92,9 @@ type CustomUsagePreset = {
   color: string;
   rate: number;
 };
-type EditorTool = "select" | "smart" | "polygon" | "lot" | "ruler";
+type EditorTool = "select" | "smart" | "polygon" | "rectangle" | "ellipse" | "lot" | "ruler";
 type LegacyEditorTool = EditorTool | "calibrate";
-type SelectionSource = "smart" | "polygon" | "merged" | "copy" | "manual";
+type SelectionSource = "smart" | "polygon" | "rectangle" | "ellipse" | "merged" | "copy" | "manual";
 type LotInclusionMode = "auto" | "manual";
 type ScaleExtractionStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
 type ScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
@@ -103,6 +105,26 @@ type CanvasPoint = {
   x: number;
   y: number;
 };
+
+type AreaShape = {
+  kind: "rectangle" | "ellipse";
+  center: CanvasPoint;
+  width: number;
+  height: number;
+  rotation: number;
+};
+
+type ShapeResizeHandle =
+  | "north-west"
+  | "north-east"
+  | "south-east"
+  | "south-west"
+  | "north"
+  | "east"
+  | "south"
+  | "west";
+
+type ShapeHandle = ShapeResizeHandle | "rotate";
 
 type EditorStudy = {
   id: string;
@@ -246,6 +268,7 @@ type AreaSelection = {
   bitmap: HTMLCanvasElement;
   source: SelectionSource;
   polygon?: CanvasPoint[];
+  shape?: AreaShape;
 };
 
 type LotBoundary = {
@@ -277,6 +300,7 @@ type SavedSelection = {
   totalPixels: number;
   source?: SelectionSource;
   polygon?: CanvasPoint[];
+  shape?: AreaShape;
   region: {
     bounds: MaskBounds;
     seed: { x: number; y: number };
@@ -368,6 +392,7 @@ type DragSnapshot = {
   bounds: MaskBounds;
   seed: CanvasPoint;
   polygon?: CanvasPoint[];
+  shape?: AreaShape;
 };
 
 type DragState = {
@@ -398,6 +423,18 @@ type SegmentDragState = {
 type PolygonEditDragState = {
   selectionId: string;
   vertexIndex: number;
+  historyRecorded: boolean;
+};
+
+type ShapeDrawState = {
+  kind: AreaShape["kind"];
+  start: CanvasPoint;
+};
+
+type ShapeEditDragState = {
+  selectionId: string;
+  handle: ShapeHandle;
+  initialShape: AreaShape;
   historyRecorded: boolean;
 };
 
@@ -452,6 +489,7 @@ type ClipboardSelection = {
   totalPixels: number;
   source: SelectionSource;
   polygon?: CanvasPoint[];
+  shape?: AreaShape;
   region: Region;
 };
 
@@ -630,9 +668,23 @@ const TOOL_OPTIONS: Array<{
     icon: <PencilLine size={17} />,
   },
   {
+    id: "rectangle",
+    label: "Rettangolo",
+    description: "Trascina per disegnare; Shift crea un quadrato",
+    shortcut: "T",
+    icon: <Square size={17} />,
+  },
+  {
+    id: "ellipse",
+    label: "Ellisse",
+    description: "Trascina per disegnare; Shift crea un cerchio",
+    shortcut: "E",
+    icon: <Circle size={17} />,
+  },
+  {
     id: "lot",
     label: "Definizione lotto",
-    description: "Disegna la sagoma che preseleziona le aree del lotto",
+    description: "Disegna e misura la superficie del lotto",
     shortcut: "L",
     icon: <LandPlot size={17} />,
   },
@@ -654,6 +706,8 @@ const SHORTCUTS = {
   select: "V",
   smart: "S",
   polygon: "P",
+  rectangle: "T",
+  ellipse: "E",
   lot: "L",
   ruler: "R",
   focus: "F",
@@ -904,6 +958,83 @@ function translatePoint(point: CanvasPoint, dx: number, dy: number): CanvasPoint
   return { x: point.x + dx, y: point.y + dy };
 }
 
+function cloneAreaShape(shape: AreaShape): AreaShape {
+  return { ...shape, center: { ...shape.center } };
+}
+
+function normalizeDegrees(value: number) {
+  return ((value % 360) + 360) % 360;
+}
+
+function rotateVector(point: CanvasPoint, degrees: number): CanvasPoint {
+  const radians = (degrees * Math.PI) / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  return {
+    x: point.x * cosine - point.y * sine,
+    y: point.x * sine + point.y * cosine,
+  };
+}
+
+function shapePoint(shape: AreaShape, local: CanvasPoint): CanvasPoint {
+  const rotated = rotateVector(local, shape.rotation);
+  return {
+    x: shape.center.x + rotated.x,
+    y: shape.center.y + rotated.y,
+  };
+}
+
+function shapeBoundaryPoints(shape: AreaShape, ellipseSegments = 72): CanvasPoint[] {
+  if (shape.kind === "rectangle") {
+    return [
+      shapePoint(shape, { x: -shape.width / 2, y: -shape.height / 2 }),
+      shapePoint(shape, { x: shape.width / 2, y: -shape.height / 2 }),
+      shapePoint(shape, { x: shape.width / 2, y: shape.height / 2 }),
+      shapePoint(shape, { x: -shape.width / 2, y: shape.height / 2 }),
+    ];
+  }
+  return Array.from({ length: ellipseSegments }, (_, index) => {
+    const angle = (index / ellipseSegments) * Math.PI * 2;
+    return shapePoint(shape, {
+      x: Math.cos(angle) * shape.width / 2,
+      y: Math.sin(angle) * shape.height / 2,
+    });
+  });
+}
+
+function shapeFromDrag(
+  kind: AreaShape["kind"],
+  start: CanvasPoint,
+  end: CanvasPoint,
+  constrainAspect: boolean,
+  canvas?: HTMLCanvasElement | null,
+): AreaShape {
+  let dx = end.x - start.x;
+  let dy = end.y - start.y;
+  if (constrainAspect) {
+    const signX = Math.sign(dx) || 1;
+    const signY = Math.sign(dy) || 1;
+    let size = Math.max(Math.abs(dx), Math.abs(dy));
+    if (canvas) {
+      const availableX = signX > 0 ? canvas.width - 1 - start.x : start.x;
+      const availableY = signY > 0 ? canvas.height - 1 - start.y : start.y;
+      size = Math.min(size, availableX, availableY);
+    }
+    dx = signX * size;
+    dy = signY * size;
+  }
+  return {
+    kind,
+    center: {
+      x: start.x + dx / 2,
+      y: start.y + dy / 2,
+    },
+    width: Math.abs(dx),
+    height: Math.abs(dy),
+    rotation: 0,
+  };
+}
+
 function cloneCanvas(source: HTMLCanvasElement) {
   const canvas = document.createElement("canvas");
   canvas.width = source.width;
@@ -1142,6 +1273,8 @@ export default function PlanimetriaEditor({
   const marqueeDragRef = useRef<MarqueeDragState | null>(null);
   const segmentDragRef = useRef<SegmentDragState | null>(null);
   const polygonEditDragRef = useRef<PolygonEditDragState | null>(null);
+  const shapeDrawRef = useRef<ShapeDrawState | null>(null);
+  const shapeEditDragRef = useRef<ShapeEditDragState | null>(null);
   const lotBoundaryDragRef = useRef<LotBoundaryDragState | null>(null);
   const lotPolygonEditDragRef = useRef<LotPolygonEditDragState | null>(null);
   const rulerDragRef = useRef<CanvasPoint | null>(null);
@@ -1217,6 +1350,11 @@ export default function PlanimetriaEditor({
   const [marqueeDraft, setMarqueeDraft] = useState<MarqueeState | null>(null);
   const [polygonDraft, setPolygonDraft] = useState<CanvasPoint[]>([]);
   const [pointerPreview, setPointerPreview] = useState<CanvasPoint | null>(null);
+  const [shapeDraft, setShapeDraft] = useState<AreaShape | null>(null);
+  const [selectedShapeHandle, setSelectedShapeHandle] = useState<{
+    selectionId: string;
+    handle: ShapeHandle;
+  } | null>(null);
   const [rulerDraft, setRulerDraft] = useState<MeasureSegment | null>(null);
   const [clipboardCount, setClipboardCount] = useState(0);
   const [scaleExtractionJob, setScaleExtractionJob] = useState<ScaleExtractionJob | null>(null);
@@ -1483,6 +1621,8 @@ export default function PlanimetriaEditor({
     marqueeDraft,
     polygonDraft,
     pointerPreview,
+    shapeDraft,
+    selectedShapeHandle,
     calibration,
     rulerDraft,
     rulerSegment,
@@ -1564,7 +1704,13 @@ export default function PlanimetriaEditor({
         if (
           usageShortcutIndex >= 0 &&
           usageShortcutIndex < FIXED_USAGES.length &&
-          (activeTool === "select" || activeTool === "smart" || activeTool === "polygon")
+          (
+            activeTool === "select" ||
+            activeTool === "smart" ||
+            activeTool === "polygon" ||
+            activeTool === "rectangle" ||
+            activeTool === "ellipse"
+          )
         ) {
           event.preventDefault();
           const usage = FIXED_USAGES[usageShortcutIndex];
@@ -1574,12 +1720,18 @@ export default function PlanimetriaEditor({
         if (key === "v") selectTool("select");
         if (key === "s") selectTool("smart");
         if (key === "p") selectTool("polygon");
+        if (key === "t") selectTool("rectangle");
+        if (key === "e") selectTool("ellipse");
         if (key === "l") selectTool("lot");
         if (key === "r") selectTool("ruler");
         if (key === "f") void toggleFocusMode();
         if (event.key === "Escape") {
           setPolygonDraft([]);
           setPointerPreview(null);
+          shapeDrawRef.current = null;
+          shapeEditDragRef.current = null;
+          setShapeDraft(null);
+          setSelectedShapeHandle(null);
           setSelectedPolygonVertex(null);
           setHoverPolygonInsert(null);
           setSelectedLotPolygonVertex(null);
@@ -1668,11 +1820,15 @@ export default function PlanimetriaEditor({
     marqueeDragRef.current = null;
     segmentDragRef.current = null;
     polygonEditDragRef.current = null;
+    shapeDrawRef.current = null;
+    shapeEditDragRef.current = null;
     lotBoundaryDragRef.current = null;
     lotPolygonEditDragRef.current = null;
     rulerDragRef.current = null;
     setSelectedPolygonVertex(null);
     setHoverPolygonInsert(null);
+    setShapeDraft(null);
+    setSelectedShapeHandle(null);
     setSelectedLotBoundaryId(null);
     setSelectedLotPolygonVertex(null);
     setHoverLotPolygonInsert(null);
@@ -2282,6 +2438,12 @@ export default function PlanimetriaEditor({
         bitmap: createTintedCanvas(region, saved.color ?? usage.color, saved.opacity),
         source: saved.source ?? "smart",
         polygon: saved.polygon,
+        shape: saved.shape
+          ? {
+              ...saved.shape,
+              center: { ...saved.shape.center },
+            }
+          : undefined,
       };
       const pageSelections = restored.get(saved.page) ?? [];
       pageSelections.push(selection);
@@ -2347,6 +2509,12 @@ export default function PlanimetriaEditor({
         totalPixels: selection.totalPixels,
         source: selection.source,
         polygon: selection.polygon,
+        shape: selection.shape
+          ? {
+              ...selection.shape,
+              center: { ...selection.shape.center },
+            }
+          : undefined,
         region: {
           bounds: selection.region.bounds,
           seed: selection.region.seed,
@@ -3644,6 +3812,61 @@ export default function PlanimetriaEditor({
     });
   }
 
+  function createShapeRegion(shape: AreaShape) {
+    const { pdfCanvas } = getCanvases();
+    if (shape.width < 1 || shape.height < 1) return null;
+    const boundary = shapeBoundaryPoints(shape);
+    const padding = 2;
+    const minX = Math.max(0, Math.floor(Math.min(...boundary.map((point) => point.x)) - padding));
+    const minY = Math.max(0, Math.floor(Math.min(...boundary.map((point) => point.y)) - padding));
+    const maxX = Math.min(
+      pdfCanvas.width - 1,
+      Math.ceil(Math.max(...boundary.map((point) => point.x)) + padding),
+    );
+    const maxY = Math.min(
+      pdfCanvas.height - 1,
+      Math.ceil(Math.max(...boundary.map((point) => point.y)) + padding),
+    );
+    if (maxX < minX || maxY < minY) return null;
+
+    const alphaCanvas = document.createElement("canvas");
+    alphaCanvas.width = maxX - minX + 1;
+    alphaCanvas.height = maxY - minY + 1;
+    const context = alphaCanvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Contesto forma non disponibile");
+    context.save();
+    context.translate(shape.center.x - minX, shape.center.y - minY);
+    context.rotate((shape.rotation * Math.PI) / 180);
+    context.fillStyle = "#000";
+    if (shape.kind === "rectangle") {
+      context.fillRect(-shape.width / 2, -shape.height / 2, shape.width, shape.height);
+    } else {
+      context.beginPath();
+      context.ellipse(0, 0, shape.width / 2, shape.height / 2, 0, 0, Math.PI * 2);
+      context.fill();
+    }
+    context.restore();
+
+    const data = context.getImageData(0, 0, alphaCanvas.width, alphaCanvas.height).data;
+    let count = 0;
+    for (let index = 3; index < data.length; index += 4) {
+      if (data[index] > 8) count++;
+    }
+    if (count < 8) return null;
+
+    return {
+      bounds: { minX, minY, maxX, maxY },
+      seed: clampCanvasPoint({
+        x: Math.round(shape.center.x),
+        y: Math.round(shape.center.y),
+      }),
+      count,
+      alphaCanvas,
+      width: alphaCanvas.width,
+      height: alphaCanvas.height,
+    } satisfies Region;
+  }
+
   function commitLotBoundary(points: CanvasPoint[]) {
     const region = createPolygonRegion(points);
     if (!region) return false;
@@ -3723,6 +3946,7 @@ export default function PlanimetriaEditor({
       region,
       bitmap: cloneCanvas(selection.bitmap),
       polygon: selection.polygon?.map((point) => ({ ...point })),
+      shape: selection.shape ? cloneAreaShape(selection.shape) : undefined,
     };
   }
 
@@ -3800,6 +4024,10 @@ export default function PlanimetriaEditor({
   }
 
   function restoreEditorSnapshot(snapshot: EditorSnapshot) {
+    shapeDrawRef.current = null;
+    shapeEditDragRef.current = null;
+    setShapeDraft(null);
+    setSelectedShapeHandle(null);
     runtimeRef.current.selectionsByPage = cloneSelectionsByPage(snapshot.selectionsByPage);
     runtimeRef.current.lotBoundariesByPage = cloneLotBoundariesByPage(snapshot.lotBoundariesByPage);
     runtimeRef.current.history = [...snapshot.history];
@@ -3921,6 +4149,7 @@ export default function PlanimetriaEditor({
       color?: string;
       includedInLot?: boolean;
       lotInclusionMode?: LotInclusionMode;
+      shape?: AreaShape;
     } = {},
   ) {
     const customPreset =
@@ -3962,6 +4191,9 @@ export default function PlanimetriaEditor({
       selection.bitmap = createTintedCanvas(region, color, opacity);
       selection.source = source;
       selection.polygon = polygon;
+      selection.shape = options.shape
+        ? { ...options.shape, center: { ...options.shape.center } }
+        : undefined;
       selection.includedInLot = options.includedInLot ?? selection.includedInLot ?? true;
       selection.lotInclusionMode = "manual";
       redrawMasks();
@@ -3988,6 +4220,9 @@ export default function PlanimetriaEditor({
       bitmap: createTintedCanvas(region, color, opacity),
       source,
       polygon,
+      shape: options.shape
+        ? { ...options.shape, center: { ...options.shape.center } }
+        : undefined,
       includedInLot: options.includedInLot ?? true,
       lotInclusionMode: "manual",
     };
@@ -4057,6 +4292,22 @@ export default function PlanimetriaEditor({
     context.moveTo(points[0].x, points[0].y);
     points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
     if (closePath) context.closePath();
+  }
+
+  function drawShapePath(context: CanvasRenderingContext2D, shape: AreaShape) {
+    context.beginPath();
+    if (shape.kind === "rectangle") {
+      const points = shapeBoundaryPoints(shape);
+      context.moveTo(points[0].x, points[0].y);
+      points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
+      context.closePath();
+      return;
+    }
+    context.save();
+    context.translate(shape.center.x, shape.center.y);
+    context.rotate((shape.rotation * Math.PI) / 180);
+    context.ellipse(0, 0, shape.width / 2, shape.height / 2, 0, 0, Math.PI * 2);
+    context.restore();
   }
 
   function boundaryPathsForRegion(region: Region) {
@@ -4155,12 +4406,84 @@ export default function PlanimetriaEditor({
     context.lineJoin = "round";
     context.lineCap = "round";
     context.setLineDash([12, 8]);
-    if (selection.polygon && selection.polygon.length >= 3) {
+    if (selection.shape) {
+      drawShapePath(context, selection.shape);
+      context.stroke();
+    } else if (selection.polygon && selection.polygon.length >= 3) {
       drawPolygonPath(context, selection.polygon, true);
       context.stroke();
     } else {
       drawRegionBoundaryOutline(context, selection);
     }
+    context.restore();
+  }
+
+  function shapeResizeHandles(shape: AreaShape) {
+    if (shape.kind === "rectangle") {
+      return [
+        { handle: "north-west" as const, point: shapePoint(shape, { x: -shape.width / 2, y: -shape.height / 2 }) },
+        { handle: "north-east" as const, point: shapePoint(shape, { x: shape.width / 2, y: -shape.height / 2 }) },
+        { handle: "south-east" as const, point: shapePoint(shape, { x: shape.width / 2, y: shape.height / 2 }) },
+        { handle: "south-west" as const, point: shapePoint(shape, { x: -shape.width / 2, y: shape.height / 2 }) },
+      ];
+    }
+    return [
+      { handle: "north" as const, point: shapePoint(shape, { x: 0, y: -shape.height / 2 }) },
+      { handle: "east" as const, point: shapePoint(shape, { x: shape.width / 2, y: 0 }) },
+      { handle: "south" as const, point: shapePoint(shape, { x: 0, y: shape.height / 2 }) },
+      { handle: "west" as const, point: shapePoint(shape, { x: -shape.width / 2, y: 0 }) },
+    ];
+  }
+
+  function shapeRotationHandle(shape: AreaShape) {
+    const offset = Math.max(34, Math.round(28 * runtimeRef.current.renderScale));
+    return {
+      anchor: shapePoint(shape, { x: 0, y: -shape.height / 2 }),
+      point: shapePoint(shape, { x: 0, y: -shape.height / 2 - offset }),
+    };
+  }
+
+  function drawShapeEditHandles(context: CanvasRenderingContext2D, selection: AreaSelection) {
+    if (!selection.shape) return;
+    if (
+      activeTool !== "select" &&
+      activeTool !== selection.shape.kind
+    ) return;
+    const handles = shapeResizeHandles(selection.shape);
+    const rotationHandle = shapeRotationHandle(selection.shape);
+
+    context.save();
+    context.strokeStyle = "#0d6efd";
+    context.lineWidth = 2;
+    context.setLineDash([]);
+    context.beginPath();
+    context.moveTo(rotationHandle.anchor.x, rotationHandle.anchor.y);
+    context.lineTo(rotationHandle.point.x, rotationHandle.point.y);
+    context.stroke();
+
+    handles.forEach(({ handle, point }) => {
+      const selected =
+        selectedShapeHandle?.selectionId === selection.id &&
+        selectedShapeHandle.handle === handle;
+      context.beginPath();
+      context.rect(point.x - (selected ? 8 : 6), point.y - (selected ? 8 : 6), selected ? 16 : 12, selected ? 16 : 12);
+      context.fillStyle = selected ? "#0d6efd" : "#ffffff";
+      context.fill();
+      context.lineWidth = selected ? 4 : 3;
+      context.strokeStyle = selection.color;
+      context.stroke();
+    });
+
+    const rotationSelected =
+      selectedShapeHandle?.selectionId === selection.id &&
+      selectedShapeHandle.handle === "rotate";
+    context.beginPath();
+    context.arc(rotationHandle.point.x, rotationHandle.point.y, rotationSelected ? 9 : 7, 0, Math.PI * 2);
+    context.fillStyle = rotationSelected ? "#0d6efd" : "#ffffff";
+    context.fill();
+    context.lineWidth = rotationSelected ? 4 : 3;
+    context.strokeStyle = "#0d6efd";
+    context.stroke();
     context.restore();
   }
 
@@ -4346,7 +4669,20 @@ export default function PlanimetriaEditor({
     selectedCurrentPageSelections.forEach((selection) => {
       drawSelectionOutline(context, selection);
       drawPolygonEditHandles(context, selection);
+      drawShapeEditHandles(context, selection);
     });
+
+    if (shapeDraft) {
+      context.save();
+      context.fillStyle = rgba(activeUsageOption.color, Math.min(0.22, opacityPercent / 200));
+      context.strokeStyle = activeUsageOption.color;
+      context.lineWidth = 3;
+      context.setLineDash([10, 7]);
+      drawShapePath(context, shapeDraft);
+      context.fill();
+      context.stroke();
+      context.restore();
+    }
 
     if (marqueeDraft) {
       const rect = rectFromPoints(marqueeDraft.start, marqueeDraft.current);
@@ -5215,8 +5551,147 @@ export default function PlanimetriaEditor({
 
   function selectedEditablePolygons() {
     return selectedCurrentPageSelections.filter(
-      (selection) => selection.polygon && selection.polygon.length >= 3,
+      (selection) => !selection.shape && selection.polygon && selection.polygon.length >= 3,
     );
+  }
+
+  function selectedEditableShapes() {
+    return selectedCurrentPageSelections.filter((selection) => selection.shape);
+  }
+
+  function hitTestShapeHandle(point: CanvasPoint) {
+    const threshold = Math.max(14, Math.round(10 * runtimeRef.current.renderScale));
+    const shapes = selectedEditableShapes();
+    for (let index = shapes.length - 1; index >= 0; index--) {
+      const selection = shapes[index];
+      if (!selection.shape) continue;
+      const rotation = shapeRotationHandle(selection.shape);
+      if (distance(point, rotation.point) <= threshold) {
+        return { selection, handle: "rotate" as const };
+      }
+      const handles = shapeResizeHandles(selection.shape);
+      for (let handleIndex = handles.length - 1; handleIndex >= 0; handleIndex--) {
+        if (distance(point, handles[handleIndex].point) <= threshold) {
+          return { selection, handle: handles[handleIndex].handle };
+        }
+      }
+    }
+    return null;
+  }
+
+  function fitShapeInsideCanvas(shape: AreaShape) {
+    const canvas = pdfCanvasRef.current;
+    if (!canvas) return shape;
+    const points = shapeBoundaryPoints(shape);
+    const minX = Math.min(...points.map((point) => point.x));
+    const maxX = Math.max(...points.map((point) => point.x));
+    const minY = Math.min(...points.map((point) => point.y));
+    const maxY = Math.max(...points.map((point) => point.y));
+    let dx = 0;
+    let dy = 0;
+    if (minX < 0) dx = -minX;
+    else if (maxX > canvas.width - 1) dx = canvas.width - 1 - maxX;
+    if (minY < 0) dy = -minY;
+    else if (maxY > canvas.height - 1) dy = canvas.height - 1 - maxY;
+    return {
+      ...shape,
+      center: translatePoint(shape.center, dx, dy),
+    };
+  }
+
+  function resizedShapeFromHandle(
+    initialShape: AreaShape,
+    handle: ShapeResizeHandle,
+    point: CanvasPoint,
+    constrainAspect: boolean,
+  ) {
+    const minimum = Math.max(12, Math.round(8 * runtimeRef.current.renderScale));
+    const rotation = initialShape.rotation;
+
+    if (initialShape.kind === "rectangle") {
+      const signs: Record<
+        Extract<ShapeResizeHandle, "north-west" | "north-east" | "south-east" | "south-west">,
+        CanvasPoint
+      > = {
+        "north-west": { x: -1, y: -1 },
+        "north-east": { x: 1, y: -1 },
+        "south-east": { x: 1, y: 1 },
+        "south-west": { x: -1, y: 1 },
+      };
+      const sign = signs[handle as keyof typeof signs];
+      if (!sign) return initialShape;
+      const opposite = shapePoint(initialShape, {
+        x: -sign.x * initialShape.width / 2,
+        y: -sign.y * initialShape.height / 2,
+      });
+      const localDelta = rotateVector(
+        { x: point.x - opposite.x, y: point.y - opposite.y },
+        -rotation,
+      );
+      let width = Math.max(minimum, Math.abs(localDelta.x));
+      let height = Math.max(minimum, Math.abs(localDelta.y));
+      if (constrainAspect) {
+        const size = Math.max(width, height);
+        width = size;
+        height = size;
+      }
+      const signedDelta = { x: sign.x * width, y: sign.y * height };
+      const centerOffset = rotateVector(
+        { x: signedDelta.x / 2, y: signedDelta.y / 2 },
+        rotation,
+      );
+      return fitShapeInsideCanvas({
+        ...initialShape,
+        center: translatePoint(opposite, centerOffset.x, centerOffset.y),
+        width,
+        height,
+      });
+    }
+
+    if (handle === "east" || handle === "west") {
+      const sign = handle === "east" ? 1 : -1;
+      const opposite = shapePoint(initialShape, { x: -sign * initialShape.width / 2, y: 0 });
+      const localDelta = rotateVector(
+        { x: point.x - opposite.x, y: point.y - opposite.y },
+        -rotation,
+      );
+      const width = Math.max(minimum, Math.abs(localDelta.x));
+      const centerOffset = rotateVector({ x: sign * width / 2, y: 0 }, rotation);
+      return fitShapeInsideCanvas({
+        ...initialShape,
+        center: translatePoint(opposite, centerOffset.x, centerOffset.y),
+        width,
+      });
+    }
+
+    const sign = handle === "south" ? 1 : -1;
+    const opposite = shapePoint(initialShape, { x: 0, y: -sign * initialShape.height / 2 });
+    const localDelta = rotateVector(
+      { x: point.x - opposite.x, y: point.y - opposite.y },
+      -rotation,
+    );
+    const height = Math.max(minimum, Math.abs(localDelta.y));
+    const centerOffset = rotateVector({ x: 0, y: sign * height / 2 }, rotation);
+    return fitShapeInsideCanvas({
+      ...initialShape,
+      center: translatePoint(opposite, centerOffset.x, centerOffset.y),
+      height,
+    });
+  }
+
+  function replaceShapeSelection(selectionId: string, shape: AreaShape) {
+    const selection = findSelectionById(selectionId);
+    if (!selection) return false;
+    const region = createShapeRegion(shape);
+    if (!region) return false;
+    selection.shape = cloneAreaShape(shape);
+    selection.polygon = undefined;
+    selection.region = region;
+    selection.totalPixels = getCanvasTotalPixels();
+    selection.bitmap = createTintedCanvas(region, selection.color, selection.opacity);
+    redrawMasks();
+    bumpRevision();
+    return true;
   }
 
   function hitTestPolygonVertex(point: CanvasPoint) {
@@ -5454,6 +5929,12 @@ export default function PlanimetriaEditor({
       if (snapshot.polygon) {
         selection.polygon = snapshot.polygon.map((point) => translatePoint(point, dx, dy));
       }
+      if (snapshot.shape) {
+        selection.shape = {
+          ...snapshot.shape,
+          center: translatePoint(snapshot.shape.center, dx, dy),
+        };
+      }
     });
     redrawMasks();
   }
@@ -5469,6 +5950,7 @@ export default function PlanimetriaEditor({
         bounds: { ...selection.region.bounds },
         seed: { ...selection.region.seed },
         polygon: selection.polygon?.map((item) => ({ ...item })),
+        shape: selection.shape ? cloneAreaShape(selection.shape) : undefined,
       })),
     };
   }
@@ -5535,6 +6017,7 @@ export default function PlanimetriaEditor({
     const region = createPolygonRegion(points);
     if (!region) return false;
     selection.polygon = points.map((point) => ({ ...point }));
+    selection.shape = undefined;
     selection.region = region;
     selection.totalPixels = getCanvasTotalPixels();
     selection.bitmap = createTintedCanvas(region, selection.color, selection.opacity);
@@ -5668,6 +6151,7 @@ export default function PlanimetriaEditor({
       totalPixels: selection.totalPixels,
       source: selection.source === "merged" ? "merged" : "copy",
       polygon: selection.polygon?.map((point) => ({ ...point })),
+      shape: selection.shape ? cloneAreaShape(selection.shape) : undefined,
       region: cloneRegion(selection.region),
     }));
     setClipboardCount(clipboardRef.current.length);
@@ -5683,6 +6167,7 @@ export default function PlanimetriaEditor({
       bounds: item.region.bounds,
       seed: item.region.seed,
       polygon: item.polygon,
+      shape: item.shape,
     }));
     const { dx, dy } = clampDeltaForSnapshots(snapshots, offset, offset);
     const pastedIds: string[] = [];
@@ -5717,6 +6202,12 @@ export default function PlanimetriaEditor({
         bitmap: createTintedCanvas(region, color, item.opacity),
         source: "copy",
         polygon: item.polygon?.map((point) => translatePoint(point, dx, dy)),
+        shape: item.shape
+          ? {
+              ...item.shape,
+              center: translatePoint(item.shape.center, dx, dy),
+            }
+          : undefined,
       };
       pageSelections.push(selection);
       runtimeRef.current.history.push(id);
@@ -5873,6 +6364,7 @@ export default function PlanimetriaEditor({
     if (event.button !== 0 || !hasPdf || busy) return;
     const point = canvasPointFromEvent(event);
     if (!point) return;
+    event.preventDefault();
 
     if ((activeTool === "select" || activeTool === "lot") && polygonDraft.length === 0) {
       const lotVertexHit = hitTestLotPolygonVertex(point);
@@ -5921,6 +6413,33 @@ export default function PlanimetriaEditor({
         startLotBoundaryDrag(point, lotBoundaryHit);
         event.currentTarget.setPointerCapture(event.pointerId);
         redrawMasks();
+        return;
+      }
+    }
+
+    if (
+      activeTool === "select" ||
+      activeTool === "rectangle" ||
+      activeTool === "ellipse"
+    ) {
+      const shapeHandleHit = hitTestShapeHandle(point);
+      if (shapeHandleHit) {
+        setSelectedSelectionIds([shapeHandleHit.selection.id]);
+        setSelectedShapeHandle({
+          selectionId: shapeHandleHit.selection.id,
+          handle: shapeHandleHit.handle,
+        });
+        setSelectedLotBoundaryId(null);
+        setSelectedLotPolygonVertex(null);
+        setSelectedPolygonVertex(null);
+        setRulerSegmentSelected(false);
+        shapeEditDragRef.current = {
+          selectionId: shapeHandleHit.selection.id,
+          handle: shapeHandleHit.handle,
+          initialShape: cloneAreaShape(shapeHandleHit.selection.shape!),
+          historyRecorded: false,
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
         return;
       }
     }
@@ -5983,6 +6502,31 @@ export default function PlanimetriaEditor({
 
     if (activeTool === "smart") {
       void fillAtCanvasPoint(point.x, point.y, event.shiftKey);
+      return;
+    }
+
+    if (activeTool === "rectangle" || activeTool === "ellipse") {
+      if (!canUseActiveUsage()) return;
+      const kind = activeTool;
+      shapeDrawRef.current = { kind, start: point };
+      setShapeDraft({
+        kind,
+        center: { ...point },
+        width: 0,
+        height: 0,
+        rotation: 0,
+      });
+      setSelectedSelectionIds([]);
+      setSelectedShapeHandle(null);
+      setSelectedLotBoundaryId(null);
+      setSelectedPolygonVertex(null);
+      setRulerSegmentSelected(false);
+      setStatus(
+        kind === "rectangle"
+          ? "Trascina per creare il rettangolo · Shift per un quadrato"
+          : "Trascina per creare l’ellisse · Shift per un cerchio",
+      );
+      event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
 
@@ -6089,6 +6633,7 @@ export default function PlanimetriaEditor({
     setHoverLotPolygonInsert(null);
     setSelectedPolygonVertex(null);
     setHoverPolygonInsert(null);
+    setSelectedShapeHandle(null);
     setRulerSegmentSelected(false);
     if (nextSelectedIds.includes(hit.id)) {
       startSelectionDrag(point, nextSelectedIds);
@@ -6101,6 +6646,8 @@ export default function PlanimetriaEditor({
     const shouldClampPointer = Boolean(
       segmentDragRef.current ||
         polygonEditDragRef.current ||
+        shapeEditDragRef.current ||
+        shapeDrawRef.current ||
         lotPolygonEditDragRef.current ||
         lotBoundaryDragRef.current ||
         marqueeDragRef.current ||
@@ -6109,6 +6656,37 @@ export default function PlanimetriaEditor({
     );
     const point = canvasPointFromEvent(event, { clamp: shouldClampPointer });
     if (!point) return;
+
+    const shapeEditDrag = shapeEditDragRef.current;
+    if (shapeEditDrag) {
+      if (!shapeEditDrag.historyRecorded) {
+        recordUndoState();
+        shapeEditDrag.historyRecorded = true;
+      }
+      let nextShape: AreaShape;
+      if (shapeEditDrag.handle === "rotate") {
+        let rotation = normalizeDegrees(
+          (Math.atan2(
+            point.y - shapeEditDrag.initialShape.center.y,
+            point.x - shapeEditDrag.initialShape.center.x,
+          ) * 180) / Math.PI + 90,
+        );
+        if (event.shiftKey) rotation = normalizeDegrees(Math.round(rotation / 15) * 15);
+        nextShape = fitShapeInsideCanvas({
+          ...shapeEditDrag.initialShape,
+          rotation,
+        });
+      } else {
+        nextShape = resizedShapeFromHandle(
+          shapeEditDrag.initialShape,
+          shapeEditDrag.handle,
+          point,
+          event.shiftKey,
+        );
+      }
+      replaceShapeSelection(shapeEditDrag.selectionId, nextShape);
+      return;
+    }
 
     const segmentDrag = segmentDragRef.current;
     if (segmentDrag) {
@@ -6192,6 +6770,20 @@ export default function PlanimetriaEditor({
       return;
     }
 
+    const shapeDraw = shapeDrawRef.current;
+    if (shapeDraw) {
+      setShapeDraft(
+        shapeFromDrag(
+          shapeDraw.kind,
+          shapeDraw.start,
+          point,
+          event.shiftKey,
+          pdfCanvasRef.current,
+        ),
+      );
+      return;
+    }
+
     if (marqueeDragRef.current) {
       updateMarqueeSelection(point);
       return;
@@ -6258,6 +6850,8 @@ export default function PlanimetriaEditor({
     const shouldClampPointer = Boolean(
       segmentDragRef.current ||
         polygonEditDragRef.current ||
+        shapeEditDragRef.current ||
+        shapeDrawRef.current ||
         lotPolygonEditDragRef.current ||
         lotBoundaryDragRef.current ||
         marqueeDragRef.current ||
@@ -6286,6 +6880,18 @@ export default function PlanimetriaEditor({
           setStatus(segmentDrag.mode === "body" ? "Segmento spostato" : "Estremo segmento aggiornato");
           markDirty();
         }
+      }
+      releasePointer();
+      return;
+    }
+
+    const shapeEditDrag = shapeEditDragRef.current;
+    if (shapeEditDrag) {
+      shapeEditDragRef.current = null;
+      if (shapeEditDrag.historyRecorded) {
+        setStatus(shapeEditDrag.handle === "rotate" ? "Forma ruotata" : "Forma ridimensionata");
+        markDirty();
+        bumpRevision();
       }
       releasePointer();
       return;
@@ -6332,6 +6938,50 @@ export default function PlanimetriaEditor({
 
     if (lotBoundaryDrag) {
       lotBoundaryDragRef.current = null;
+      redrawMasks();
+      releasePointer();
+      return;
+    }
+
+    const shapeDraw = shapeDrawRef.current;
+    if (shapeDraw && point) {
+      const shape = shapeFromDrag(
+        shapeDraw.kind,
+        shapeDraw.start,
+        point,
+        event.shiftKey,
+        pdfCanvasRef.current,
+      );
+      shapeDrawRef.current = null;
+      setShapeDraft(null);
+      const minimum = Math.max(12, Math.round(8 * runtimeRef.current.renderScale));
+      if (shape.width >= minimum && shape.height >= minimum) {
+        const region = createShapeRegion(shape);
+        if (region) {
+          const selectionId = commitSelection(
+            region,
+            activeUsage,
+            opacityPercent / 100,
+            shape.kind,
+            undefined,
+            { shape },
+          );
+          if (selectionId) {
+            setSelectedShapeHandle(null);
+            setStatus(shape.kind === "rectangle" ? "Rettangolo tracciato" : "Ellisse tracciata");
+          }
+        }
+      } else {
+        setStatus(shape.kind === "rectangle" ? "Rettangolo troppo piccolo" : "Ellisse troppo piccola");
+        redrawMasks();
+      }
+      releasePointer();
+      return;
+    }
+
+    if (shapeDraw) {
+      shapeDrawRef.current = null;
+      setShapeDraft(null);
       redrawMasks();
       releasePointer();
       return;
@@ -6536,6 +7186,20 @@ export default function PlanimetriaEditor({
       selection.polygon = selection.polygon?.map((point) =>
         rotateCanvasPoint(point, oldWidth, oldHeight, newWidth, newHeight, delta),
       );
+      if (selection.shape) {
+        selection.shape = {
+          ...selection.shape,
+          center: rotateCanvasPoint(
+            selection.shape.center,
+            oldWidth,
+            oldHeight,
+            newWidth,
+            newHeight,
+            delta,
+          ),
+          rotation: normalizeDegrees(selection.shape.rotation + delta),
+        };
+      }
     });
     const pageLotBoundaries = runtimeRef.current.lotBoundariesByPage.get(pageNumber) ?? [];
     pageLotBoundaries.forEach((boundary) => {
@@ -6836,6 +7500,9 @@ export default function PlanimetriaEditor({
 
   function selectTool(tool: EditorTool) {
     setActiveTool(tool);
+    shapeDrawRef.current = null;
+    shapeEditDragRef.current = null;
+    setShapeDraft(null);
     if (tool !== activeTool || (tool !== "polygon" && tool !== "lot")) {
       setPolygonDraft([]);
       setPointerPreview(null);
@@ -6843,6 +7510,9 @@ export default function PlanimetriaEditor({
     if (tool !== "select" && tool !== "polygon") {
       setSelectedPolygonVertex(null);
       setHoverPolygonInsert(null);
+    }
+    if (tool !== "select" && tool !== "rectangle" && tool !== "ellipse") {
+      setSelectedShapeHandle(null);
     }
     if (tool !== "select" && tool !== "lot") {
       setSelectedLotPolygonVertex(null);
@@ -6856,6 +7526,8 @@ export default function PlanimetriaEditor({
     if (tool === "select") setStatus("Seleziona aree, trascina o usa copia/incolla");
     if (tool === "smart") setStatus("Smart selection attiva");
     if (tool === "polygon") setStatus("Disegna i vertici del poligono");
+    if (tool === "rectangle") setStatus("Trascina per creare un rettangolo · Shift per un quadrato");
+    if (tool === "ellipse") setStatus("Trascina per creare un’ellisse · Shift per un cerchio");
     if (tool === "lot") {
       setStatus(
         currentLotBoundaries.length > 0

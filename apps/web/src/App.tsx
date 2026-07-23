@@ -529,7 +529,7 @@ type PlanAreaDraftSelection = {
   lotInclusionMode?: "auto" | "manual";
   opacity: number;
   totalPixels: number;
-  source?: "smart" | "polygon" | "merged" | "copy" | "manual";
+  source?: "smart" | "polygon" | "rectangle" | "ellipse" | "merged" | "copy" | "manual";
   region: {
     count: number;
   };
@@ -1858,6 +1858,8 @@ function planAreaUsageForSelection(selection: PlanAreaDraftSelection) {
 function planAreaSourceLabel(source?: PlanAreaDraftSelection["source"]) {
   if (source === "manual") return "Manuale";
   if (source === "polygon") return "Poligono";
+  if (source === "rectangle") return "Rettangolo";
+  if (source === "ellipse") return "Ellisse";
   if (source === "merged") return "Unione";
   if (source === "copy") return "Copia";
   return "Smart";

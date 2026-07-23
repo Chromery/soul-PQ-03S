@@ -6263,6 +6263,8 @@ body.is-resizing-columns {
 .plan-stage {
   position: relative;
   overflow: hidden;
+  user-select: none;
+  touch-action: none;
   border-radius: 4px;
   background: #fff;
   box-shadow:
