@@ -3750,7 +3750,7 @@ body.is-resizing-columns {
 
 .property-lot-valuation {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto minmax(220px, 0.7fr);
+  grid-template-columns: minmax(240px, 1fr) auto minmax(360px, 1.2fr);
   align-items: end;
   gap: 12px;
   margin-bottom: 12px;
@@ -5740,16 +5740,6 @@ body.is-resizing-columns {
   background: #eef6ff;
 }
 
-.lot-checkbox.auto:has(input:checked)::after {
-  content: "Auto";
-  padding-left: 4px;
-  border-left: 1px solid #9cc1ec;
-  color: #16803c;
-  font-size: 9px;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
 .lot-checkbox.compact {
   min-height: 25px;
   gap: 4px;
@@ -5809,6 +5799,21 @@ body.is-resizing-columns {
   font-weight: 800;
 }
 
+.lot-value-field > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lot-value-field > span small {
+  color: #71849b;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .lot-value-field > div {
   min-height: 34px;
   display: grid;
@@ -5819,6 +5824,19 @@ body.is-resizing-columns {
   border: 1px solid #cbd8e8;
   border-radius: 7px;
   background: #fff;
+}
+
+.lot-value-field.source-value > div {
+  border-color: #6ea6eb;
+  box-shadow: 0 0 0 2px rgb(13 110 253 / 8%);
+}
+
+.lot-value-field.source-value > span small {
+  color: #0754b8;
+}
+
+.lot-value-field.derived-value > div {
+  background: #f8fafc;
 }
 
 .lot-value-field input {
@@ -5835,6 +5853,24 @@ body.is-resizing-columns {
   color: #31567f;
   font-size: 11px;
   white-space: nowrap;
+}
+
+.lot-linked-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.lot-calculation-formula {
+  display: block;
+  padding: 8px 9px;
+  border: 1px solid #dbe8f7;
+  border-radius: 7px;
+  color: #31567f !important;
+  background: #fff;
+  font-size: 10px !important;
+  font-weight: 750;
+  line-height: 1.5;
 }
 
 .area-table-value-cell.compact {
@@ -6437,6 +6473,10 @@ body.is-resizing-columns {
   width: 100%;
 }
 
+.editor-lot-valuation .lot-linked-fields {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .editor-summary-collapse {
   min-width: 0;
   overflow: hidden;
@@ -6488,6 +6528,16 @@ body.is-resizing-columns {
 
 .editor-lot-selection-meta {
   color: #526780 !important;
+}
+
+@media (max-width: 1150px) {
+  .property-lot-valuation {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .property-lot-valuation .lot-linked-fields {
+    grid-column: 1 / -1;
+  }
 }
 
 .editor-imu-collapse-toggle {

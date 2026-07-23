@@ -2,30 +2,43 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_LOT_VALUATION,
-  lotValueForArea,
+  lotValueShare,
   normalizeLotValuation,
+  resolveLotValuation,
 } from "../../web/src/lotValuation.ts";
 
-test("il lotto percentuale si somma al valore della destinazione selezionata", () => {
-  const lotValue = lotValueForArea(100, 720, true, DEFAULT_LOT_VALUATION);
+test("il lotto percentuale deriva valore totale e valore al metro quadro", () => {
+  const valuation = resolveLotValuation(
+    { mode: "percentage", percentage: 10, unitValuePerM2: 0 },
+    1000,
+    10000,
+  );
 
-  assert.equal(lotValue, 86.4);
-  assert.equal(720 + lotValue, 806.4);
+  assert.equal(valuation.lotValue, 1000);
+  assert.equal(valuation.unitValuePerM2, 1);
 });
 
-test("il lotto a metro quadro usa la superficie dell'area selezionata", () => {
-  const lotValue = lotValueForArea(100, 720, true, {
+test("il lotto a metro quadro deriva valore totale e percentuale", () => {
+  const valuation = resolveLotValuation({
     mode: "per_sqm",
-    percentage: 12,
-    unitValuePerM2: 50,
-  });
+    percentage: 0,
+    unitValuePerM2: 2,
+  }, 1000, 10000);
 
-  assert.equal(lotValue, 5000);
-  assert.equal(720 + lotValue, 5720);
+  assert.equal(valuation.lotValue, 2000);
+  assert.equal(valuation.percentage, 20);
 });
 
-test("un'area senza check lotto non riceve alcuna quota", () => {
-  assert.equal(lotValueForArea(100, 720, false, DEFAULT_LOT_VALUATION), 0);
+test("la quota lotto viene ripartita solo tra le destinazioni selezionate", () => {
+  const totals = {
+    lotValue: 1000,
+    selectedDestinationValue: 10000,
+    selectedAreaM2: 1000,
+    selectedCount: 2,
+  };
+  assert.equal(lotValueShare(6000, 400, true, totals), 600);
+  assert.equal(lotValueShare(4000, 600, true, totals), 400);
+  assert.equal(lotValueShare(6000, 400, false, totals), 0);
 });
 
 test("le bozze precedenti ricevono il fallback percentuale del 12%", () => {

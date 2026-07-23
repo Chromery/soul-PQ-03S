@@ -63,7 +63,7 @@ import {
   writeEditorPreferences,
 } from "./editorPreferences";
 import { openEntriesInForMaps, toForMapsEntries, toForMapsEntry } from "./formaps";
-import { lotValueForArea, normalizeLotValuation } from "./lotValuation";
+import { lotValueShare, normalizeLotValuation, resolveLotValuation } from "./lotValuation";
 import type { LotValuation, LotValuationMode } from "./lotValuation";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
@@ -508,6 +508,7 @@ type PlanAreaDraft = {
   totalLotArea?: number;
   totalLotValue?: number;
   lotValuation?: LotValuation;
+  lotBoundaries?: PlanAreaLotBoundary[];
   estimatedImu?: number | null;
   imuCalculation?: PropertyImuCalculation | null;
   selections: PlanAreaDraftSelection[];
@@ -524,9 +525,19 @@ type PlanAreaDraftSelection = {
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
   includedInLot?: boolean;
+  lotInclusionMode?: "auto" | "manual";
   opacity: number;
   totalPixels: number;
   source?: "smart" | "polygon" | "merged" | "copy" | "manual";
+  region: {
+    count: number;
+  };
+};
+
+type PlanAreaLotBoundary = {
+  id: string;
+  page: number;
+  totalPixels?: number;
   region: {
     count: number;
   };
@@ -1885,17 +1896,61 @@ function planAreaEffectiveAmount(selection: PlanAreaDraftSelection, draft: PlanA
     : computedAmount;
 }
 
-function planAreaLotValue(selection: PlanAreaDraftSelection, draft: PlanAreaDraft) {
-  return lotValueForArea(
-    planAreaEffectiveAreaM2(selection, draft),
-    planAreaEffectiveAmount(selection, draft),
-    selection.includedInLot,
-    normalizeLotValuation(draft.lotValuation),
-  );
+function planAreaIncludedInLot(selection: PlanAreaDraftSelection) {
+  return selection.lotInclusionMode === "manual"
+    ? selection.includedInLot === true
+    : true;
 }
 
-function planAreaTotalAmount(selection: PlanAreaDraftSelection, draft: PlanAreaDraft) {
-  return planAreaEffectiveAmount(selection, draft) + planAreaLotValue(selection, draft);
+function planLotAreaFromDraft(draft: PlanAreaDraft) {
+  return (draft.lotBoundaries ?? []).reduce((sum, boundary) => {
+    const totalPixels =
+      typeof boundary.totalPixels === "number" && boundary.totalPixels > 0
+        ? boundary.totalPixels
+        : draft.selections.find(
+            (selection) => selection.page === boundary.page && selection.totalPixels > 0,
+          )?.totalPixels ?? 0;
+    if (totalPixels <= 0 || boundary.region.count <= 0) return sum;
+    return sum + (boundary.region.count / totalPixels) *
+      pageRealAreaM2(draft.sheetSize, draft.scaleDenominator);
+  }, 0);
+}
+
+function planAreaLotCalculation(draft: PlanAreaDraft) {
+  const baseRows = draft.selections.map((selection) => ({
+    selection,
+    area: planAreaEffectiveAreaM2(selection, draft),
+    amount: planAreaEffectiveAmount(selection, draft),
+    includedInLot: planAreaIncludedInLot(selection),
+  }));
+  const selectedStats = baseRows.reduce(
+    (acc, row) => {
+      if (!row.includedInLot) return acc;
+      acc.destinationValue += row.amount;
+      acc.areaM2 += row.area;
+      acc.count += 1;
+      return acc;
+    },
+    { destinationValue: 0, areaM2: 0, count: 0 },
+  );
+  const lotArea = planLotAreaFromDraft(draft);
+  const resolved = resolveLotValuation(
+    draft.lotValuation,
+    lotArea,
+    selectedStats.destinationValue,
+  );
+  const rowValues = new Map(
+    baseRows.map((row) => [
+      row.selection.id,
+      lotValueShare(row.amount, row.area, row.includedInLot, {
+        lotValue: resolved.lotValue,
+        selectedDestinationValue: selectedStats.destinationValue,
+        selectedAreaM2: selectedStats.areaM2,
+        selectedCount: selectedStats.count,
+      }),
+    ]),
+  );
+  return { baseRows, selectedStats, lotArea, resolved, rowValues };
 }
 
 function planAreaEstimatedRenditaFromAmount(amount: number) {
@@ -1912,29 +1967,37 @@ function planAreaEstimatedRenditaFromDraft(draft: PlanAreaDraft) {
 }
 
 function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft): PlanAreaDraft {
-  const totals = draft.selections.reduce(
-    (acc, selection) => {
-      const area = planAreaEffectiveAreaM2(selection, draft);
-      const baseAmount = planAreaEffectiveAmount(selection, draft);
-      const lotValue = planAreaLotValue(selection, draft);
-      acc.area += area;
-      acc.baseAmount += baseAmount;
-      acc.lotArea += selection.includedInLot ? area : 0;
-      acc.lotValue += lotValue;
-      acc.amount += baseAmount + lotValue;
+  const migratedDraft = {
+    ...draft,
+    selections: draft.selections.map((selection) => ({
+      ...selection,
+      includedInLot: planAreaIncludedInLot(selection),
+      lotInclusionMode: "manual" as const,
+    })),
+  };
+  const lot = planAreaLotCalculation(migratedDraft);
+  const totals = lot.baseRows.reduce(
+    (acc, row) => {
+      acc.area += row.area;
+      acc.baseAmount += row.amount;
       return acc;
     },
-    { area: 0, baseAmount: 0, lotArea: 0, lotValue: 0, amount: 0 },
+    { area: 0, baseAmount: 0 },
   );
+  const amount = totals.baseAmount + lot.resolved.lotValue;
   return {
-    ...draft,
-    lotValuation: normalizeLotValuation(draft.lotValuation),
+    ...migratedDraft,
+    lotValuation: {
+      mode: lot.resolved.mode,
+      percentage: lot.resolved.percentage,
+      unitValuePerM2: lot.resolved.unitValuePerM2,
+    },
     totalArea: totals.area,
     totalBaseAmount: totals.baseAmount,
-    totalLotArea: totals.lotArea,
-    totalLotValue: totals.lotValue,
-    totalEstimatedAmount: totals.amount,
-    totalEstimatedRendita: planAreaEstimatedRenditaFromAmount(totals.amount),
+    totalLotArea: lot.lotArea,
+    totalLotValue: lot.resolved.lotValue,
+    totalEstimatedAmount: amount,
+    totalEstimatedRendita: planAreaEstimatedRenditaFromAmount(amount),
   };
 }
 
@@ -6001,8 +6064,12 @@ function PropertyAreaDetail({
   }, [draftState.draft?.propertyId, draftState.draft?.savedAt]);
 
   const draft = editableDraft;
+  const lotCalculation = useMemo(
+    () => (draft ? planAreaLotCalculation(draft) : null),
+    [draft],
+  );
   const rows = useMemo(() => {
-    if (!draft) return [];
+    if (!draft || !lotCalculation) return [];
     return draft.selections.map((selection, index) => {
       const usage = planAreaUsageForSelection(selection);
       const rate = selection.rate ?? usage.rate;
@@ -6010,7 +6077,7 @@ function PropertyAreaDetail({
       const area = planAreaEffectiveAreaM2(selection, draft);
       const calculatedAmount = area * rate;
       const amount = planAreaEffectiveAmount(selection, draft);
-      const lotValue = planAreaLotValue(selection, draft);
+      const lotValue = lotCalculation.rowValues.get(selection.id) ?? 0;
       return {
         id: selection.id,
         index: index + 1,
@@ -6023,30 +6090,33 @@ function PropertyAreaDetail({
         amount,
         calculatedAmount,
         lotValue,
-        totalAmount: planAreaTotalAmount(selection, draft),
+        totalAmount: amount + lotValue,
         areaOverridden: typeof selection.areaOverrideM2 === "number" && Number.isFinite(selection.areaOverrideM2),
         amountOverridden: typeof selection.amountOverride === "number" && Number.isFinite(selection.amountOverride),
         source: planAreaSourceLabel(selection.source),
       };
     });
-  }, [draft]);
+  }, [draft, lotCalculation]);
 
-  const totals = useMemo(
-    () =>
-      rows.reduce(
+  const totals = useMemo(() => {
+    const base = rows.reduce(
         (acc, row) => {
           acc.area += row.area;
           acc.baseAmount += row.amount;
-          acc.lotArea += row.selection.includedInLot ? row.area : 0;
-          acc.lotValue += row.lotValue;
-          acc.amount += row.totalAmount;
-          acc.rendita += planAreaEstimatedRenditaFromAmount(row.totalAmount);
           return acc;
         },
-        { area: 0, baseAmount: 0, lotArea: 0, lotValue: 0, amount: 0, rendita: 0 },
-      ),
-    [rows],
-  );
+        { area: 0, baseAmount: 0 },
+      );
+    const lotValue = lotCalculation?.resolved.lotValue ?? 0;
+    const amount = base.baseAmount + lotValue;
+    return {
+      ...base,
+      lotArea: lotCalculation?.lotArea ?? 0,
+      lotValue,
+      amount,
+      rendita: planAreaEstimatedRenditaFromAmount(amount),
+    };
+  }, [lotCalculation, rows]);
 
   const breakdown = useMemo(
     () => {
@@ -6070,7 +6140,12 @@ function PropertyAreaDetail({
         : "Nessuna bozza";
   const topPriceLists = property.priceLists?.slice(0, 5) ?? [];
   const primaryPriceList = topPriceLists[0];
-  const lotValuation = normalizeLotValuation(draft?.lotValuation);
+  const lotValuation = lotCalculation?.resolved ?? {
+    ...normalizeLotValuation(draft?.lotValuation),
+    lotAreaM2: 0,
+    destinationValue: 0,
+    lotValue: 0,
+  };
 
   function updateEditableDraft(updater: (draft: PlanAreaDraft) => void) {
     setEditableDraft((current) => {
@@ -6171,19 +6246,29 @@ function PropertyAreaDetail({
 
   function handleLotModeChange(mode: LotValuationMode) {
     updateEditableDraft((nextDraft) => {
-      nextDraft.lotValuation = { ...normalizeLotValuation(nextDraft.lotValuation), mode };
+      nextDraft.lotValuation = {
+        mode,
+        percentage: lotValuation.percentage,
+        unitValuePerM2: lotValuation.unitValuePerM2,
+      };
     });
   }
 
-  function handleLotValueBlur(input: HTMLInputElement) {
-    const field = lotValuation.mode === "percentage" ? "percentage" : "unitValuePerM2";
+  function handleLotValueBlur(
+    field: "percentage" | "unitValuePerM2",
+    input: HTMLInputElement,
+  ) {
     const fallback = lotValuation[field];
     handleNumberBlur(
       input.value,
       fallback,
       (value) =>
         updateEditableDraft((nextDraft) => {
-          nextDraft.lotValuation = { ...normalizeLotValuation(nextDraft.lotValuation), [field]: value };
+          nextDraft.lotValuation = {
+            ...normalizeLotValuation(nextDraft.lotValuation),
+            mode: field === "percentage" ? "percentage" : "per_sqm",
+            [field]: value,
+          };
         }),
       input,
       "Inserisci un valore lotto valido.",
@@ -6386,7 +6471,8 @@ function PropertyAreaDetail({
               <div>
                 <h3>Valorizzazione lotto</h3>
                 <p>
-                  Il contributo si somma al valore della destinazione d’uso solo per le righe con check Lotto.
+                  La superficie deriva dal poligono Lotto. I check stabiliscono quali valori delle destinazioni
+                  entrano nella base percentuale.
                 </p>
               </div>
               <div className="lot-mode-toggle" role="group" aria-label="Metodo di valorizzazione del lotto">
@@ -6405,40 +6491,54 @@ function PropertyAreaDetail({
                   €/m²
                 </button>
               </div>
-              <label className="lot-value-field">
-                <span>{lotValuation.mode === "percentage" ? "Incidenza sul valore destinazioni" : "Valore unitario lotto"}</span>
-                <div>
-                  <input
-                    key={`${lotValuation.mode}-${lotValuation.mode === "percentage" ? lotValuation.percentage : lotValuation.unitValuePerM2}`}
-                    type="text"
-                    inputMode="decimal"
-                    defaultValue={areaFormatter.format(
-                      lotValuation.mode === "percentage" ? lotValuation.percentage : lotValuation.unitValuePerM2,
-                    )}
-                    onBlur={(event) => handleLotValueBlur(event.currentTarget)}
-                    onKeyDown={(event) =>
-                      handleNumericInputKeyDown(
-                        event,
-                        areaFormatter.format(
-                          lotValuation.mode === "percentage" ? lotValuation.percentage : lotValuation.unitValuePerM2,
-                        ),
-                      )
-                    }
-                  />
-                  <strong>{lotValuation.mode === "percentage" ? "%" : "€/m²"}</strong>
-                </div>
-              </label>
-              <small>
+              <div className="lot-linked-fields">
+                {([
+                  ["percentage", "Incidenza sul valore destinazioni", "%"],
+                  ["unitValuePerM2", "Valore unitario lotto", "€/m²"],
+                ] as const).map(([field, label, unit]) => (
+                  <label
+                    className={`lot-value-field ${
+                      lotValuation.mode === (field === "percentage" ? "percentage" : "per_sqm")
+                        ? "source-value"
+                        : "derived-value"
+                    }`}
+                    key={field}
+                  >
+                    <span>
+                      {label}
+                      <small>
+                        {lotValuation.mode === (field === "percentage" ? "percentage" : "per_sqm")
+                          ? "impostato"
+                          : "derivato"}
+                      </small>
+                    </span>
+                    <div>
+                      <input
+                        key={`${field}-${lotValuation[field]}`}
+                        type="text"
+                        inputMode="decimal"
+                        defaultValue={areaFormatter.format(lotValuation[field])}
+                        onBlur={(event) => handleLotValueBlur(field, event.currentTarget)}
+                        onKeyDown={(event) =>
+                          handleNumericInputKeyDown(event, areaFormatter.format(lotValuation[field]))
+                        }
+                      />
+                      <strong>{unit}</strong>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <small className="lot-calculation-formula">
                 {lotValuation.mode === "percentage"
-                  ? "La Circolare 6/2012 indica normalmente almeno il 12% del costo delle strutture quando manca una stima di dettaglio."
-                  : "Usa il valore da indagine di mercato del lotto e seleziona una sola volta le superfici fisicamente sovrapposte."}
+                  ? `${formatEuro(lotValuation.destinationValue)} × ${areaFormatter.format(lotValuation.percentage)}% = ${formatEuro(lotValuation.lotValue)}; ${formatEuro(lotValuation.lotValue)} ÷ ${formatM2(lotValuation.lotAreaM2)} = ${areaFormatter.format(lotValuation.unitValuePerM2)} €/m²`
+                  : `${formatM2(lotValuation.lotAreaM2)} × ${areaFormatter.format(lotValuation.unitValuePerM2)} €/m² = ${formatEuro(lotValuation.lotValue)}; ${formatEuro(lotValuation.lotValue)} ÷ ${formatEuro(lotValuation.destinationValue)} = ${areaFormatter.format(lotValuation.percentage)}%`}
               </small>
             </section>
 
             <div className="property-area-summary">
               <SummaryStat label="Aree tracciate" value={rows.length.toString()} />
               <SummaryStat label="Area totale" value={formatM2(totals.area)} />
-              <SummaryStat label="Area nel lotto" value={formatM2(totals.lotArea)} />
+              <SummaryStat label="Superficie lotto" value={formatM2(totals.lotArea)} />
               <SummaryStat label="Valore destinazioni" value={formatEuro(totals.baseAmount)} />
               <SummaryStat label="Valore lotto" value={formatEuro(totals.lotValue)} />
               <SummaryStat label="Valore complessivo" value={formatEuro(totals.amount)} />
@@ -6531,11 +6631,12 @@ function PropertyAreaDetail({
                           <label className="lot-checkbox" title="Includi questa area nel calcolo del lotto">
                             <input
                               type="checkbox"
-                              checked={row.selection.includedInLot === true}
+                              checked={planAreaIncludedInLot(row.selection)}
                               onChange={(event) => {
                                 const includedInLot = event.currentTarget.checked;
                                 updateEditableSelection(row.id, (selection) => {
                                   selection.includedInLot = includedInLot;
+                                  selection.lotInclusionMode = "manual";
                                 });
                               }}
                               aria-label={`Includi area ${row.index} nel lotto`}

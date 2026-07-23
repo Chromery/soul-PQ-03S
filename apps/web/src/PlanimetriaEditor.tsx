@@ -44,8 +44,9 @@ import { openEntriesInForMaps, toForMapsEntry } from "./formaps";
 import type { PropertyImuCalculation } from "./imu";
 import {
   DEFAULT_LOT_VALUATION,
-  lotValueForArea,
+  lotValueShare,
   normalizeLotValuation,
+  resolveLotValuation,
 } from "./lotValuation";
 import type { LotValuation, LotValuationMode } from "./lotValuation";
 
@@ -251,6 +252,7 @@ type LotBoundary = {
   page: number;
   polygon: CanvasPoint[];
   region: Region;
+  totalPixels: number;
 };
 
 type DocumentSource =
@@ -288,6 +290,7 @@ type SavedLotBoundary = {
   id: string;
   page: number;
   polygon: CanvasPoint[];
+  totalPixels?: number;
   region: {
     bounds: MaskBounds;
     seed: CanvasPoint;
@@ -408,6 +411,32 @@ type SelectedPolygonVertex = {
   vertexIndex: number;
 };
 
+type LotBoundaryDragState = {
+  boundaryId: string;
+  start: CanvasPoint;
+  bounds: MaskBounds;
+  seed: CanvasPoint;
+  polygon: CanvasPoint[];
+  historyRecorded: boolean;
+};
+
+type LotPolygonEditDragState = {
+  boundaryId: string;
+  vertexIndex: number;
+  historyRecorded: boolean;
+};
+
+type LotPolygonInsertTarget = {
+  boundaryId: string;
+  edgeIndex: number;
+  point: CanvasPoint;
+};
+
+type SelectedLotPolygonVertex = {
+  boundaryId: string;
+  vertexIndex: number;
+};
+
 type ClipboardSelection = {
   usageId: UsageId;
   customUsageId?: string;
@@ -454,6 +483,7 @@ type EditorSnapshot = {
   selectionsByPage: Map<number, AreaSelection[]>;
   lotBoundariesByPage: Map<number, LotBoundary[]>;
   selectedIds: string[];
+  selectedLotBoundaryId: string | null;
   history: string[];
   calibration: SavedCalibration | null;
   rulerSegment: MeasureSegment | null;
@@ -1111,6 +1141,8 @@ export default function PlanimetriaEditor({
   const marqueeDragRef = useRef<MarqueeDragState | null>(null);
   const segmentDragRef = useRef<SegmentDragState | null>(null);
   const polygonEditDragRef = useRef<PolygonEditDragState | null>(null);
+  const lotBoundaryDragRef = useRef<LotBoundaryDragState | null>(null);
+  const lotPolygonEditDragRef = useRef<LotPolygonEditDragState | null>(null);
   const rulerDragRef = useRef<CanvasPoint | null>(null);
   const clipboardRef = useRef<ClipboardSelection[]>([]);
   const outlinePathCacheRef = useRef<WeakMap<HTMLCanvasElement, CanvasPoint[][]>>(new WeakMap());
@@ -1177,6 +1209,9 @@ export default function PlanimetriaEditor({
   const [collapsedAreaIds, setCollapsedAreaIds] = useState<string[]>([]);
   const [selectedPolygonVertex, setSelectedPolygonVertex] = useState<SelectedPolygonVertex | null>(null);
   const [hoverPolygonInsert, setHoverPolygonInsert] = useState<PolygonInsertTarget | null>(null);
+  const [selectedLotBoundaryId, setSelectedLotBoundaryId] = useState<string | null>(null);
+  const [selectedLotPolygonVertex, setSelectedLotPolygonVertex] = useState<SelectedLotPolygonVertex | null>(null);
+  const [hoverLotPolygonInsert, setHoverLotPolygonInsert] = useState<LotPolygonInsertTarget | null>(null);
   const [selectedSelectionIds, setSelectedSelectionIds] = useState<string[]>([]);
   const [marqueeDraft, setMarqueeDraft] = useState<MarqueeState | null>(null);
   const [polygonDraft, setPolygonDraft] = useState<CanvasPoint[]>([]);
@@ -1242,13 +1277,18 @@ export default function PlanimetriaEditor({
   );
   const canUndo = runtimeRef.current.undoStack.length > 0;
   const canRedo = runtimeRef.current.redoStack.length > 0;
-  const canDeleteSelectedObject = selectedSelectionIds.length > 0 || rulerSegmentSelected || Boolean(selectedPolygonVertex);
+  const canDeleteSelectedObject =
+    selectedSelectionIds.length > 0 ||
+    rulerSegmentSelected ||
+    Boolean(selectedPolygonVertex) ||
+    Boolean(selectedLotPolygonVertex) ||
+    Boolean(selectedLotBoundaryId);
   const hasCurrentPageAreas = selections.length > 0;
   const hasCurrentPageLotBoundary = currentLotBoundaries.length > 0;
   const canSaveDraft = Boolean(documentSource || allSelections.length > 0 || allLotBoundaries.length > 0);
   const currentPageRotation = currentPage ? runtimeRef.current.pageRotations.get(currentPage) ?? 0 : 0;
 
-  const selectedAreas = useMemo(
+  const baseSelectedAreas = useMemo(
     () =>
       allSelections.map((selection, index) => {
         const selectionCustomUsage = customUsageByIdOrLabel(
@@ -1271,7 +1311,6 @@ export default function PlanimetriaEditor({
         const area = effectiveSelectionAreaM2(selection, calculatedArea);
         const calculatedAmount = area * selection.rate;
         const amount = effectiveSelectionAmount(selection, calculatedAmount);
-        const lotValue = lotValueForArea(area, amount, selection.includedInLot, lotValuation);
         return {
           selection,
           index,
@@ -1280,29 +1319,90 @@ export default function PlanimetriaEditor({
           calculatedArea,
           amount,
           calculatedAmount,
-          lotValue,
-          totalAmount: amount + lotValue,
           areaOverridden: typeof selection.areaOverrideM2 === "number" && Number.isFinite(selection.areaOverrideM2),
           amountOverridden: typeof selection.amountOverride === "number" && Number.isFinite(selection.amountOverride),
         };
       }),
-    [allSelections, customUsages, lotValuation, scaleDenominator, sheetSize, revision],
+    [allSelections, customUsages, scaleDenominator, sheetSize, revision],
+  );
+
+  const tracedLotArea = useMemo(
+    () =>
+      allLotBoundaries.reduce(
+        (sum, boundary) =>
+          sum +
+          areaFromPixels(
+            boundary.region.count,
+            boundary.totalPixels,
+            sheetSize,
+            scaleDenominator,
+          ),
+        0,
+      ),
+    [allLotBoundaries, scaleDenominator, sheetSize, revision],
+  );
+
+  const selectedLotStats = useMemo(
+    () =>
+      baseSelectedAreas.reduce(
+        (acc, area) => {
+          if (!area.selection.includedInLot) return acc;
+          acc.destinationValue += area.amount;
+          acc.areaM2 += area.area;
+          acc.count += 1;
+          return acc;
+        },
+        { destinationValue: 0, areaM2: 0, count: 0 },
+      ),
+    [baseSelectedAreas],
+  );
+
+  const resolvedLotValuation = useMemo(
+    () => resolveLotValuation(lotValuation, tracedLotArea, selectedLotStats.destinationValue),
+    [lotValuation, selectedLotStats.destinationValue, tracedLotArea],
+  );
+
+  const selectedAreas = useMemo(
+    () =>
+      baseSelectedAreas.map((area) => {
+        const lotValue = lotValueShare(
+          area.amount,
+          area.area,
+          area.selection.includedInLot,
+          {
+            lotValue: resolvedLotValuation.lotValue,
+            selectedDestinationValue: selectedLotStats.destinationValue,
+            selectedAreaM2: selectedLotStats.areaM2,
+            selectedCount: selectedLotStats.count,
+          },
+        );
+        return {
+          ...area,
+          lotValue,
+          totalAmount: area.amount + lotValue,
+        };
+      }),
+    [baseSelectedAreas, resolvedLotValuation.lotValue, selectedLotStats],
   );
 
   const totals = useMemo(() => {
-    return selectedAreas.reduce(
+    const base = selectedAreas.reduce(
       (acc, area) => {
         acc.area += area.area;
         acc.baseAmount += area.amount;
-        acc.lotArea += area.selection.includedInLot ? area.area : 0;
-        acc.lotValue += area.lotValue;
-        acc.amount += area.totalAmount;
-        acc.rendita += estimatedRenditaFromAmount(area.totalAmount);
         return acc;
       },
-      { area: 0, baseAmount: 0, lotArea: 0, lotValue: 0, amount: 0, rendita: 0 },
+      { area: 0, baseAmount: 0 },
     );
-  }, [selectedAreas]);
+    const amount = base.baseAmount + resolvedLotValuation.lotValue;
+    return {
+      ...base,
+      lotArea: tracedLotArea,
+      lotValue: resolvedLotValuation.lotValue,
+      amount,
+      rendita: estimatedRenditaFromAmount(amount),
+    };
+  }, [resolvedLotValuation.lotValue, selectedAreas, tracedLotArea]);
 
   const currentImuCalculation =
     property.currentImuCalculation?.status === "calculated" ? property.currentImuCalculation : null;
@@ -1388,6 +1488,9 @@ export default function PlanimetriaEditor({
     rulerSegmentSelected,
     selectedPolygonVertex,
     hoverPolygonInsert,
+    selectedLotBoundaryId,
+    selectedLotPolygonVertex,
+    hoverLotPolygonInsert,
     revision,
     hasPdf,
   ]);
@@ -1449,7 +1552,8 @@ export default function PlanimetriaEditor({
 
       if (event.key === "Backspace" || event.key === "Delete") {
         event.preventDefault();
-        if (selectedPolygonVertex) deleteSelectedPolygonVertex();
+        if (selectedLotPolygonVertex) deleteSelectedLotPolygonVertex();
+        else if (selectedPolygonVertex) deleteSelectedPolygonVertex();
         else deleteSelectedObjects();
         return;
       }
@@ -1477,6 +1581,8 @@ export default function PlanimetriaEditor({
           setPointerPreview(null);
           setSelectedPolygonVertex(null);
           setHoverPolygonInsert(null);
+          setSelectedLotPolygonVertex(null);
+          setHoverLotPolygonInsert(null);
           setDeleteMenuOpen(false);
           setOpacityDockOpen(false);
         }
@@ -1498,6 +1604,8 @@ export default function PlanimetriaEditor({
   }, [
     selectedSelectionIds,
     selectedPolygonVertex,
+    selectedLotBoundaryId,
+    selectedLotPolygonVertex,
     clipboardCount,
     currentPage,
     hasPdf,
@@ -1559,9 +1667,14 @@ export default function PlanimetriaEditor({
     marqueeDragRef.current = null;
     segmentDragRef.current = null;
     polygonEditDragRef.current = null;
+    lotBoundaryDragRef.current = null;
+    lotPolygonEditDragRef.current = null;
     rulerDragRef.current = null;
     setSelectedPolygonVertex(null);
     setHoverPolygonInsert(null);
+    setSelectedLotBoundaryId(null);
+    setSelectedLotPolygonVertex(null);
+    setHoverLotPolygonInsert(null);
     setCollapsedAreaIds([]);
     setPriceListDropdownOpen(false);
     setCollapsedRightSections({ totals: true, areas: false });
@@ -2157,8 +2270,11 @@ export default function PlanimetriaEditor({
           typeof saved.amountOverride === "number" && Number.isFinite(saved.amountOverride)
             ? saved.amountOverride
             : null,
-        includedInLot: saved.includedInLot === true,
-        lotInclusionMode: saved.lotInclusionMode,
+        includedInLot:
+          saved.lotInclusionMode === "manual"
+            ? saved.includedInLot === true
+            : true,
+        lotInclusionMode: "manual",
         opacity: saved.opacity,
         totalPixels: saved.totalPixels,
         region,
@@ -2182,6 +2298,11 @@ export default function PlanimetriaEditor({
         id: saved.id,
         page: saved.page,
         polygon: saved.polygon.map((point) => ({ ...point })),
+        totalPixels:
+          typeof saved.totalPixels === "number" && saved.totalPixels > 0
+            ? saved.totalPixels
+            : restored.get(saved.page)?.find((selection) => selection.totalPixels > 0)?.totalPixels
+              ?? (saved.page === runtimeRef.current.currentPage ? getCanvasTotalPixels() : 0),
         region: {
           bounds: { ...saved.region.bounds },
           seed: { ...saved.region.seed },
@@ -2240,6 +2361,7 @@ export default function PlanimetriaEditor({
         id: boundary.id,
         page: boundary.page,
         polygon: boundary.polygon.map((point) => ({ ...point })),
+        totalPixels: boundary.totalPixels,
         region: {
           bounds: { ...boundary.region.bounds },
           seed: { ...boundary.region.seed },
@@ -2282,7 +2404,11 @@ export default function PlanimetriaEditor({
       totalBaseAmount: totals.baseAmount,
       totalLotArea: totals.lotArea,
       totalLotValue: totals.lotValue,
-      lotValuation,
+      lotValuation: {
+        mode: resolvedLotValuation.mode,
+        percentage: resolvedLotValuation.percentage,
+        unitValuePerM2: resolvedLotValuation.unitValuePerM2,
+      },
       lotBoundaries: lotBoundariesToSave,
       selections: selectionsToSave,
     };
@@ -3517,64 +3643,6 @@ export default function PlanimetriaEditor({
     });
   }
 
-  function regionsIntersect(first: Region, second: Region) {
-    if (!boundsIntersectRect(first.bounds, second.bounds)) return false;
-    const minX = Math.max(first.bounds.minX, second.bounds.minX);
-    const minY = Math.max(first.bounds.minY, second.bounds.minY);
-    const maxX = Math.min(first.bounds.maxX, second.bounds.maxX);
-    const maxY = Math.min(first.bounds.maxY, second.bounds.maxY);
-    const width = maxX - minX + 1;
-    const height = maxY - minY + 1;
-    if (width <= 0 || height <= 0) return false;
-
-    const firstContext = first.alphaCanvas.getContext("2d", { willReadFrequently: true });
-    const secondContext = second.alphaCanvas.getContext("2d", { willReadFrequently: true });
-    if (!firstContext || !secondContext) return false;
-    const firstData = firstContext.getImageData(
-      minX - first.bounds.minX,
-      minY - first.bounds.minY,
-      width,
-      height,
-    ).data;
-    const secondData = secondContext.getImageData(
-      minX - second.bounds.minX,
-      minY - second.bounds.minY,
-      width,
-      height,
-    ).data;
-    for (let index = 3; index < firstData.length; index += 4) {
-      if (firstData[index] > 8 && secondData[index] > 8) return true;
-    }
-    return false;
-  }
-
-  function selectionIntersectsLotBoundary(selection: AreaSelection) {
-    const boundaries = runtimeRef.current.lotBoundariesByPage.get(selection.page) ?? [];
-    return boundaries.some((boundary) => regionsIntersect(selection.region, boundary.region));
-  }
-
-  function reconcileSelectionLot(selection: AreaSelection, forceIntersecting = false) {
-    const intersects = selectionIntersectsLotBoundary(selection);
-    if (intersects && (forceIntersecting || selection.lotInclusionMode !== "manual")) {
-      selection.includedInLot = true;
-      selection.lotInclusionMode = "auto";
-      return true;
-    }
-    if (!intersects && selection.lotInclusionMode === "auto") {
-      selection.includedInLot = false;
-      return true;
-    }
-    return false;
-  }
-
-  function reconcilePageLotSelections(page: number, forceIntersecting = false) {
-    let changed = false;
-    (runtimeRef.current.selectionsByPage.get(page) ?? []).forEach((selection) => {
-      if (reconcileSelectionLot(selection, forceIntersecting)) changed = true;
-    });
-    return changed;
-  }
-
   function commitLotBoundary(points: CanvasPoint[]) {
     const region = createPolygonRegion(points);
     if (!region) return false;
@@ -3587,10 +3655,14 @@ export default function PlanimetriaEditor({
         page,
         polygon: points.map((point) => ({ ...point })),
         region,
+        totalPixels: getCanvasTotalPixels(),
       },
     ]);
-    reconcilePageLotSelections(page, true);
+    const boundary = runtimeRef.current.lotBoundariesByPage.get(page)?.[0] ?? null;
     setSelectedSelectionIds([]);
+    setSelectedLotBoundaryId(boundary?.id ?? null);
+    setSelectedLotPolygonVertex(null);
+    setHoverLotPolygonInsert(null);
     setRulerSegmentSelected(false);
     redrawMasks();
     setStatus(replacing ? "Definizione lotto aggiornata" : "Definizione lotto completata");
@@ -3604,7 +3676,9 @@ export default function PlanimetriaEditor({
     if ((runtimeRef.current.lotBoundariesByPage.get(page) ?? []).length === 0) return;
     recordUndoState();
     runtimeRef.current.lotBoundariesByPage.delete(page);
-    reconcilePageLotSelections(page);
+    setSelectedLotBoundaryId(null);
+    setSelectedLotPolygonVertex(null);
+    setHoverLotPolygonInsert(null);
     setDeleteMenuOpen(false);
     redrawMasks();
     setStatus("Definizione lotto rimossa");
@@ -3668,6 +3742,7 @@ export default function PlanimetriaEditor({
           id: boundary.id,
           page: boundary.page,
           polygon: boundary.polygon.map((point) => ({ ...point })),
+          totalPixels: boundary.totalPixels,
           region: cloneRegion(boundary.region),
         })),
       );
@@ -3680,6 +3755,7 @@ export default function PlanimetriaEditor({
       selectionsByPage: cloneSelectionsByPage(runtimeRef.current.selectionsByPage),
       lotBoundariesByPage: cloneLotBoundariesByPage(runtimeRef.current.lotBoundariesByPage),
       selectedIds: [...selectedSelectionIds],
+      selectedLotBoundaryId,
       history: [...runtimeRef.current.history],
       calibration: calibration
         ? {
@@ -3732,6 +3808,18 @@ export default function PlanimetriaEditor({
         .map((selection) => selection.id),
     );
     setSelectedSelectionIds(snapshot.selectedIds.filter((id) => existingIds.has(id)));
+    const existingLotIds = new Set(
+      Array.from(runtimeRef.current.lotBoundariesByPage.values())
+        .flat()
+        .map((boundary) => boundary.id),
+    );
+    setSelectedLotBoundaryId(
+      snapshot.selectedLotBoundaryId && existingLotIds.has(snapshot.selectedLotBoundaryId)
+        ? snapshot.selectedLotBoundaryId
+        : null,
+    );
+    setSelectedLotPolygonVertex(null);
+    setHoverLotPolygonInsert(null);
     setCalibration(
       snapshot.calibration
         ? {
@@ -3873,12 +3961,8 @@ export default function PlanimetriaEditor({
       selection.bitmap = createTintedCanvas(region, color, opacity);
       selection.source = source;
       selection.polygon = polygon;
-      if (options.includedInLot !== undefined) {
-        selection.includedInLot = options.includedInLot;
-        selection.lotInclusionMode = options.lotInclusionMode ?? "manual";
-      } else {
-        reconcileSelectionLot(selection);
-      }
+      selection.includedInLot = options.includedInLot ?? selection.includedInLot ?? true;
+      selection.lotInclusionMode = "manual";
       redrawMasks();
       setStatus(`Area ${duplicateIndex + 1} aggiornata`);
       if (shouldSelect) setSelectedSelectionIds([selection.id]);
@@ -3903,10 +3987,9 @@ export default function PlanimetriaEditor({
       bitmap: createTintedCanvas(region, color, opacity),
       source,
       polygon,
-      includedInLot: options.includedInLot === true,
-      lotInclusionMode: options.includedInLot !== undefined ? options.lotInclusionMode ?? "manual" : "auto",
+      includedInLot: options.includedInLot ?? true,
+      lotInclusionMode: "manual",
     };
-    if (options.includedInLot === undefined) reconcileSelectionLot(selection);
     selectionsForPage.push(selection);
     runtimeRef.current.history.push(selection.id);
     redrawMasks();
@@ -3947,6 +4030,8 @@ export default function PlanimetriaEditor({
       region,
       bitmap: createTintedCanvas(region, usage.color, opacity),
       source: "manual",
+      includedInLot: true,
+      lotInclusionMode: "manual",
     };
     recordUndoState();
     const pageSelections = runtimeRef.current.selectionsByPage.get(page) ?? [];
@@ -4124,6 +4209,50 @@ export default function PlanimetriaEditor({
     context.restore();
   }
 
+  function drawLotPolygonEditHandles(context: CanvasRenderingContext2D, boundary: LotBoundary) {
+    if (boundary.id !== selectedLotBoundaryId || (activeTool !== "select" && activeTool !== "lot")) return;
+    const isSelectedVertex = (index: number) =>
+      selectedLotPolygonVertex?.boundaryId === boundary.id &&
+      selectedLotPolygonVertex.vertexIndex === index;
+
+    context.save();
+    context.strokeStyle = "#0d6efd";
+    context.lineWidth = 3;
+    context.setLineDash([8, 6]);
+    drawPolygonPath(context, boundary.polygon, true);
+    context.stroke();
+    context.setLineDash([]);
+
+    boundary.polygon.forEach((point, index) => {
+      context.beginPath();
+      context.arc(point.x, point.y, isSelectedVertex(index) ? 11 : 8, 0, Math.PI * 2);
+      context.fillStyle = isSelectedVertex(index) ? "#0d6efd" : "#ffffff";
+      context.fill();
+      context.lineWidth = isSelectedVertex(index) ? 4 : 3;
+      context.strokeStyle = "#16a34a";
+      context.stroke();
+    });
+
+    if (hoverLotPolygonInsert?.boundaryId === boundary.id) {
+      context.beginPath();
+      context.arc(hoverLotPolygonInsert.point.x, hoverLotPolygonInsert.point.y, 7, 0, Math.PI * 2);
+      context.fillStyle = "#ffffff";
+      context.fill();
+      context.lineWidth = 3;
+      context.strokeStyle = "#0d6efd";
+      context.setLineDash([4, 4]);
+      context.stroke();
+      context.setLineDash([]);
+      context.beginPath();
+      context.moveTo(hoverLotPolygonInsert.point.x - 5, hoverLotPolygonInsert.point.y);
+      context.lineTo(hoverLotPolygonInsert.point.x + 5, hoverLotPolygonInsert.point.y);
+      context.moveTo(hoverLotPolygonInsert.point.x, hoverLotPolygonInsert.point.y - 5);
+      context.lineTo(hoverLotPolygonInsert.point.x, hoverLotPolygonInsert.point.y + 5);
+      context.stroke();
+    }
+    context.restore();
+  }
+
   function drawPolygonEditHandles(context: CanvasRenderingContext2D, selection: AreaSelection) {
     if (!selection.polygon || selection.polygon.length < 3) return;
     if (activeTool !== "select" && activeTool !== "polygon") return;
@@ -4210,6 +4339,9 @@ export default function PlanimetriaEditor({
   }
 
   function drawEditorOverlays(context: CanvasRenderingContext2D) {
+    (runtimeRef.current.lotBoundariesByPage.get(runtimeRef.current.currentPage) ?? []).forEach((boundary) => {
+      drawLotPolygonEditHandles(context, boundary);
+    });
     selectedCurrentPageSelections.forEach((selection) => {
       drawSelectionOutline(context, selection);
       drawPolygonEditHandles(context, selection);
@@ -4430,12 +4562,20 @@ export default function PlanimetriaEditor({
 
   function deleteSelectedObjects() {
     setDeleteMenuOpen(false);
+    if (selectedLotPolygonVertex) {
+      deleteSelectedLotPolygonVertex();
+      return;
+    }
     if (selectedPolygonVertex) {
       deleteSelectedPolygonVertex();
       return;
     }
     if (selectedSelectionIds.length > 0) {
       removeSelections(selectedSelectionIds);
+      return;
+    }
+    if (selectedLotBoundaryId) {
+      removeCurrentPageLotBoundary();
       return;
     }
     if (rulerSegmentSelected) removeMeasureSegment();
@@ -4800,7 +4940,11 @@ export default function PlanimetriaEditor({
   function changeLotValuationMode(mode: LotValuationMode) {
     if (lotValuation.mode === mode) return;
     recordUndoState();
-    setLotValuation((current) => ({ ...current, mode }));
+    setLotValuation({
+      mode,
+      percentage: resolvedLotValuation.percentage,
+      unitValuePerM2: resolvedLotValuation.unitValuePerM2,
+    });
     setStatus(mode === "percentage" ? "Lotto valorizzato in percentuale" : "Lotto valorizzato al metro quadro");
     markDirty();
     bumpRevision();
@@ -4813,10 +4957,28 @@ export default function PlanimetriaEditor({
       bumpRevision();
       return null;
     }
-    if (lotValuation[field] === parsed) return parsed;
+    const mode = field === "percentage" ? "percentage" : "per_sqm";
+    if (lotValuation.mode === mode && resolvedLotValuation[field] === parsed) return parsed;
+    const nextValuation = resolveLotValuation(
+      {
+        mode,
+        percentage: field === "percentage" ? parsed : resolvedLotValuation.percentage,
+        unitValuePerM2: field === "unitValuePerM2" ? parsed : resolvedLotValuation.unitValuePerM2,
+      },
+      tracedLotArea,
+      selectedLotStats.destinationValue,
+    );
     recordUndoState();
-    setLotValuation((current) => ({ ...current, [field]: parsed }));
-    setStatus(field === "percentage" ? "Percentuale lotto aggiornata" : "Valore unitario lotto aggiornato");
+    setLotValuation({
+      mode: nextValuation.mode,
+      percentage: nextValuation.percentage,
+      unitValuePerM2: nextValuation.unitValuePerM2,
+    });
+    setStatus(
+      field === "percentage"
+        ? `Percentuale aggiornata; valore derivato ${areaFormatter.format(nextValuation.unitValuePerM2)} €/m²`
+        : `Valore unitario aggiornato; incidenza derivata ${areaFormatter.format(nextValuation.percentage)}%`,
+    );
     markDirty();
     bumpRevision();
     return parsed;
@@ -5097,6 +5259,171 @@ export default function PlanimetriaEditor({
     return null;
   }
 
+  function findLotBoundaryById(id: string) {
+    for (const boundaries of runtimeRef.current.lotBoundariesByPage.values()) {
+      const boundary = boundaries.find((item) => item.id === id);
+      if (boundary) return boundary;
+    }
+    return null;
+  }
+
+  function selectedEditableLotBoundary() {
+    if (!selectedLotBoundaryId) return null;
+    const boundary = findLotBoundaryById(selectedLotBoundaryId);
+    return boundary?.page === runtimeRef.current.currentPage ? boundary : null;
+  }
+
+  function hitTestLotPolygonVertex(point: CanvasPoint) {
+    const boundary = selectedEditableLotBoundary();
+    if (!boundary) return null;
+    const threshold = Math.max(12, Math.round(9 * runtimeRef.current.renderScale));
+    for (let index = boundary.polygon.length - 1; index >= 0; index--) {
+      if (distance(point, boundary.polygon[index]) <= threshold) {
+        return { boundary, vertexIndex: index };
+      }
+    }
+    return null;
+  }
+
+  function hitTestLotPolygonInsert(point: CanvasPoint): LotPolygonInsertTarget | null {
+    const boundary = selectedEditableLotBoundary();
+    if (!boundary) return null;
+    const threshold = Math.max(10, Math.round(7 * runtimeRef.current.renderScale));
+    for (let index = 0; index < boundary.polygon.length; index++) {
+      const start = boundary.polygon[index];
+      const end = boundary.polygon[(index + 1) % boundary.polygon.length];
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const lengthSquared = dx * dx + dy * dy;
+      if (lengthSquared === 0) continue;
+      const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+      if (t < 0.16 || t > 0.84) continue;
+      const projected = { x: Math.round(start.x + t * dx), y: Math.round(start.y + t * dy) };
+      if (distance(point, projected) <= threshold) {
+        return { boundaryId: boundary.id, edgeIndex: index, point: projected };
+      }
+    }
+    return null;
+  }
+
+  function hitTestLotBoundary(point: CanvasPoint, includeInterior = false) {
+    const boundaries = runtimeRef.current.lotBoundariesByPage.get(runtimeRef.current.currentPage) ?? [];
+    const lineThreshold = Math.max(12, Math.round(8 * runtimeRef.current.renderScale));
+    for (let boundaryIndex = boundaries.length - 1; boundaryIndex >= 0; boundaryIndex--) {
+      const boundary = boundaries[boundaryIndex];
+      for (let index = 0; index < boundary.polygon.length; index++) {
+        if (
+          distanceToSegment(
+            point,
+            boundary.polygon[index],
+            boundary.polygon[(index + 1) % boundary.polygon.length],
+          ) <= lineThreshold
+        ) {
+          return boundary;
+        }
+      }
+      if (!includeInterior || !boundsIntersectRect(boundary.region.bounds, rectFromPoints(point, point))) continue;
+      const context = boundary.region.alphaCanvas.getContext("2d", { willReadFrequently: true });
+      if (!context) continue;
+      const alpha = context.getImageData(
+        point.x - boundary.region.bounds.minX,
+        point.y - boundary.region.bounds.minY,
+        1,
+        1,
+      ).data[3];
+      if (alpha > 8) return boundary;
+    }
+    return null;
+  }
+
+  function replaceLotBoundaryPolygon(boundaryId: string, points: CanvasPoint[]) {
+    if (points.length < 3) return false;
+    const boundary = findLotBoundaryById(boundaryId);
+    if (!boundary || boundary.page !== runtimeRef.current.currentPage) return false;
+    const region = createPolygonRegion(points);
+    if (!region) return false;
+    boundary.polygon = points.map((point) => ({ ...point }));
+    boundary.region = region;
+    boundary.totalPixels = getCanvasTotalPixels();
+    redrawMasks();
+    bumpRevision();
+    return true;
+  }
+
+  function addLotPolygonVertex(target: LotPolygonInsertTarget) {
+    const boundary = findLotBoundaryById(target.boundaryId);
+    if (!boundary) return null;
+    recordUndoState();
+    const points = boundary.polygon.map((point) => ({ ...point }));
+    const vertexIndex = target.edgeIndex + 1;
+    points.splice(vertexIndex, 0, { ...target.point });
+    if (!replaceLotBoundaryPolygon(boundary.id, points)) return null;
+    setSelectedLotBoundaryId(boundary.id);
+    setSelectedLotPolygonVertex({ boundaryId: boundary.id, vertexIndex });
+    setStatus("Vertice lotto aggiunto");
+    markDirty();
+    return { boundaryId: boundary.id, vertexIndex };
+  }
+
+  function updateLotPolygonVertex(boundaryId: string, vertexIndex: number, point: CanvasPoint) {
+    const boundary = findLotBoundaryById(boundaryId);
+    if (!boundary) return false;
+    const points = boundary.polygon.map((item, index) =>
+      index === vertexIndex ? { ...point } : { ...item },
+    );
+    return replaceLotBoundaryPolygon(boundaryId, points);
+  }
+
+  function deleteSelectedLotPolygonVertex() {
+    if (!selectedLotPolygonVertex) return;
+    const boundary = findLotBoundaryById(selectedLotPolygonVertex.boundaryId);
+    if (!boundary) return;
+    if (boundary.polygon.length <= 3) {
+      setStatus("La definizione lotto deve avere almeno tre vertici");
+      return;
+    }
+    recordUndoState();
+    const points = boundary.polygon.filter((_, index) => index !== selectedLotPolygonVertex.vertexIndex);
+    if (!replaceLotBoundaryPolygon(boundary.id, points)) return;
+    setSelectedLotBoundaryId(boundary.id);
+    setSelectedLotPolygonVertex(null);
+    setStatus("Vertice lotto rimosso");
+    markDirty();
+  }
+
+  function startLotBoundaryDrag(point: CanvasPoint, boundary: LotBoundary) {
+    lotBoundaryDragRef.current = {
+      boundaryId: boundary.id,
+      start: point,
+      bounds: { ...boundary.region.bounds },
+      seed: { ...boundary.region.seed },
+      polygon: boundary.polygon.map((item) => ({ ...item })),
+      historyRecorded: false,
+    };
+  }
+
+  function applyLotBoundaryDrag(state: LotBoundaryDragState, rawDx: number, rawDy: number) {
+    const boundary = findLotBoundaryById(state.boundaryId);
+    const canvas = pdfCanvasRef.current;
+    if (!boundary || !canvas) return { dx: 0, dy: 0 };
+    const dx = Math.round(
+      Math.max(-state.bounds.minX, Math.min(rawDx, canvas.width - 1 - state.bounds.maxX)),
+    );
+    const dy = Math.round(
+      Math.max(-state.bounds.minY, Math.min(rawDy, canvas.height - 1 - state.bounds.maxY)),
+    );
+    boundary.region.bounds = {
+      minX: state.bounds.minX + dx,
+      minY: state.bounds.minY + dy,
+      maxX: state.bounds.maxX + dx,
+      maxY: state.bounds.maxY + dy,
+    };
+    boundary.region.seed = translatePoint(state.seed, dx, dy);
+    boundary.polygon = state.polygon.map((point) => translatePoint(point, dx, dy));
+    redrawMasks();
+    return { dx, dy };
+  }
+
   function clampDeltaForSnapshots(snapshots: DragSnapshot[], dx: number, dy: number) {
     const canvas = pdfCanvasRef.current;
     if (!canvas) return { dx, dy };
@@ -5210,7 +5537,6 @@ export default function PlanimetriaEditor({
     selection.region = region;
     selection.totalPixels = getCanvasTotalPixels();
     selection.bitmap = createTintedCanvas(region, selection.color, selection.opacity);
-    if (selection.lotInclusionMode !== "manual") reconcileSelectionLot(selection);
     redrawMasks();
     bumpRevision();
     return true;
@@ -5391,7 +5717,6 @@ export default function PlanimetriaEditor({
         source: "copy",
         polygon: item.polygon?.map((point) => translatePoint(point, dx, dy)),
       };
-      if (selection.lotInclusionMode !== "manual") reconcileSelectionLot(selection);
       pageSelections.push(selection);
       runtimeRef.current.history.push(id);
       pastedIds.push(id);
@@ -5451,7 +5776,7 @@ export default function PlanimetriaEditor({
       customUsageId: activeCustomUsageId ?? undefined,
       customUsageLabel,
       includedInLot: selected.some((selection) => selection.includedInLot),
-      lotInclusionMode: selected.some((selection) => selection.lotInclusionMode === "manual") ? "manual" : "auto",
+      lotInclusionMode: "manual",
     });
     if (mergedId) setSelectedSelectionIds([mergedId]);
     setStatus(`${selected.length + 1} aree unite con Smart Selection`);
@@ -5483,7 +5808,7 @@ export default function PlanimetriaEditor({
       customUsageLabel: first.customUsageLabel,
       color: first.color,
       includedInLot: selected.some((selection) => selection.includedInLot),
-      lotInclusionMode: selected.some((selection) => selection.lotInclusionMode === "manual") ? "manual" : "auto",
+      lotInclusionMode: "manual",
     });
     if (mergedId) setSelectedSelectionIds([mergedId]);
     setStatus(`${selected.length} aree unite`);
@@ -5548,10 +5873,64 @@ export default function PlanimetriaEditor({
     const point = canvasPointFromEvent(event);
     if (!point) return;
 
+    if ((activeTool === "select" || activeTool === "lot") && polygonDraft.length === 0) {
+      const lotVertexHit = hitTestLotPolygonVertex(point);
+      if (lotVertexHit) {
+        setSelectedSelectionIds([]);
+        setSelectedPolygonVertex(null);
+        setHoverPolygonInsert(null);
+        setSelectedLotBoundaryId(lotVertexHit.boundary.id);
+        setSelectedLotPolygonVertex({
+          boundaryId: lotVertexHit.boundary.id,
+          vertexIndex: lotVertexHit.vertexIndex,
+        });
+        setRulerSegmentSelected(false);
+        lotPolygonEditDragRef.current = {
+          boundaryId: lotVertexHit.boundary.id,
+          vertexIndex: lotVertexHit.vertexIndex,
+          historyRecorded: false,
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
+        return;
+      }
+
+      const lotInsertHit = hitTestLotPolygonInsert(point);
+      if (lotInsertHit) {
+        const inserted = addLotPolygonVertex(lotInsertHit);
+        if (inserted) {
+          lotPolygonEditDragRef.current = { ...inserted, historyRecorded: true };
+          setHoverLotPolygonInsert(null);
+          event.currentTarget.setPointerCapture(event.pointerId);
+          return;
+        }
+      }
+
+      const lotBoundaryHit = hitTestLotBoundary(
+        point,
+        activeTool === "lot" || Boolean(selectedLotBoundaryId),
+      );
+      if (lotBoundaryHit) {
+        setSelectedSelectionIds([]);
+        setSelectedPolygonVertex(null);
+        setHoverPolygonInsert(null);
+        setSelectedLotBoundaryId(lotBoundaryHit.id);
+        setSelectedLotPolygonVertex(null);
+        setHoverLotPolygonInsert(null);
+        setRulerSegmentSelected(false);
+        startLotBoundaryDrag(point, lotBoundaryHit);
+        event.currentTarget.setPointerCapture(event.pointerId);
+        redrawMasks();
+        return;
+      }
+    }
+
     if (activeTool === "select" || activeTool === "polygon") {
       const vertexHit = hitTestPolygonVertex(point);
       if (vertexHit) {
         setSelectedSelectionIds([vertexHit.selection.id]);
+        setSelectedLotBoundaryId(null);
+        setSelectedLotPolygonVertex(null);
+        setHoverLotPolygonInsert(null);
         setSelectedPolygonVertex({ selectionId: vertexHit.selection.id, vertexIndex: vertexHit.vertexIndex });
         setRulerSegmentSelected(false);
         polygonEditDragRef.current = {
@@ -5580,6 +5959,9 @@ export default function PlanimetriaEditor({
       const segment = activeMeasureSegment();
       if (segmentHandle && segment) {
         setSelectedSelectionIds([]);
+        setSelectedLotBoundaryId(null);
+        setSelectedLotPolygonVertex(null);
+        setHoverLotPolygonInsert(null);
         setSelectedPolygonVertex(null);
         setHoverPolygonInsert(null);
         setRulerSegmentSelected(true);
@@ -5648,6 +6030,9 @@ export default function PlanimetriaEditor({
     const hitSegment = hitTestMeasureSegment(point);
     if (!hit && hitSegment) {
       setSelectedSelectionIds([]);
+      setSelectedLotBoundaryId(null);
+      setSelectedLotPolygonVertex(null);
+      setHoverLotPolygonInsert(null);
       setSelectedPolygonVertex(null);
       setHoverPolygonInsert(null);
       setRulerSegmentSelected(true);
@@ -5667,6 +6052,7 @@ export default function PlanimetriaEditor({
         setMarqueeDraft({ start: point, current: point });
         if (!append) {
           setSelectedSelectionIds([]);
+          setSelectedLotBoundaryId(null);
           setRulerSegmentSelected(false);
         }
         setSelectedPolygonVertex(null);
@@ -5676,6 +6062,9 @@ export default function PlanimetriaEditor({
       }
       if (!event.shiftKey && !event.metaKey && !event.ctrlKey) {
         setSelectedSelectionIds([]);
+        setSelectedLotBoundaryId(null);
+        setSelectedLotPolygonVertex(null);
+        setHoverLotPolygonInsert(null);
         setRulerSegmentSelected(false);
         setSelectedPolygonVertex(null);
         setHoverPolygonInsert(null);
@@ -5694,6 +6083,9 @@ export default function PlanimetriaEditor({
       nextSelectedIds = alreadySelected ? selectedSelectionIds : [hit.id];
     }
     setSelectedSelectionIds(nextSelectedIds);
+    setSelectedLotBoundaryId(null);
+    setSelectedLotPolygonVertex(null);
+    setHoverLotPolygonInsert(null);
     setSelectedPolygonVertex(null);
     setHoverPolygonInsert(null);
     setRulerSegmentSelected(false);
@@ -5708,6 +6100,8 @@ export default function PlanimetriaEditor({
     const shouldClampPointer = Boolean(
       segmentDragRef.current ||
         polygonEditDragRef.current ||
+        lotPolygonEditDragRef.current ||
+        lotBoundaryDragRef.current ||
         marqueeDragRef.current ||
         rulerDragRef.current ||
         dragStateRef.current,
@@ -5767,6 +6161,36 @@ export default function PlanimetriaEditor({
       return;
     }
 
+    const lotPolygonEditDrag = lotPolygonEditDragRef.current;
+    if (lotPolygonEditDrag) {
+      if (!lotPolygonEditDrag.historyRecorded) {
+        recordUndoState();
+        lotPolygonEditDrag.historyRecorded = true;
+      }
+      updateLotPolygonVertex(
+        lotPolygonEditDrag.boundaryId,
+        lotPolygonEditDrag.vertexIndex,
+        clampCanvasPoint(point),
+      );
+      setSelectedLotPolygonVertex({
+        boundaryId: lotPolygonEditDrag.boundaryId,
+        vertexIndex: lotPolygonEditDrag.vertexIndex,
+      });
+      return;
+    }
+
+    const lotBoundaryDrag = lotBoundaryDragRef.current;
+    if (lotBoundaryDrag) {
+      const rawDx = point.x - lotBoundaryDrag.start.x;
+      const rawDy = point.y - lotBoundaryDrag.start.y;
+      if ((rawDx !== 0 || rawDy !== 0) && !lotBoundaryDrag.historyRecorded) {
+        recordUndoState();
+        lotBoundaryDrag.historyRecorded = true;
+      }
+      applyLotBoundaryDrag(lotBoundaryDrag, rawDx, rawDy);
+      return;
+    }
+
     if (marqueeDragRef.current) {
       updateMarqueeSelection(point);
       return;
@@ -5812,6 +6236,20 @@ export default function PlanimetriaEditor({
     } else if (hoverPolygonInsert) {
       setHoverPolygonInsert(null);
     }
+
+    if ((activeTool === "select" || activeTool === "lot") && selectedEditableLotBoundary()) {
+      const insertHit = hitTestLotPolygonInsert(point);
+      const current = hoverLotPolygonInsert;
+      const changed =
+        Boolean(insertHit) !== Boolean(current) ||
+        insertHit?.boundaryId !== current?.boundaryId ||
+        insertHit?.edgeIndex !== current?.edgeIndex ||
+        insertHit?.point.x !== current?.point.x ||
+        insertHit?.point.y !== current?.point.y;
+      if (changed) setHoverLotPolygonInsert(insertHit);
+    } else if (hoverLotPolygonInsert) {
+      setHoverLotPolygonInsert(null);
+    }
   }
 
   function onStagePointerUp(event: PointerEvent<HTMLDivElement>) {
@@ -5819,6 +6257,8 @@ export default function PlanimetriaEditor({
     const shouldClampPointer = Boolean(
       segmentDragRef.current ||
         polygonEditDragRef.current ||
+        lotPolygonEditDragRef.current ||
+        lotBoundaryDragRef.current ||
         marqueeDragRef.current ||
         rulerDragRef.current ||
         dragStateRef.current,
@@ -5857,6 +6297,41 @@ export default function PlanimetriaEditor({
         setStatus("Vertice aggiornato");
         markDirty();
       }
+      releasePointer();
+      return;
+    }
+
+    const lotPolygonEditDrag = lotPolygonEditDragRef.current;
+    if (lotPolygonEditDrag) {
+      lotPolygonEditDragRef.current = null;
+      if (lotPolygonEditDrag.historyRecorded) {
+        setStatus("Vertice lotto aggiornato");
+        markDirty();
+      }
+      releasePointer();
+      return;
+    }
+
+    const lotBoundaryDrag = lotBoundaryDragRef.current;
+    if (lotBoundaryDrag && point) {
+      const { dx, dy } = applyLotBoundaryDrag(
+        lotBoundaryDrag,
+        point.x - lotBoundaryDrag.start.x,
+        point.y - lotBoundaryDrag.start.y,
+      );
+      lotBoundaryDragRef.current = null;
+      if (dx !== 0 || dy !== 0) {
+        setStatus("Definizione lotto spostata");
+        markDirty();
+        bumpRevision();
+      }
+      releasePointer();
+      return;
+    }
+
+    if (lotBoundaryDrag) {
+      lotBoundaryDragRef.current = null;
+      redrawMasks();
       releasePointer();
       return;
     }
@@ -5905,7 +6380,6 @@ export default function PlanimetriaEditor({
       applyDragDelta(dragState, dx, dy);
       dragStateRef.current = null;
       if (dx !== 0 || dy !== 0) {
-        reconcilePageLotSelections(runtimeRef.current.currentPage);
         redrawMasks();
         setStatus(`${dragState.snapshots.length} aree spostate`);
         markDirty();
@@ -6065,6 +6539,7 @@ export default function PlanimetriaEditor({
     const pageLotBoundaries = runtimeRef.current.lotBoundariesByPage.get(pageNumber) ?? [];
     pageLotBoundaries.forEach((boundary) => {
       boundary.region = rotateRegion(boundary.region, oldWidth, oldHeight, newWidth, newHeight, delta);
+      boundary.totalPixels = newWidth * newHeight;
       boundary.polygon = boundary.polygon.map((point) =>
         rotateCanvasPoint(point, oldWidth, oldHeight, newWidth, newHeight, delta),
       );
@@ -6087,10 +6562,13 @@ export default function PlanimetriaEditor({
     );
     setMarqueeDraft(null);
     setHoverPolygonInsert(null);
+    setHoverLotPolygonInsert(null);
     dragStateRef.current = null;
     marqueeDragRef.current = null;
     segmentDragRef.current = null;
     polygonEditDragRef.current = null;
+    lotBoundaryDragRef.current = null;
+    lotPolygonEditDragRef.current = null;
     outlinePathCacheRef.current = new WeakMap();
   }
 
@@ -6365,6 +6843,10 @@ export default function PlanimetriaEditor({
       setSelectedPolygonVertex(null);
       setHoverPolygonInsert(null);
     }
+    if (tool !== "select" && tool !== "lot") {
+      setSelectedLotPolygonVertex(null);
+      setHoverLotPolygonInsert(null);
+    }
     if (tool !== "ruler") {
       rulerDragRef.current = null;
       setRulerDraft(null);
@@ -6374,7 +6856,11 @@ export default function PlanimetriaEditor({
     if (tool === "smart") setStatus("Smart selection attiva");
     if (tool === "polygon") setStatus("Disegna i vertici del poligono");
     if (tool === "lot") {
-      setStatus(currentLotBoundaries.length > 0 ? "Ridisegna la definizione del lotto" : "Disegna la definizione del lotto");
+      setStatus(
+        currentLotBoundaries.length > 0
+          ? "Seleziona e modifica il lotto, oppure ridisegnalo"
+          : "Disegna la definizione del lotto",
+      );
     }
     if (tool === "ruler") setStatus("Traccia una distanza tra due punti");
   }
@@ -7181,14 +7667,7 @@ export default function PlanimetriaEditor({
                                   </div>
                                 </td>
                                 <td>
-                                  <label
-                                    className={`lot-checkbox compact ${selection.lotInclusionMode === "auto" ? "auto" : ""}`}
-                                    title={
-                                      selection.lotInclusionMode === "auto"
-                                        ? "Preselezionata dalla definizione lotto; puoi modificarla manualmente"
-                                        : "Includi questa area nel calcolo del lotto"
-                                    }
-                                  >
+                                  <label className="lot-checkbox compact" title="Includi questa destinazione nel calcolo del lotto">
                                     <input
                                       type="checkbox"
                                       checked={selection.includedInLot === true}
@@ -7598,33 +8077,48 @@ export default function PlanimetriaEditor({
                             €/m²
                           </button>
                         </div>
-                        <label className="lot-value-field">
-                          <span>{lotValuation.mode === "percentage" ? "Incidenza sul valore destinazioni" : "Valore unitario lotto"}</span>
-                          <div>
-                            <input
-                              key={`${lotValuation.mode}-${lotValuation.mode === "percentage" ? lotValuation.percentage : lotValuation.unitValuePerM2}`}
-                              type="text"
-                              inputMode="decimal"
-                              defaultValue={areaFormatter.format(
-                                lotValuation.mode === "percentage" ? lotValuation.percentage : lotValuation.unitValuePerM2,
-                              )}
-                              onBlur={(event) => {
-                                const field = lotValuation.mode === "percentage" ? "percentage" : "unitValuePerM2";
-                                const fallback = lotValuation[field];
-                                const nextValue = changeLotValuationValue(field, event.currentTarget.value);
-                                event.currentTarget.value = areaFormatter.format(nextValue ?? fallback);
-                              }}
-                            />
-                            <strong>{lotValuation.mode === "percentage" ? "%" : "€/m²"}</strong>
-                          </div>
-                        </label>
-                        <small>
+                        <div className="lot-linked-fields">
+                          {([
+                            ["percentage", "Incidenza sul valore destinazioni", "%"],
+                            ["unitValuePerM2", "Valore unitario lotto", "€/m²"],
+                          ] as const).map(([field, label, unit]) => {
+                            const fieldMode = field === "percentage" ? "percentage" : "per_sqm";
+                            return (
+                              <label
+                                key={field}
+                                className={`lot-value-field ${
+                                  lotValuation.mode === fieldMode ? "source-value" : "derived-value"
+                                }`}
+                              >
+                                <span>
+                                  {label}
+                                  <small>{lotValuation.mode === fieldMode ? "impostato" : "derivato"}</small>
+                                </span>
+                                <div>
+                                  <input
+                                    key={`${field}-${resolvedLotValuation[field]}`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    defaultValue={areaFormatter.format(resolvedLotValuation[field])}
+                                    onBlur={(event) => {
+                                      const fallback = resolvedLotValuation[field];
+                                      const nextValue = changeLotValuationValue(field, event.currentTarget.value);
+                                      event.currentTarget.value = areaFormatter.format(nextValue ?? fallback);
+                                    }}
+                                  />
+                                  <strong>{unit}</strong>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <small className="lot-calculation-formula">
                           {lotValuation.mode === "percentage"
-                            ? "Applicata al valore delle sole destinazioni con check Lotto; riferimento ordinario 12%."
-                            : "Applicata ai m² con check Lotto. Evita di selezionare superfici sovrapposte su più piani."}
+                            ? `${moneyFormatter.format(selectedLotStats.destinationValue)} × ${areaFormatter.format(resolvedLotValuation.percentage)}% = ${moneyFormatter.format(resolvedLotValuation.lotValue)}; ${moneyFormatter.format(resolvedLotValuation.lotValue)} ÷ ${formatM2(tracedLotArea)} = ${areaFormatter.format(resolvedLotValuation.unitValuePerM2)} €/m²`
+                            : `${formatM2(tracedLotArea)} × ${areaFormatter.format(resolvedLotValuation.unitValuePerM2)} €/m² = ${moneyFormatter.format(resolvedLotValuation.lotValue)}; ${moneyFormatter.format(resolvedLotValuation.lotValue)} ÷ ${moneyFormatter.format(selectedLotStats.destinationValue)} = ${areaFormatter.format(resolvedLotValuation.percentage)}%`}
                         </small>
                         <small className="editor-lot-selection-meta">
-                          {formatM2(totals.lotArea)} · {selectedAreas.filter(({ selection }) => selection.includedInLot).length} aree incluse
+                          Superficie lotto tracciata: {formatM2(totals.lotArea)} · {selectedLotStats.count} destinazioni incluse
                         </small>
                       </div>
                     </div>
@@ -7948,12 +8442,8 @@ export default function PlanimetriaEditor({
                               )}
                             </div>
                             <label
-                              className={`lot-checkbox compact area-row-lot ${selection.lotInclusionMode === "auto" ? "auto" : ""}`}
-                              title={
-                                selection.lotInclusionMode === "auto"
-                                  ? "Preselezionata dalla definizione lotto; puoi modificarla manualmente"
-                                  : "Includi questa area nel calcolo del lotto"
-                              }
+                              className="lot-checkbox compact area-row-lot"
+                              title="Includi questa destinazione nel calcolo del lotto"
                               onClick={(event) => event.stopPropagation()}
                             >
                               <input
