@@ -11,6 +11,8 @@ export type PresentationPropertySnapshot = {
   imuOttenibile: number | null;
 };
 
+export type PresentationPropertyInput = PresentationPropertySnapshot;
+
 export type PresentationSnapshot = {
   version: 1;
   generatedAt: string;

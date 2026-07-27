@@ -14,7 +14,7 @@ export class StudyPresentationsController {
 
   @Post()
   create(@Param("studyId") studyId: string, @Body() input: CreatePresentationDto) {
-    return this.presentations.create(studyId, input.propertyIds);
+    return this.presentations.create(studyId, input.propertyIds, input.properties, input.clientName);
   }
 }
 
@@ -33,7 +33,7 @@ export class PresentationsController {
     response.setHeader("Cache-Control", "private, max-age=300");
     response.setHeader(
       "Content-Security-Policy",
-      "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+      "default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
     );
     return document.html;
   }

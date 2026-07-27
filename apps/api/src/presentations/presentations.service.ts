@@ -11,6 +11,7 @@ import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { StudiesService } from "../studies/studies.service.js";
 import type {
+  PresentationPropertyInput,
   PresentationSnapshot,
   PresentationSummary,
 } from "./presentations.types.js";
@@ -27,7 +28,7 @@ const ASSET_URLS = {
   __ASSET_COVER__: { url: new URL("./templates/assets/soul-exterior-mountain-facade.jpg", import.meta.url), contentType: "image/jpeg" },
   __ASSET_RECEPTION__: { url: new URL("./templates/assets/soul-reception.png", import.meta.url), contentType: "image/png" },
   __ASSET_ATRIUM__: { url: new URL("./templates/assets/soul-atrium-lounge-wide.jpg", import.meta.url), contentType: "image/jpeg" },
-  __ASSET_WORKSPACE__: { url: new URL("./templates/assets/soul-workspace-table-detail.jpg", import.meta.url), contentType: "image/jpeg" },
+  __ASSET_PROCESS__: { url: new URL("./templates/assets/soul-entrance-lobby.jpg", import.meta.url), contentType: "image/jpeg" },
   __ASSET_HANDSHAKE__: { url: new URL("./templates/assets/soul-handshake.png", import.meta.url), contentType: "image/png" },
 } as const;
 
@@ -46,7 +47,12 @@ export class PresentationsService implements OnModuleDestroy {
     this.chromiumExecutablePath = config.get<string>("CHROMIUM_EXECUTABLE_PATH", "/usr/bin/chromium");
   }
 
-  async create(studyId: string, propertyIds: string[]) {
+  async create(
+    studyId: string,
+    propertyIds: string[],
+    propertyInputs: PresentationPropertyInput[] = [],
+    clientName?: string,
+  ) {
     const study = await this.studies.find(studyId);
     if (!study) throw new NotFoundException("Studio non trovato");
 
@@ -62,31 +68,57 @@ export class PresentationsService implements OnModuleDestroy {
       );
     }
 
+    const selectedIdSet = new Set(selectedProperties.map((property) => property.id));
+    const invalidInputIds = propertyInputs
+      .map((property) => property.id)
+      .filter((propertyId) => !selectedIdSet.has(propertyId));
+    if (invalidInputIds.length > 0) {
+      throw new BadRequestException(
+        `I dati personalizzati degli immobili ${invalidInputIds.join(", ")} non appartengono alla selezione`,
+      );
+    }
+    const propertyInputById = new Map(propertyInputs.map((property) => [property.id, property]));
+
     const generatedAt = new Date();
     const snapshot: PresentationSnapshot = {
       version: 1,
       generatedAt: generatedAt.toISOString(),
       studio: {
         id: study.id,
-        company: study.company,
+        company: normalizePresentationText(clientName, study.company),
         vat: study.vat,
         comune: study.comune,
         provincia: study.provincia,
         commercialOwner: study.commercialOwner,
         technicalOwner: study.technicalOwner,
       },
-      immobili: selectedProperties.map((property) => ({
-        id: property.id,
-        societa: study.company,
-        comune: property.comune || study.comune,
-        indirizzo: property.address || property.ubicazione || "Ubicazione non disponibile",
-        foglioParticellaSub: cadastralReference(property.foglio, property.particella, property.subalterno),
-        categoria: property.categoria,
-        renditaAttuale: Number(property.currentRendita),
-        renditaAttribuibile: Number(property.estimatedRendita),
-        imuAttuale: property.currentImu === null ? null : Number(property.currentImu),
-        imuOttenibile: property.estimatedImu === null ? null : Number(property.estimatedImu),
-      })),
+      immobili: selectedProperties.map((property) => {
+        const input = propertyInputById.get(property.id);
+        return {
+          id: property.id,
+          societa: normalizePresentationText(input?.societa, study.company),
+          comune: normalizePresentationText(input?.comune, property.comune || study.comune),
+          indirizzo: normalizePresentationText(
+            input?.indirizzo,
+            property.address || property.ubicazione || "Ubicazione non disponibile",
+          ),
+          foglioParticellaSub: normalizePresentationText(
+            input?.foglioParticellaSub,
+            cadastralReference(property.foglio, property.particella, property.subalterno),
+          ),
+          categoria: normalizePresentationText(input?.categoria, property.categoria),
+          renditaAttuale: toCurrencyPrecision(input?.renditaAttuale ?? Number(property.currentRendita)),
+          renditaAttribuibile: toCurrencyPrecision(
+            input?.renditaAttribuibile ?? Number(property.estimatedRendita),
+          ),
+          imuAttuale: toOptionalCurrencyPrecision(
+            input ? input.imuAttuale : property.currentImu == null ? null : Number(property.currentImu),
+          ),
+          imuOttenibile: toOptionalCurrencyPrecision(
+            input ? input.imuOttenibile : property.estimatedImu == null ? null : Number(property.estimatedImu),
+          ),
+        };
+      }),
     };
     const fileName = presentationFileName(study.company, generatedAt);
     const deck = await this.prisma.presentationDeck.create({
@@ -227,15 +259,27 @@ async function createNativePdf(browser: Browser, input: string, destination: str
 }
 
 async function captureHybridSlides(browser: Browser, input: string, directory: string) {
-  const page = await browser.newPage({
-    viewport: { width: 1600, height: 900 },
-    deviceScaleFactor: 2,
-  });
   const captures = new Map<number, HybridCapture>();
-  try {
-    for (const slide of HYBRID_SLIDES) {
+  for (const slide of HYBRID_SLIDES) {
+    const page = await browser.newPage({
+      viewport: { width: 1600, height: 900 },
+      deviceScaleFactor: 2,
+    });
+    try {
       await page.goto(exportUrl(input, slide.number), { waitUntil: "load", timeout: 30_000 });
       await waitForDeck(page);
+      await page.evaluate(() => {
+        const browserGlobal = globalThis as unknown as {
+          scrollTo: (x: number, y: number) => void;
+          document: {
+            documentElement: { scrollTop: number };
+            body: { scrollTop: number };
+          };
+        };
+        browserGlobal.scrollTo(0, 0);
+        browserGlobal.document.documentElement.scrollTop = 0;
+        browserGlobal.document.body.scrollTop = 0;
+      });
       const extension = slide.format === "jpeg" ? "jpg" : "png";
       const destination = path.join(directory, `slide-${slide.number}.${extension}`);
       if (slide.format === "jpeg") {
@@ -255,9 +299,9 @@ async function captureHybridSlides(browser: Browser, input: string, directory: s
         });
       }
       captures.set(slide.number, { format: slide.format, path: destination });
+    } finally {
+      await page.close();
     }
-  } finally {
-    await page.close();
   }
   return captures;
 }
@@ -294,7 +338,7 @@ async function composeHybridPdf(
     page.drawImage(image, { x: 0, y: 0, width, height });
   }
 
-  outputPdf.setTitle("Rideterminazione rendita catastale");
+  outputPdf.setTitle("Ottimizzazione rendita catastale");
   outputPdf.setAuthor("Soul S.r.l.");
   outputPdf.setCreator("Soul slides hybrid exporter");
   outputPdf.setSubject(`Proposta per ${snapshot.studio.company}`);
@@ -338,7 +382,20 @@ function presentationFileName(company: string, createdAt: Date) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 70) || "cliente";
-  return `proposta-rideterminazione-${slug}-${createdAt.toISOString().slice(0, 10)}.pdf`;
+  return `proposta-ottimizzazione-${slug}-${createdAt.toISOString().slice(0, 10)}.pdf`;
+}
+
+function normalizePresentationText(input: string | undefined, fallback: string) {
+  const normalized = input?.replace(/\s+/g, " ").trim();
+  return normalized || fallback;
+}
+
+function toCurrencyPrecision(value: number) {
+  return Math.round((value + 1e-9) * 100) / 100;
+}
+
+function toOptionalCurrencyPrecision(value: number | null | undefined) {
+  return value === null || value === undefined ? null : toCurrencyPrecision(value);
 }
 
 function toSummary(deck: {

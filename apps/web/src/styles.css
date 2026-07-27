@@ -2621,6 +2621,184 @@ body.is-resizing-columns {
   padding-top: 2px;
 }
 
+.presentation-validation-warning,
+.presentation-preview-note {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #f1cf8c;
+  border-radius: 7px;
+  color: #7a4709;
+  background: #fff8e8;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.presentation-data-preview {
+  display: grid;
+  gap: 13px;
+  margin-top: 18px;
+  scroll-margin-top: 18px;
+}
+
+.presentation-data-preview:focus {
+  outline: 3px solid rgba(16, 93, 184, 0.2);
+  outline-offset: 3px;
+}
+
+.presentation-preview-title {
+  align-items: flex-start;
+}
+
+.presentation-preview-title h2 {
+  margin-bottom: 3px;
+}
+
+.presentation-preview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.presentation-manual-badge {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid #f1cf8c;
+  border-radius: 999px;
+  color: #7a4709;
+  background: #fff8e8;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.presentation-manual-badge > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #e3a008;
+  box-shadow: 0 0 0 3px rgba(227, 160, 8, 0.14);
+}
+
+.presentation-client-field {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 5px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.presentation-client-field input,
+.presentation-preview-table input {
+  width: 100%;
+  min-width: 0;
+  height: 31px;
+  padding: 5px 7px;
+  border: 1px solid #d8e3ef;
+  border-radius: 6px;
+  color: var(--text);
+  background: #fff;
+  font: inherit;
+  font-size: 11px;
+}
+
+.presentation-client-field input {
+  height: 36px;
+  font-size: 13px;
+}
+
+.presentation-client-field input:focus,
+.presentation-preview-table input:focus {
+  border-color: #6ba9ed;
+  outline: 3px solid rgba(37, 99, 235, 0.1);
+}
+
+.presentation-client-field input.invalid,
+.presentation-preview-table input.invalid {
+  border-color: #d97706;
+  background: #fffaf0;
+}
+
+.presentation-preview-table-wrap {
+  max-width: 100%;
+  max-height: min(55dvh, 520px);
+  overflow: auto;
+  border: 1px solid #dbe5f0;
+  border-radius: 8px;
+}
+
+.presentation-preview-table {
+  width: 100%;
+  min-width: 1320px;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.presentation-preview-table th,
+.presentation-preview-table td {
+  padding: 5px;
+  border-right: 1px solid #e7edf4;
+  border-bottom: 1px solid #e7edf4;
+  vertical-align: middle;
+}
+
+.presentation-preview-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: #41566e;
+  background: #f5f8fc;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1.2;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.presentation-preview-table th:nth-child(1) { width: 12%; }
+.presentation-preview-table th:nth-child(2) { width: 8%; }
+.presentation-preview-table th:nth-child(3) { width: 16%; }
+.presentation-preview-table th:nth-child(4) { width: 13%; }
+.presentation-preview-table th:nth-child(5) { width: 5%; }
+.presentation-preview-table th:nth-child(n + 6) { width: 11.5%; }
+
+.presentation-preview-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.presentation-preview-table th:last-child,
+.presentation-preview-table td:last-child {
+  border-right: 0;
+}
+
+.presentation-preview-totals {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.presentation-preview-totals .summary-stat {
+  min-height: 64px;
+  padding: 10px;
+  border: 1px solid #e0e8f1;
+  border-radius: 7px;
+  background: #f8fbff;
+}
+
+.presentation-preview-totals .summary-stat span {
+  font-size: 10px;
+}
+
+.presentation-preview-totals .summary-stat strong {
+  font-size: 14px;
+}
+
 .new-study-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7458,6 +7636,19 @@ body.is-resizing-columns {
   .presentation-data-state {
     grid-column: 2;
     justify-self: start;
+  }
+
+  .presentation-preview-title {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .presentation-preview-actions {
+    justify-content: flex-start;
+  }
+
+  .presentation-preview-totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .new-study-form-grid {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Soul S.r.l. - Rideterminazione rendita catastale</title>
+  <title>Soul S.r.l. - Ottimizzazione rendita catastale</title>
   <style>
     @font-face {
       font-family: "Soul Inter";
@@ -168,7 +168,7 @@
 
     .logo-stack {
       display: inline-grid;
-      justify-items: start;
+      justify-items: center;
       gap: 0.72rem;
     }
 
@@ -270,7 +270,7 @@
 
     .cover-top {
       display: flex;
-      justify-content: flex-start;
+      justify-content: center;
       align-items: flex-start;
       gap: 2rem;
     }
@@ -363,19 +363,24 @@
       padding-right: 2%;
     }
 
-    .quote-mark {
-      color: var(--cyan);
-      font-size: clamp(4rem, 7cqw, 7rem);
-      line-height: 0.6;
-      font-weight: 800;
-    }
-
     blockquote {
       margin: 0;
       color: var(--ink);
       font-size: clamp(1.45rem, 2.38cqw, 2.55rem);
       line-height: 1.16;
       font-weight: 650;
+    }
+
+    .complete-quote p {
+      margin: 0;
+    }
+
+    .complete-quote p + p {
+      margin-top: 1.15rem;
+      color: #33434c;
+      font-size: 0.58em;
+      line-height: 1.46;
+      font-weight: 520;
     }
 
     .quote-credit {
@@ -422,34 +427,6 @@
       font-weight: 790;
     }
 
-    .metric-row {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 1rem;
-      margin-top: 2.1rem;
-    }
-
-    .metric {
-      border-top: 3px solid var(--cyan);
-      padding-top: 0.95rem;
-    }
-
-    .metric b {
-      display: block;
-      color: var(--ink);
-      font-size: clamp(2.1rem, 3.3cqw, 3.35rem);
-      line-height: 1;
-      letter-spacing: 0;
-    }
-
-    .metric span {
-      display: block;
-      margin-top: 0.45rem;
-      color: var(--muted);
-      font-size: clamp(0.8rem, 0.94cqw, 1rem);
-      line-height: 1.25;
-    }
-
     .service-photo {
       position: relative;
       height: 100%;
@@ -472,81 +449,163 @@
 
     .process-slide .photo-strip {
       inset: 0 auto 0 0;
-      width: 42%;
-      background-position: center;
+      width: 32.5%;
+      background-position: center 48%;
     }
 
     .process-slide .photo-strip::after {
       content: "";
       position: absolute;
       inset: 0;
-      background: linear-gradient(90deg, rgba(247, 249, 248, 0.08), rgba(247, 249, 248, 0.82));
+      background: linear-gradient(90deg, rgba(247, 249, 248, 0), rgba(247, 249, 248, 0.08) 76%, rgba(247, 249, 248, 0.82));
+    }
+
+    .process-slide .slide-inner {
+      padding: 4% 4.5% 4% 36.2%;
     }
 
     .process-layout {
       display: grid;
-      grid-template-columns: 0.85fr 1.15fr;
-      gap: 5.2%;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 1rem;
       height: 100%;
-      align-items: center;
+      align-items: stretch;
     }
 
     .process-title {
-      align-self: center;
-      padding-bottom: 0;
+      align-self: start;
     }
 
     .process-title h2 {
-      max-width: 9ch;
-      margin-bottom: 0.5em;
-    }
-
-    .process-title .lead {
-      max-width: 22ch;
-      color: #2f3d45;
-      font-weight: 560;
+      max-width: none;
+      margin-bottom: 0;
+      font-size: clamp(2.2rem, 3.35cqw, 3.5rem);
     }
 
     .steps {
+      position: relative;
       display: grid;
-      gap: 1rem;
+      grid-template-rows: repeat(3, auto);
+      align-content: center;
+      gap: clamp(0.8rem, 1.05cqw, 1.1rem);
+      padding-left: 4rem;
+    }
+
+    .steps::before {
+      content: "";
+      position: absolute;
+      left: 1.72rem;
+      top: 13%;
+      bottom: 13%;
+      width: 2px;
+      background: linear-gradient(#a4ddea, #42b7d4 52%, #268eaf);
+      opacity: 0.72;
     }
 
     .step {
+      --step-accent: #75cfe3;
       position: relative;
       display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 1.2rem;
-      align-items: start;
-      padding: 1.35rem 1.4rem;
-      background: rgba(255, 255, 255, 0.82);
-      border: 1px solid rgba(255, 255, 255, 0.72);
-      box-shadow: 0 18px 44px rgba(29, 43, 50, 0.08);
+      grid-template-columns: clamp(4rem, 4.5cqw, 4.65rem) 1px minmax(0, 1fr);
+      gap: clamp(0.85rem, 1.1cqw, 1.15rem);
+      align-items: center;
+      min-height: clamp(8.3rem, 9.1cqw, 9.45rem);
+      padding: 0.92rem clamp(1.1rem, 1.45cqw, 1.5rem);
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid rgba(49, 73, 87, 0.16);
+      border-left: 4px solid var(--step-accent);
+      border-radius: 1rem 3.35rem 3.35rem 1rem;
+      box-shadow: 0 10px 26px rgba(29, 43, 50, 0.08);
+    }
+
+    .step::before {
+      content: "";
+      position: absolute;
+      left: -2.35rem;
+      top: 50%;
+      width: 2.35rem;
+      height: 2px;
+      transform: translateY(-50%);
+      background: var(--step-accent);
+      opacity: 0.88;
+    }
+
+    .step:nth-child(2) {
+      --step-accent: #39b4d2;
+    }
+
+    .step:nth-child(3) {
+      --step-accent: #238dab;
     }
 
     .step-number {
       display: grid;
       place-items: center;
-      width: clamp(3.2rem, 4cqw, 4.1rem);
+      position: absolute;
+      z-index: 2;
+      left: -4.02rem;
+      top: 50%;
+      width: clamp(3.55rem, 4.05cqw, 4.2rem);
       aspect-ratio: 1;
+      transform: translateY(-50%);
+      border: 3px solid #f9fcfd;
       border-radius: 999px;
-      background: var(--ink);
+      outline: 1px solid rgba(71, 190, 219, 0.54);
+      background: #062445;
       color: var(--white);
-      font-size: clamp(1.4rem, 2.2cqw, 2.35rem);
-      font-weight: 790;
+      box-shadow: 0 7px 18px rgba(6, 36, 69, 0.2);
+      font-size: clamp(1.75rem, 2.4cqw, 2.5rem);
+      font-weight: 720;
       line-height: 1;
     }
 
+    .step-icon {
+      display: grid;
+      place-items: center;
+      width: clamp(3.7rem, 4.25cqw, 4.4rem);
+      aspect-ratio: 1;
+      min-width: 0;
+      border: 1px solid color-mix(in srgb, var(--step-accent) 32%, white);
+      border-radius: 1rem;
+      background: color-mix(in srgb, var(--step-accent) 11%, white);
+      color: #159bc2;
+    }
+
+    .step-icon svg {
+      width: 68%;
+      height: 68%;
+      overflow: visible;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .step-divider {
+      align-self: stretch;
+      width: 1px;
+      min-height: 72%;
+      margin-block: auto;
+      background: rgba(49, 73, 87, 0.27);
+    }
+
+    .step-copy {
+      min-width: 0;
+    }
+
     .step h3 {
-      margin-bottom: 0.38rem;
+      margin-bottom: 0.3rem;
       color: var(--cyan);
+      font-size: clamp(1.18rem, 1.52cqw, 1.58rem);
+      line-height: 1.05;
     }
 
     .step p {
       margin-bottom: 0;
       color: var(--muted);
-      font-size: clamp(0.9rem, 1.07cqw, 1.13rem);
-      line-height: 1.36;
+      font-size: clamp(0.76rem, 0.9cqw, 0.95rem);
+      line-height: 1.34;
     }
 
     .closing .slide-inner {
@@ -573,13 +632,14 @@
     .objective p {
       margin-bottom: 0.65rem;
       color: rgba(255, 255, 255, 0.74);
-      font-size: clamp(1.28rem, 2.08cqw, 2.15rem);
+      font-size: clamp(0.96rem, 1.22cqw, 1.3rem);
       line-height: 1.22;
       font-weight: 520;
     }
 
     .objective p:first-child {
       color: var(--white);
+      font-size: clamp(1.25rem, 1.7cqw, 1.82rem);
       font-weight: 690;
     }
 
@@ -614,10 +674,10 @@
     }
 
     .tables-slide .slide-inner {
-      padding: 3.7% 3.9%;
+      padding: 3.2% 3.7%;
       display: grid;
-      grid-template-rows: auto 1fr;
-      gap: 1.25rem;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 0.9rem;
     }
 
     .tables-header {
@@ -630,7 +690,7 @@
     .tables-header h2 {
       max-width: 13.5ch;
       margin-bottom: 0;
-      font-size: clamp(2.2rem, 3.8cqw, 4rem);
+      font-size: clamp(2.05rem, 3.45cqw, 3.65rem);
     }
 
     .table-note {
@@ -644,9 +704,11 @@
 
     .table-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1.5fr) minmax(18rem, 0.78fr);
-      gap: 1.15rem;
+      grid-template-columns: minmax(0, 1.52fr) minmax(25rem, 0.72fr);
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 0.85rem;
       min-height: 0;
+      align-items: start;
     }
 
     .table-box {
@@ -657,9 +719,21 @@
       overflow: hidden;
     }
 
+    .table-box.properties,
     .table-box.summary {
-      display: grid;
-      grid-template-rows: auto 1fr;
+      min-height: 0;
+    }
+
+    .table-box.properties {
+      grid-column: 1;
+      grid-row: 1 / span 2;
+      align-self: start;
+    }
+
+    .table-box.summary {
+      grid-column: 2;
+      grid-row: 1;
+      align-self: start;
     }
 
     .table-title {
@@ -704,16 +778,21 @@
       font-variant-numeric: tabular-nums;
     }
 
-    .main-table th:nth-child(1) { width: 14%; }
-    .main-table th:nth-child(2) { width: 9%; }
-    .main-table th:nth-child(3) { width: 15%; }
-    .main-table th:nth-child(4) { width: 14%; }
-    .main-table th:nth-child(5) { width: 6%; }
-    .main-table th:nth-child(6),
-    .main-table th:nth-child(7),
+    th.nowrap {
+      white-space: nowrap;
+      overflow-wrap: normal;
+    }
+
+    .main-table th:nth-child(1) { width: 11%; }
+    .main-table th:nth-child(2) { width: 8%; }
+    .main-table th:nth-child(3) { width: 12%; }
+    .main-table th:nth-child(4) { width: 12%; }
+    .main-table th:nth-child(5) { width: 5%; }
+    .main-table th:nth-child(6) { width: 10%; }
+    .main-table th:nth-child(7) { width: 11%; }
     .main-table th:nth-child(8),
-    .main-table th:nth-child(9) { width: 10.5%; }
-    .main-table th:nth-child(10) { width: 7%; }
+    .main-table th:nth-child(9) { width: 11%; }
+    .main-table th:nth-child(10) { width: 9%; }
 
     .main-table tfoot td {
       background: #eef4f2;
@@ -744,130 +823,248 @@
       letter-spacing: 0.03em;
     }
 
-    .benefit-table {
-      margin-top: auto;
-      border-top: 1px solid rgba(23, 33, 41, 0.1);
+    td.is-unfavorable,
+    .summary-table td.is-unfavorable {
+      color: #b42318;
+      font-weight: 820;
     }
 
-    .benefit-table th {
-      width: 45%;
-      background: #eef4f2;
-      text-transform: none;
-      letter-spacing: 0;
+    td.is-favorable,
+    .summary-table td.is-favorable {
+      color: #15715a;
+      font-weight: 790;
     }
 
     .economic-chart {
-      align-self: end;
-      border-top: 1px solid rgba(23, 33, 41, 0.1);
-      padding: 0.62rem 0.9rem 0.58rem;
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.45), rgba(224, 241, 239, 0.62));
+      grid-column: 2;
+      grid-row: 2;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      align-self: stretch;
+      padding: 0.64rem 0.72rem 0.72rem;
+      border: 1px solid rgba(23, 33, 41, 0.1);
+      background: linear-gradient(115deg, rgba(255, 255, 255, 0.92), rgba(224, 241, 239, 0.76));
+      box-shadow: 0 12px 30px rgba(28, 48, 56, 0.07);
     }
 
     .chart-head {
-      display: grid;
-      gap: 0.3rem;
-      margin-bottom: 0.38rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 0.48rem;
     }
 
     .chart-head h3 {
       margin-bottom: 0;
-      font-size: clamp(0.78rem, 0.92cqw, 0.98rem);
+      font-size: clamp(0.82rem, 0.98cqw, 1.05rem);
       line-height: 1;
       text-transform: uppercase;
       letter-spacing: 0.03em;
     }
 
     .chart-head span {
-      justify-self: start;
-      padding: 0.32rem 0.55rem 0.36rem;
-      border-left: 4px solid var(--green);
-      background: rgba(74, 155, 119, 0.12);
-      color: var(--green);
-      font-size: clamp(0.86rem, 1.01cqw, 1.08rem);
-      font-weight: 850;
+      color: var(--muted);
+      font-size: clamp(0.66rem, 0.76cqw, 0.82rem);
+      font-weight: 720;
       line-height: 1;
       white-space: nowrap;
     }
 
     .chart-head span.is-negative {
-      border-left-color: #c45555;
       color: #a43f3f;
-      background: rgba(196, 85, 85, 0.12);
     }
 
     .chart-bars {
       display: grid;
-      grid-template-columns: repeat(2, minmax(5.4rem, 5.9rem));
-      justify-content: center;
-      align-items: end;
-      gap: 0.2rem;
-      min-height: 3.9rem;
-      padding: 0.15rem 0.3rem 0;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.52rem;
+      min-height: 0;
     }
 
     .chart-item {
       display: grid;
-      grid-template-rows: 2.55rem auto;
-      gap: 0.22rem;
-      align-items: end;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: 0.42rem;
+      min-width: 0;
+      min-height: 9.7rem;
+      height: 100%;
+      padding: 0.55rem 0.6rem;
+      border: 1px solid rgba(23, 33, 41, 0.09);
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    .chart-panel-head {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 0.35rem;
       min-width: 0;
     }
 
-    .chart-bar-wrap {
-      position: relative;
-      height: 2.55rem;
-      border-bottom: 1px solid rgba(23, 33, 41, 0.22);
-    }
-
-    .chart-bar {
-      position: absolute;
-      left: 50%;
-      bottom: 0;
-      width: min(3.25rem, 70%);
-      min-height: 0.5rem;
-      transform: translateX(-50%);
-      background: linear-gradient(180deg, var(--cyan), var(--blue));
-    }
-
-    .chart-item.is-after .chart-bar {
-      background: linear-gradient(180deg, var(--green), #2d7c64);
-    }
-
-    .chart-item.is-after.is-negative .chart-bar {
-      background: linear-gradient(180deg, #d8786e, #a43f3f);
-    }
-
-    .chart-label {
+    .chart-panel-head > div {
       min-width: 0;
-      color: var(--muted);
-      font-size: clamp(0.52rem, 0.62cqw, 0.7rem);
-      line-height: 1.05;
-      text-align: center;
-      font-weight: 650;
-      white-space: normal;
     }
 
-    .chart-label strong {
+    .chart-panel-head strong {
       display: block;
-      margin-right: 0;
+      margin-top: 0.1rem;
       color: var(--ink);
-      font-size: 1.1em;
-      font-weight: 830;
+      font-size: clamp(0.66rem, 0.73cqw, 0.78rem);
+      line-height: 1.15;
+    }
+
+    .chart-panel-delta {
+      flex: none;
+      color: #15715a;
+      font-size: clamp(0.62rem, 0.71cqw, 0.76rem);
+      font-weight: 850;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .chart-item.is-increase .chart-panel-delta {
+      color: #b42318;
+    }
+
+    .cost-comparison {
+      display: grid;
+      align-content: center;
+      gap: 0.5rem;
+      min-height: 0;
+    }
+
+    .cost-row {
+      display: grid;
+      gap: 0.2rem;
+    }
+
+    .cost-row-label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.35rem;
+      color: var(--muted);
+      font-size: clamp(0.55rem, 0.62cqw, 0.67rem);
+      line-height: 1;
+    }
+
+    .cost-row-label strong {
+      color: var(--ink);
+      font-size: 1.05em;
       font-variant-numeric: tabular-nums;
     }
 
-    .bar-track {
-      height: 0.56rem;
-      border-radius: 999px;
-      background: rgba(23, 33, 41, 0.1);
+    .cost-track {
+      position: relative;
+      height: 0.52rem;
       overflow: hidden;
+      border-radius: 999px;
+      background: rgba(23, 33, 41, 0.09);
     }
 
-    .bar {
-      display: block;
-      height: 100%;
+    .cost-bar {
+      position: absolute;
+      inset: 0 auto 0 0;
+      min-width: 0.45rem;
       border-radius: inherit;
+      background: linear-gradient(90deg, #7d919d, #526873);
+    }
+
+    .cost-bar.projected {
       background: linear-gradient(90deg, var(--cyan), var(--green));
+    }
+
+    .chart-item.is-increase .cost-bar.projected {
+      background: linear-gradient(90deg, #e27a6f, #b42318);
+    }
+
+    .decade-lines {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 4.2rem;
+      overflow: visible;
+    }
+
+    .decade-lines .grid-line {
+      stroke: rgba(23, 33, 41, 0.1);
+      stroke-width: 1;
+    }
+
+    .decade-lines .saving-area {
+      fill: rgba(74, 155, 119, 0.17);
+    }
+
+    .chart-item.is-increase .decade-lines .saving-area {
+      fill: rgba(180, 35, 24, 0.13);
+    }
+
+    .decade-lines .baseline-line,
+    .decade-lines .projected-line {
+      fill: none;
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .decade-lines .baseline-line {
+      stroke: #607783;
+    }
+
+    .decade-lines .projected-line {
+      stroke: #278e70;
+    }
+
+    .chart-item.is-increase .decade-lines .projected-line {
+      stroke: #b42318;
+    }
+
+    .chart-axis {
+      display: flex;
+      justify-content: space-between;
+      color: #75848c;
+      font-size: clamp(0.5rem, 0.56cqw, 0.6rem);
+      line-height: 1;
+    }
+
+    .chart-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.28rem 0.65rem;
+      color: var(--muted);
+      font-size: clamp(0.5rem, 0.56cqw, 0.6rem);
+      line-height: 1;
+    }
+
+    .chart-legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .chart-legend i {
+      width: 0.52rem;
+      height: 0.16rem;
+      border-radius: 999px;
+      background: #607783;
+    }
+
+    .chart-legend i.projected {
+      background: #278e70;
+    }
+
+    .chart-item.is-increase .chart-legend i.projected {
+      background: #b42318;
+    }
+
+    .chart-horizon {
+      color: var(--cyan);
+      font-size: clamp(0.55rem, 0.62cqw, 0.67rem);
+      font-weight: 850;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
     }
 
     .nav-arrow {
@@ -918,10 +1115,6 @@
     .export-mode .service-slide .body-copy {
       font-size: clamp(0.94rem, 1.16cqw, 1.2rem);
       line-height: 1.32;
-    }
-
-    .export-mode .service-slide .metric-row {
-      margin-top: 0.85rem;
     }
 
     .nav-prev {
@@ -1015,7 +1208,7 @@
 </head>
 <body>
   <main class="deck-shell">
-    <section class="deck" aria-label="Presentazione Soul - rideterminazione rendita catastale">
+    <section class="deck" aria-label="Presentazione Soul - ottimizzazione rendita catastale">
       <article class="slide cover is-active" data-slide>
         <div class="photo-bg scrim" style="background-image:url('__ASSET_COVER__')"></div>
         <div class="cover-ribbon"></div>
@@ -1028,8 +1221,7 @@
             </div>
           </div>
           <div class="cover-title">
-            <h1>Rideterminazione rendita catastale</h1>
-            <p>Il vostro partner per ottimizzare i vostri immobili e il corretto pagamento delle imposte municipali.</p>
+            <h1>Ottimizzazione rendita catastale</h1>
             <div class="cover-client">
               <span>Proposta per</span>
               <strong id="clientName"></strong>
@@ -1044,13 +1236,10 @@
             <div class="photo-panel" style="background-image:url('__ASSET_RECEPTION__')"></div>
           </div>
           <div class="quote-block">
-            <div class="quote-mark" aria-hidden="true">"</div>
-            <blockquote>
-              Le più grandi imprese sono formate dalle migliori persone. Tutti lo dicono ma io lo credo fermamente.
+            <blockquote class="complete-quote">
+              <p>“Le più grandi imprese sono formate dalle migliori persone. Tutti lo dicono ma io lo credo fermamente.</p>
+              <p>Le persone che fanno parte del team, con motivazione, professionalità e impegno hanno permesso a Soul di raggiungere e superare gli obiettivi prefissati di anno in anno, mantenendo un trend di costante crescita.”</p>
             </blockquote>
-            <p class="body-copy" style="margin-top:1.8rem">
-              Le persone che fanno parte del team, con motivazione, professionalità e impegno hanno permesso a Soul di raggiungere e superare gli obiettivi prefissati di anno in anno, mantenendo un trend di costante crescita.
-            </p>
             <div class="quote-credit">
               <strong>Dott. Ruggero Lopriore</strong>
               Amministratore di Soul
@@ -1062,7 +1251,7 @@
       <article class="slide service-slide" data-slide>
         <div class="slide-inner split-service">
           <div class="service-copy">
-            <p class="eyebrow">Riduzione della</p>
+            <p class="eyebrow">Ottimizzazione</p>
             <h2>Rendita catastale</h2>
             <p class="lead">Una corretta valutazione del valore catastale per un corretto pagamento delle imposte municipali.</p>
             <p class="body-copy">
@@ -1071,16 +1260,6 @@
             <p class="body-copy">
               Spesso la pubblica amministrazione attribuisce agli immobili una rendita catastale molto elevata: Soul è in grado di dimostrare che il reale valore catastale sia effettivamente inferiore, <strong>riducendo tra il 15% e il 40% le relative imposte.</strong>
             </p>
-            <div class="metric-row" aria-label="Intervallo di riduzione stimato">
-              <div class="metric">
-                <b>15%</b>
-                <span>riduzione minima tipica delle relative imposte</span>
-              </div>
-              <div class="metric">
-                <b>40%</b>
-                <span>riduzione massima riscontrabile nei casi idonei</span>
-              </div>
-            </div>
           </div>
           <div class="service-photo" aria-hidden="true">
             <div class="photo-panel" style="background-image:url('__ASSET_ATRIUM__')"></div>
@@ -1089,31 +1268,60 @@
       </article>
 
       <article class="slide process-slide" data-slide>
-        <div class="photo-strip" style="background-image:url('__ASSET_WORKSPACE__')"></div>
+        <div class="photo-strip" style="background-image:url('__ASSET_PROCESS__')"></div>
         <div class="slide-inner process-layout">
           <div class="process-title">
             <p class="eyebrow">Metodo</p>
             <h2>La nostra attività in 3 fasi</h2>
-            <p class="lead">Analisi, attività tecnica e risultato finale sono organizzati in un percorso tracciabile.</p>
           </div>
           <div class="steps">
             <section class="step">
               <div class="step-number">1</div>
-              <div>
+              <div class="step-icon" aria-hidden="true">
+                <svg viewBox="0 0 64 64">
+                  <path d="M15 7h24l10 10v22"></path>
+                  <path d="M39 7v11h10"></path>
+                  <path d="M21 25h16M21 32h11M21 39h8"></path>
+                  <circle cx="42" cy="42" r="10"></circle>
+                  <path d="m49 49 8 8"></path>
+                </svg>
+              </div>
+              <span class="step-divider" aria-hidden="true"></span>
+              <div class="step-copy">
                 <h3>Studio preliminare</h3>
                 <p>Analizzando visura catastale e planimetria, daremo evidenza degli immobili interessati a possibile intervento con indicazione del potenziale abbattimento.</p>
               </div>
             </section>
             <section class="step">
               <div class="step-number">2</div>
-              <div>
+              <div class="step-icon" aria-hidden="true">
+                <svg viewBox="0 0 64 64">
+                  <circle cx="31" cy="13" r="4"></circle>
+                  <path d="m29 17-10 34M33 17l12 34M23 38h18"></path>
+                  <path d="M13 52h38"></path>
+                  <path d="M43 10h10v25"></path>
+                  <path d="m48 16 5-6 5 6"></path>
+                  <path d="M48 25h5"></path>
+                </svg>
+              </div>
+              <span class="step-divider" aria-hidden="true"></span>
+              <div class="step-copy">
                 <h3>Esecuzione attività</h3>
-                <p>Alla firma del contratto, verranno avviate le attività tecniche, peritali e tributarie volte a ottimizzare le rendite catastali.</p>
+                <p>Svolgiamo le attività tecniche, peritali e tributarie necessarie a ottimizzare le rendite catastali.</p>
               </div>
             </section>
             <section class="step">
               <div class="step-number">3</div>
-              <div>
+              <div class="step-icon" aria-hidden="true">
+                <svg viewBox="0 0 64 64">
+                  <path d="M20 10h24v9c0 10-5 17-12 20-7-3-12-10-12-20z"></path>
+                  <path d="M20 14H11v6c0 7 4 12 12 13M44 14h9v6c0 7-4 12-12 13"></path>
+                  <path d="M32 39v10M23 55h18M27 49h10"></path>
+                  <path d="m26 23 4 4 8-9"></path>
+                </svg>
+              </div>
+              <span class="step-divider" aria-hidden="true"></span>
+              <div class="step-copy">
                 <h3>Risultato</h3>
                 <p>Al termine delle attività e una volta raggiunta la ridefinizione definitiva della rendita, attraverso accertamento, mediazione o sentenza passata in giudicato, maturerà il beneficio per la proprietà e la nostra consulenza.</p>
               </div>
@@ -1127,14 +1335,14 @@
           <header class="tables-header">
             <div>
               <p class="eyebrow">Simulazione economica</p>
-              <h2>Rideterminazione rendita catastale</h2>
+              <h2>Ottimizzazione rendita catastale</h2>
             </div>
             <p class="table-note" id="economicTableNote"></p>
           </header>
           <div class="table-grid">
-            <section class="table-box">
-              <div class="table-title">Dettaglio immobili selezionati</div>
-              <table class="main-table" aria-label="Rideterminazione rendita catastale - immobili categoria D">
+            <section class="table-box properties">
+              <div class="table-title">Immobili oggetto di analisi</div>
+              <table class="main-table" aria-label="Ottimizzazione rendita catastale - immobili oggetto di analisi">
                 <thead>
                   <tr>
                     <th>Società</th>
@@ -1143,9 +1351,9 @@
                     <th>Foglio - Particella - Sub</th>
                     <th>Cat.</th>
                     <th class="num">R.C. attuale</th>
-                    <th class="num">R.C. attribuibile</th>
-                    <th class="num">Diff. rendita</th>
-                    <th class="num">Diff. IMU</th>
+                    <th class="num nowrap">R.C. attribuibile</th>
+                    <th class="num">Differenza rendita</th>
+                    <th class="num">Differenza IMU</th>
                     <th class="num">% rid.</th>
                   </tr>
                 </thead>
@@ -1158,19 +1366,19 @@
 
             <section class="table-box summary">
               <div>
-                <div class="table-title">Sintesi rideterminazione</div>
-                <table class="summary-table" aria-label="Sintesi rideterminazione rendita catastale">
+                <div class="table-title">Sintesi</div>
+                <table class="summary-table" aria-label="Sintesi ottimizzazione rendita catastale">
                   <tbody id="summaryRows"></tbody>
                 </table>
               </div>
-              <div class="economic-chart" aria-label="Grafico confronto IMU">
-                <div class="chart-head">
-                  <h3>Confronto IMU annua</h3>
-                  <span id="chartSaving"></span>
-                </div>
-                <div class="chart-bars" id="savingsChart"></div>
-              </div>
             </section>
+            <div class="economic-chart" aria-label="Saving IMU generato a uno e dieci anni">
+              <div class="chart-head">
+                <h3 id="economicChartTitle">Saving generato</h3>
+                <span id="chartSaving"></span>
+              </div>
+              <div class="chart-bars" id="savingsChart"></div>
+            </div>
           </div>
         </div>
       </article>
@@ -1220,8 +1428,20 @@
       return new Intl.NumberFormat("it-IT", {
         style: "currency",
         currency: "EUR",
-        maximumFractionDigits: 0
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
       }).format(value);
+    }
+
+    function formatSignedEuro(value) {
+      if (!Number.isFinite(value)) return "n.d.";
+      const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+      return `${sign}${formatEuro(Math.abs(value))}`;
+    }
+
+    function variationClass(value) {
+      if (!Number.isFinite(value) || value === 0) return "";
+      return value > 0 ? "is-unfavorable" : "is-favorable";
     }
 
     function formatPercent(value) {
@@ -1266,14 +1486,17 @@
       const summaryRows = document.getElementById("summaryRows");
       const savingsChart = document.getElementById("savingsChart");
       const chartSaving = document.getElementById("chartSaving");
+      const economicChartTitle = document.getElementById("economicChartTitle");
       const economicTableNote = document.getElementById("economicTableNote");
       const total = totals(items);
       const diffRendita = total.renditaAttuale - total.renditaAttribuibile;
       const hasImuTotals = total.imuComplete > 0;
-      const diffImu = hasImuTotals ? total.imuAttuale - total.imuOttenibile : null;
-      const hasImuSaving = Number.isFinite(diffImu) && diffImu >= 0;
+      const imuVariation = hasImuTotals ? total.imuOttenibile - total.imuAttuale : null;
+      const annualSaving = Number.isFinite(imuVariation) ? -imuVariation : null;
+      const hasImuSaving = Number.isFinite(annualSaving) && annualSaving >= 0;
       const reduction = safePercent(diffRendita, total.renditaAttuale);
-      const valorizzazioneAsset = hasImuSaving ? diffImu * 12 : null;
+      const imuVariationTenYears = Number.isFinite(imuVariation) ? imuVariation * 10 : null;
+      const savingTenYears = Number.isFinite(annualSaving) ? annualSaving * 10 : null;
       const detailLimit = 8;
       const detailItems = items.slice(0, detailLimit);
 
@@ -1283,8 +1506,8 @@
 
       propertyRows.innerHTML = detailItems.map((item) => {
         const rowDiffRendita = item.renditaAttuale - item.renditaAttribuibile;
-        const rowDiffImu = Number.isFinite(item.imuAttuale) && Number.isFinite(item.imuOttenibile)
-          ? item.imuAttuale - item.imuOttenibile
+        const rowImuVariation = Number.isFinite(item.imuAttuale) && Number.isFinite(item.imuOttenibile)
+          ? item.imuOttenibile - item.imuAttuale
           : null;
         const rowReduction = safePercent(rowDiffRendita, item.renditaAttuale);
 
@@ -1298,7 +1521,7 @@
             <td class="num">${formatEuro(item.renditaAttuale)}</td>
             <td class="num">${formatEuro(item.renditaAttribuibile)}</td>
             <td class="num">${formatEuro(rowDiffRendita)}</td>
-            <td class="num">${formatEuro(rowDiffImu)}</td>
+            <td class="num ${variationClass(rowImuVariation)}">${formatSignedEuro(rowImuVariation)}</td>
             <td class="num">${formatPercent(rowReduction)}</td>
           </tr>
         `;
@@ -1309,54 +1532,106 @@
         <td class="num">${formatEuro(total.renditaAttuale)}</td>
         <td class="num">${formatEuro(total.renditaAttribuibile)}</td>
         <td class="num">${formatEuro(diffRendita)}</td>
-        <td class="num">${formatEuro(diffImu)}</td>
+        <td class="num ${variationClass(imuVariation)}">${formatSignedEuro(imuVariation)}</td>
         <td class="num">${formatPercent(reduction)}</td>
       `;
 
       summaryRows.innerHTML = `
-        <tr class="section"><th colspan="2">Rideterminazione rendita catastale immobili</th></tr>
+        <tr class="section"><th colspan="2">Ottimizzazione rendita catastale immobili</th></tr>
         <tr><th>Rendita catastale attuale</th><td class="num">${formatEuro(total.renditaAttuale)}</td></tr>
         <tr><th>Rendita catastale attribuibile</th><td class="num">${formatEuro(total.renditaAttribuibile)}</td></tr>
         <tr><th>Differenza rendita</th><td class="num">${formatEuro(diffRendita)}</td></tr>
         <tr class="section"><th colspan="2">IMU prevista</th></tr>
         <tr><th>Valore attuale IMU${total.imuComplete < items.length ? " (dati disponibili)" : ""}</th><td class="num">${formatEuro(hasImuTotals ? total.imuAttuale : null)}</td></tr>
         <tr><th>Valore ottenibile IMU${total.imuComplete < items.length ? " (dati disponibili)" : ""}</th><td class="num">${formatEuro(hasImuTotals ? total.imuOttenibile : null)}</td></tr>
-        <tr class="section"><th colspan="2">${hasImuSaving ? "Risparmio IMU previsto" : "Variazione IMU prevista"}</th></tr>
-        <tr><th>${hasImuSaving ? "Risparmio 1° anno" : "Variazione 1° anno"}</th><td class="num">${formatEuro(diffImu)}</td></tr>
-        <tr><th>Valorizzazione asset immobiliare</th><td class="num">${formatEuro(valorizzazioneAsset)}</td></tr>
+        <tr class="section"><th colspan="2">Variazione IMU prevista</th></tr>
+        <tr><th>Variazione annua</th><td class="num ${variationClass(imuVariation)}">${formatSignedEuro(imuVariation)}</td></tr>
+        <tr><th>Variazione in 10 anni</th><td class="num ${variationClass(imuVariationTenYears)}">${formatSignedEuro(imuVariationTenYears)}</td></tr>
       `;
 
       if (!hasImuTotals) {
+        economicChartTitle.textContent = "Andamento IMU";
         chartSaving.textContent = "Dati IMU non disponibili";
         savingsChart.innerHTML = "";
         return;
       }
 
-      const chartItems = [
-        { label: "IMU attuale", value: total.imuAttuale, className: "is-before" },
-        { label: "IMU ottenibile", value: total.imuOttenibile, className: `is-after${hasImuSaving ? "" : " is-negative"}` }
-      ];
-      const maxChartValue = Math.max(...chartItems.map((item) => item.value));
-      const imuReduction = safePercent(diffImu, total.imuAttuale);
+      const imuReduction = safePercent(annualSaving, total.imuAttuale);
       const coverage = total.imuComplete < items.length ? ` · ${total.imuComplete}/${items.length} immobili` : "";
-      const chartLabel = hasImuSaving ? "Risparmio annuo" : "Incremento annuo";
       chartSaving.classList.toggle("is-negative", !hasImuSaving);
-      chartSaving.textContent = `${chartLabel} ${formatEuro(Math.abs(diffImu))} (${formatPercent(Math.abs(imuReduction))})${coverage}`;
-      savingsChart.innerHTML = chartItems.map((item) => {
-        const height = maxChartValue > 0 ? Math.max(8, Math.round((item.value / maxChartValue) * 100)) : 8;
+      economicChartTitle.textContent = hasImuSaving ? "Saving generato" : "Impatto IMU previsto";
+      const imuReductionLabel = Number.isFinite(imuReduction)
+        ? formatPercent(Math.abs(imuReduction))
+        : "n.d.";
+      chartSaving.textContent = `${hasImuSaving ? "Riduzione IMU" : "Incremento IMU"} ${imuReductionLabel}${coverage}`;
 
-        return `
-          <div class="chart-item ${item.className}">
-            <div class="chart-bar-wrap">
-              <span class="chart-bar" style="height:${height}%"></span>
+      const annualMaximum = Math.max(total.imuAttuale, total.imuOttenibile, 1);
+      const currentWidth = Math.max(3, Math.round((total.imuAttuale / annualMaximum) * 100));
+      const projectedWidth = Math.max(3, Math.round((total.imuOttenibile / annualMaximum) * 100));
+      const graphWidth = 240;
+      const graphHeight = 94;
+      const graphPaddingX = 8;
+      const graphTop = 8;
+      const graphBottom = 86;
+      const decadeMaximum = Math.max(total.imuAttuale * 10, total.imuOttenibile * 10, 1);
+      const cumulativePoint = (annualValue, year) => {
+        const x = graphPaddingX + (year / 10) * (graphWidth - graphPaddingX * 2);
+        const y = graphBottom - ((annualValue * year) / decadeMaximum) * (graphBottom - graphTop);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      };
+      const years = Array.from({ length: 11 }, (_, year) => year);
+      const currentPoints = years.map((year) => cumulativePoint(total.imuAttuale, year));
+      const projectedPoints = years.map((year) => cumulativePoint(total.imuOttenibile, year));
+      const areaPoints = [...currentPoints, ...[...projectedPoints].reverse()].join(" ");
+      const increaseClass = hasImuSaving ? "" : " is-increase";
+
+      savingsChart.innerHTML = `
+        <section class="chart-item${increaseClass}">
+          <div class="chart-panel-head">
+            <div>
+              <span class="chart-horizon">1 anno</span>
+              <strong>IMU attuale e prevista</strong>
             </div>
-            <div class="chart-label">
-              <strong>${formatEuro(item.value)}</strong>
-              ${item.label}
+            <span class="chart-panel-delta">${formatSignedEuro(imuVariation)}</span>
+          </div>
+          <div class="cost-comparison">
+            <div class="cost-row">
+              <div class="cost-row-label"><span>Attuale</span><strong>${formatEuro(total.imuAttuale)}</strong></div>
+              <div class="cost-track"><span class="cost-bar" style="width:${currentWidth}%"></span></div>
+            </div>
+            <div class="cost-row">
+              <div class="cost-row-label"><span>Prevista</span><strong>${formatEuro(total.imuOttenibile)}</strong></div>
+              <div class="cost-track"><span class="cost-bar projected" style="width:${projectedWidth}%"></span></div>
             </div>
           </div>
-        `;
-      }).join("");
+          <div class="chart-legend">
+            <span>${hasImuSaving ? "Risparmio annuo" : "Maggior costo annuo"}: <strong>${formatEuro(Math.abs(annualSaving))}</strong></span>
+          </div>
+        </section>
+        <section class="chart-item${increaseClass}">
+          <div class="chart-panel-head">
+            <div>
+              <span class="chart-horizon">10 anni</span>
+              <strong>Costo IMU cumulato</strong>
+            </div>
+            <span class="chart-panel-delta">${formatSignedEuro(imuVariationTenYears)}</span>
+          </div>
+          <svg class="decade-lines" viewBox="0 0 ${graphWidth} ${graphHeight}" preserveAspectRatio="none" role="img" aria-label="Confronto cumulato tra IMU attuale e prevista in dieci anni">
+            <line class="grid-line" x1="${graphPaddingX}" y1="${graphBottom}" x2="${graphWidth - graphPaddingX}" y2="${graphBottom}"></line>
+            <line class="grid-line" x1="${graphPaddingX}" y1="${(graphTop + graphBottom) / 2}" x2="${graphWidth - graphPaddingX}" y2="${(graphTop + graphBottom) / 2}"></line>
+            <polygon class="saving-area" points="${areaPoints}"></polygon>
+            <polyline class="baseline-line" points="${currentPoints.join(" ")}"></polyline>
+            <polyline class="projected-line" points="${projectedPoints.join(" ")}"></polyline>
+          </svg>
+          <div>
+            <div class="chart-axis"><span>Oggi</span><span>5 anni</span><span>10 anni</span></div>
+            <div class="chart-legend">
+              <span><i></i>Scenario attuale</span>
+              <span><i class="projected"></i>Scenario previsto</span>
+            </div>
+          </div>
+        </section>
+      `;
     }
 
     function renderDeckMetadata(data) {

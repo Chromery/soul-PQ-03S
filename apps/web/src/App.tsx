@@ -68,7 +68,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.51.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.52.0";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -189,6 +189,51 @@ type PresentationDeck = {
   createdAt: string;
   htmlUrl: string;
   pdfUrl: string;
+};
+
+type PresentationPropertyDraft = {
+  id: string;
+  societa: string;
+  comune: string;
+  indirizzo: string;
+  foglioParticellaSub: string;
+  categoria: string;
+  renditaAttuale: string;
+  renditaAttribuibile: string;
+  imuAttuale: string;
+  imuOttenibile: string;
+};
+
+type PresentationPropertyField = Exclude<keyof PresentationPropertyDraft, "id">;
+
+const PRESENTATION_PROPERTY_FIELDS: PresentationPropertyField[] = [
+  "societa",
+  "comune",
+  "indirizzo",
+  "foglioParticellaSub",
+  "categoria",
+  "renditaAttuale",
+  "renditaAttribuibile",
+  "imuAttuale",
+  "imuOttenibile",
+];
+
+type PresentationDraft = {
+  clientName: string;
+  properties: PresentationPropertyDraft[];
+};
+
+type PresentationPropertyPayload = {
+  id: string;
+  societa: string;
+  comune: string;
+  indirizzo: string;
+  foglioParticellaSub: string;
+  categoria: string;
+  renditaAttuale: number;
+  renditaAttribuibile: number;
+  imuAttuale: number | null;
+  imuOttenibile: number | null;
 };
 
 type StudyUpdate = Partial<Pick<FeasibilityStudy, "status" | "notes">>;
@@ -4895,6 +4940,7 @@ function StudyRows({
                   <div className="summary-actions">
                     <PresentationAction
                       study={study}
+                      draft={presentationDraftFromStudy(study)}
                       onNotice={onNotice}
                     />
                     <a className="button secondary" href={study.erpUrl} target="_blank" rel="noreferrer">
@@ -5149,11 +5195,118 @@ function PropertyRow({
   );
 }
 
+function presentationDraftFromStudy(study: FeasibilityStudy): PresentationDraft {
+  return {
+    clientName: study.company,
+    properties: study.properties.map((property) => ({
+      id: property.id,
+      societa: study.company,
+      comune: property.comune || study.comune,
+      indirizzo: property.address || property.ubicazione || "Ubicazione non disponibile",
+      foglioParticellaSub: cadastralPropertyReference(property).split(" · ").join(" - "),
+      categoria: property.categoria,
+      renditaAttuale: formatPresentationMoneyInput(property.currentRendita),
+      renditaAttribuibile: formatPresentationMoneyInput(property.estimatedRendita),
+      imuAttuale: formatPresentationMoneyInput(property.currentImu),
+      imuOttenibile: formatPresentationMoneyInput(property.estimatedImu),
+    })),
+  };
+}
+
+function formatPresentationMoneyInput(value: number | null | undefined) {
+  return value === null || value === undefined || !Number.isFinite(value) ? "" : value.toFixed(2);
+}
+
+function formatPresentationDraftAmount(value: string | undefined, emptyLabel = "Valore non valido") {
+  if (value === undefined) return emptyLabel;
+  const parsed = presentationMoneyToCents(value, false);
+  return parsed === null ? emptyLabel : parsed === undefined ? "Valore non valido" : formatEuro(parsed);
+}
+
+function presentationMoneyToCents(value: string, required: true): number | undefined;
+function presentationMoneyToCents(value: string, required: false): number | null | undefined;
+function presentationMoneyToCents(value: string, required: boolean) {
+  if (!value.trim()) return required ? undefined : null;
+  const parsed = parseOptionalDecimalInput(value);
+  if (parsed === null || parsed < 0) return undefined;
+  return Math.round((parsed + 1e-9) * 100) / 100;
+}
+
+function presentationPropertyPayload(
+  property: PresentationPropertyDraft,
+): PresentationPropertyPayload | null {
+  const strings = {
+    societa: property.societa.trim(),
+    comune: property.comune.trim(),
+    indirizzo: property.indirizzo.trim(),
+    foglioParticellaSub: property.foglioParticellaSub.trim(),
+    categoria: property.categoria.trim(),
+  };
+  if (Object.values(strings).some((value) => !value)) return null;
+
+  const renditaAttuale = presentationMoneyToCents(property.renditaAttuale, true);
+  const renditaAttribuibile = presentationMoneyToCents(property.renditaAttribuibile, true);
+  const imuAttuale = presentationMoneyToCents(property.imuAttuale, false);
+  const imuOttenibile = presentationMoneyToCents(property.imuOttenibile, false);
+  if (
+    renditaAttuale === undefined
+    || renditaAttribuibile === undefined
+    || imuAttuale === undefined
+    || imuOttenibile === undefined
+  ) {
+    return null;
+  }
+
+  return {
+    id: property.id,
+    ...strings,
+    renditaAttuale,
+    renditaAttribuibile,
+    imuAttuale,
+    imuOttenibile,
+  };
+}
+
+function presentationPropertyHasIncompleteData(property: PresentationPropertyDraft) {
+  const payload = presentationPropertyPayload(property);
+  return !payload || payload.renditaAttribuibile <= 0 || payload.imuAttuale === null || payload.imuOttenibile === null;
+}
+
+function presentationDraftTotals(draft: PresentationDraft) {
+  return draft.properties.reduce(
+    (totals, property) => {
+      const payload = presentationPropertyPayload(property);
+      if (!payload) {
+        totals.invalid += 1;
+        return totals;
+      }
+      totals.renditaAttuale += payload.renditaAttuale;
+      totals.renditaAttribuibile += payload.renditaAttribuibile;
+      if (payload.imuAttuale !== null && payload.imuOttenibile !== null) {
+        totals.imuAttuale += payload.imuAttuale;
+        totals.imuOttenibile += payload.imuOttenibile;
+        totals.imuComplete += 1;
+      }
+      return totals;
+    },
+    {
+      renditaAttuale: 0,
+      renditaAttribuibile: 0,
+      imuAttuale: 0,
+      imuOttenibile: 0,
+      imuComplete: 0,
+      invalid: 0,
+    },
+  );
+}
+
 function PresentationAction({
   study,
+  draft,
   onNotice,
 }: {
   study: FeasibilityStudy;
+  draft: PresentationDraft;
   onNotice: (message: string) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -5162,6 +5315,17 @@ function PresentationAction({
   const [latestDeck, setLatestDeck] = useState<PresentationDeck | null>(null);
   const [generatedDeck, setGeneratedDeck] = useState<PresentationDeck | null>(null);
   const [busy, setBusy] = useState(false);
+  const propertyDraftById = useMemo(
+    () => new Map(draft.properties.map((property) => [property.id, property])),
+    [draft.properties],
+  );
+  const selectedDrafts = selectedPropertyIds
+    .map((propertyId) => propertyDraftById.get(propertyId))
+    .filter((property): property is PresentationPropertyDraft => Boolean(property));
+  const selectedPayloads = selectedDrafts
+    .map(presentationPropertyPayload)
+    .filter((property): property is PresentationPropertyPayload => Boolean(property));
+  const selectionHasInvalidData = selectedPayloads.length !== selectedPropertyIds.length || !draft.clientName.trim();
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -5205,12 +5369,20 @@ function PresentationAction({
 
   async function generatePresentation() {
     if (selectedPropertyIds.length === 0 || busy) return;
+    if (selectionHasInvalidData) {
+      onNotice("Correggi i campi evidenziati nell’anteprima prima di generare la presentazione.");
+      return;
+    }
     setBusy(true);
     try {
       const response = await fetch(`${API_BASE_URL}/studies/${encodeURIComponent(study.id)}/presentations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ propertyIds: selectedPropertyIds }),
+        body: JSON.stringify({
+          propertyIds: selectedPropertyIds,
+          clientName: draft.clientName.trim(),
+          properties: selectedPayloads,
+        }),
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { message?: string | string[] } | null;
@@ -5313,7 +5485,7 @@ function PresentationAction({
             </div>
 
             <p className="modal-note">
-              Seleziona gli immobili da includere. La versione generata resta uno snapshot consultabile tramite link e scaricabile in PDF.
+              Seleziona gli immobili da includere. I contenuti e gli importi arrivano dall’anteprima editabile presente nella pagina dello studio.
             </p>
 
             <div className="presentation-selection-toolbar">
@@ -5324,10 +5496,16 @@ function PresentationAction({
                 <button type="button" onClick={() => setSelectedPropertyIds([])}>Nessuno</button>
               </div>
             </div>
+            {selectionHasInvalidData && selectedPropertyIds.length > 0 && (
+              <p className="presentation-validation-warning">
+                Uno o più campi selezionati non sono validi. Correggili nell’anteprima dati prima di generare.
+              </p>
+            )}
 
             <div className="presentation-property-list">
               {study.properties.map((property) => {
-                const incomplete = presentationPropertyHasIncompleteData(property);
+                const propertyDraft = propertyDraftById.get(property.id);
+                const incomplete = !propertyDraft || presentationPropertyHasIncompleteData(propertyDraft);
                 return (
                   <label key={property.id} className={selectedPropertyIds.includes(property.id) ? "selected" : ""}>
                     <input
@@ -5336,12 +5514,12 @@ function PresentationAction({
                       onChange={() => toggleProperty(property.id)}
                     />
                     <div>
-                      <strong>{propertyLocation(property)}</strong>
+                      <strong>{propertyDraft?.indirizzo || propertyLocation(property)}</strong>
                       <span>
-                        {property.id} · {property.categoria} · {cadastralPropertyReference(property)}
+                        {property.id} · {propertyDraft?.categoria || property.categoria} · {propertyDraft?.foglioParticellaSub || cadastralPropertyReference(property)}
                       </span>
                       <small>
-                        Rendita {formatEuro(property.currentRendita)} → {formatEstimatedValue(property.estimatedRendita)} · IMU {property.currentImu == null ? "n.d." : formatEuro(property.currentImu)} → {property.estimatedImu == null ? "n.d." : formatEuro(property.estimatedImu)}
+                        Rendita {formatPresentationDraftAmount(propertyDraft?.renditaAttuale)} → {formatPresentationDraftAmount(propertyDraft?.renditaAttribuibile)} · IMU {formatPresentationDraftAmount(propertyDraft?.imuAttuale, "n.d.")} → {formatPresentationDraftAmount(propertyDraft?.imuOttenibile, "n.d.")}
                       </small>
                     </div>
                     <span className={`presentation-data-state ${incomplete ? "warning" : "ready"}`}>
@@ -5382,7 +5560,7 @@ function PresentationAction({
               <button className="button secondary" type="button" onClick={() => setModalOpen(false)} disabled={busy}>
                 Chiudi
               </button>
-              <button className="button primary" type="button" disabled={busy || selectedPropertyIds.length === 0} onClick={() => void generatePresentation()}>
+              <button className="button primary" type="button" disabled={busy || selectedPropertyIds.length === 0 || selectionHasInvalidData} onClick={() => void generatePresentation()}>
                 <Presentation size={15} />
                 {busy ? "Generazione..." : generatedDeck ? "Genera nuova versione" : "Genera presentazione"}
               </button>
@@ -5401,10 +5579,6 @@ function defaultPresentationPropertyIds(study: FeasibilityStudy) {
   return positiveIds.length > 0 ? positiveIds : study.properties.map((property) => property.id);
 }
 
-function presentationPropertyHasIncompleteData(property: PropertyItem) {
-  return property.estimatedRendita <= 0 || property.currentImu == null || property.estimatedImu == null;
-}
-
 function cadastralPropertyReference(property: PropertyItem) {
   const values = [
     property.foglio ? `Fg. ${property.foglio}` : null,
@@ -5412,6 +5586,158 @@ function cadastralPropertyReference(property: PropertyItem) {
     property.subalterno ? `Sub. ${property.subalterno}` : null,
   ].filter(Boolean);
   return values.length > 0 ? values.join(" · ") : "dati catastali non disponibili";
+}
+
+function presentationMoneyInputInvalid(value: string, required: boolean) {
+  return presentationMoneyToCents(value, required as false) === undefined
+    || (required && !value.trim());
+}
+
+function PresentationDataPreview({
+  draft,
+  manualChanges,
+  onClientNameChange,
+  onPropertyFieldChange,
+  onReset,
+}: {
+  draft: PresentationDraft;
+  manualChanges: number;
+  onClientNameChange: (value: string) => void;
+  onPropertyFieldChange: (
+    propertyId: string,
+    field: PresentationPropertyField,
+    value: string,
+  ) => void;
+  onReset: () => void;
+}) {
+  const totals = presentationDraftTotals(draft);
+  const renditaDifference = totals.renditaAttuale - totals.renditaAttribuibile;
+  const imuDifference = totals.imuAttuale - totals.imuOttenibile;
+
+  function moneyInput(
+    property: PresentationPropertyDraft,
+    field: "renditaAttuale" | "renditaAttribuibile" | "imuAttuale" | "imuOttenibile",
+    required: boolean,
+    label: string,
+  ) {
+    const invalid = presentationMoneyInputInvalid(property[field], required);
+    return (
+      <input
+        className={invalid ? "invalid" : ""}
+        type="text"
+        inputMode="decimal"
+        value={property[field]}
+        placeholder={required ? "0,00" : "n.d."}
+        aria-label={`${label} per ${property.indirizzo}`}
+        aria-invalid={invalid}
+        onChange={(event) => onPropertyFieldChange(property.id, field, event.target.value)}
+        onBlur={() => {
+          const parsed = presentationMoneyToCents(property[field], required as false);
+          if (parsed !== undefined && parsed !== null) {
+            onPropertyFieldChange(property.id, field, formatPresentationMoneyInput(parsed));
+          }
+        }}
+      />
+    );
+  }
+
+  return (
+    <section
+      id="presentation-data"
+      className="detail-card presentation-data-preview"
+      tabIndex={-1}
+    >
+      <div className="section-title presentation-preview-title">
+        <div>
+          <h2>Dati presentazione modificabili</h2>
+          <span>Questi sono i valori che verranno congelati nello snapshot HTML e PDF.</span>
+        </div>
+        <div className="presentation-preview-actions">
+          {manualChanges > 0 && (
+            <span className="presentation-manual-badge">
+              <span aria-hidden="true" />
+              {manualChanges} {manualChanges === 1 ? "modifica manuale" : "modifiche manuali"}
+            </span>
+          )}
+          <button className="button secondary compact-button" type="button" disabled={manualChanges === 0} onClick={onReset}>
+            <RefreshCw size={14} />
+            Ripristina dati stima
+          </button>
+        </div>
+      </div>
+
+      <label className="presentation-client-field">
+        <span>Cliente mostrato in copertina</span>
+        <input
+          className={!draft.clientName.trim() ? "invalid" : ""}
+          value={draft.clientName}
+          aria-invalid={!draft.clientName.trim()}
+          onChange={(event) => onClientNameChange(event.target.value)}
+        />
+      </label>
+
+      <div className="presentation-preview-table-wrap">
+        <table className="presentation-preview-table">
+          <thead>
+            <tr>
+              <th>Società</th>
+              <th>Comune</th>
+              <th>Indirizzo</th>
+              <th>Foglio - Part. - Sub</th>
+              <th>Cat.</th>
+              <th>R.C. attuale (€)</th>
+              <th>R.C. attribuibile (€)</th>
+              <th>IMU attuale (€)</th>
+              <th>IMU ottenibile (€)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {draft.properties.map((property) => (
+              <tr key={property.id}>
+                {(["societa", "comune", "indirizzo", "foglioParticellaSub", "categoria"] as const).map((field) => (
+                  <td key={field}>
+                    <input
+                      className={!property[field].trim() ? "invalid" : ""}
+                      value={property[field]}
+                      aria-label={`${field} per ${property.id}`}
+                      aria-invalid={!property[field].trim()}
+                      onChange={(event) => onPropertyFieldChange(property.id, field, event.target.value)}
+                    />
+                  </td>
+                ))}
+                <td>{moneyInput(property, "renditaAttuale", true, "Rendita catastale attuale")}</td>
+                <td>{moneyInput(property, "renditaAttribuibile", true, "Rendita catastale attribuibile")}</td>
+                <td>{moneyInput(property, "imuAttuale", false, "IMU attuale")}</td>
+                <td>{moneyInput(property, "imuOttenibile", false, "IMU ottenibile")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="presentation-preview-totals" aria-label="Totali anteprima presentazione">
+        <SummaryStat label="Rendita attuale" value={formatEuro(totals.renditaAttuale)} />
+        <SummaryStat label="Rendita attribuibile" value={formatEuro(totals.renditaAttribuibile)} />
+        <SummaryStat label="Differenza rendita" value={formatEuro(renditaDifference)} />
+        <SummaryStat
+          label="IMU attuale"
+          value={totals.imuComplete > 0 ? formatEuro(totals.imuAttuale) : "n.d."}
+        />
+        <SummaryStat
+          label="Saving IMU annuo"
+          value={totals.imuComplete > 0 ? formatEuro(imuDifference) : "n.d."}
+        />
+      </div>
+      {(totals.invalid > 0 || totals.imuComplete < draft.properties.length) && (
+        <p className="presentation-preview-note">
+          {totals.invalid > 0
+            ? `${totals.invalid} righe contengono valori non validi. `
+            : ""}
+          I campi IMU vuoti vengono esportati come “n.d.” e non concorrono ai totali IMU.
+        </p>
+      )}
+    </section>
+  );
 }
 
 async function copyText(value: string) {
@@ -5478,6 +5804,9 @@ function StudyDetail({
   const [newPropertyBusy, setNewPropertyBusy] = useState(false);
   const [deleteConfirmIds, setDeleteConfirmIds] = useState<string[]>([]);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const presentationBaseline = useMemo(() => presentationDraftFromStudy(study), [study]);
+  const [presentationDraft, setPresentationDraft] = useState<PresentationDraft>(() => presentationBaseline);
+  const [presentationTouchedFields, setPresentationTouchedFields] = useState<Set<string>>(() => new Set());
   const propertyTableColumns = useTableColumns("soul-table-study-properties-v1", PROPERTY_TABLE_COLUMNS);
   const visiblePropertyColumnIds = useMemo(
     () => new Set<PropertyTableColumnId>(propertyTableColumns.visibleColumns.map((column) => column.id)),
@@ -5491,7 +5820,33 @@ function StudyDetail({
     setActivePropertyId(null);
     setNewPropertyModalOpen(false);
     setDeleteConfirmIds([]);
+    setPresentationDraft(presentationDraftFromStudy(study));
+    setPresentationTouchedFields(new Set());
   }, [study.id]);
+
+  useEffect(() => {
+    setPresentationDraft((current) => {
+      const currentById = new Map(current.properties.map((property) => [property.id, property]));
+      return {
+        clientName: presentationTouchedFields.has("clientName")
+          ? current.clientName
+          : presentationBaseline.clientName,
+        properties: presentationBaseline.properties.map((baselineProperty) => {
+          const currentProperty = currentById.get(baselineProperty.id);
+          if (!currentProperty) return baselineProperty;
+          return PRESENTATION_PROPERTY_FIELDS.reduce(
+            (merged, field) => ({
+              ...merged,
+              [field]: presentationTouchedFields.has(`${baselineProperty.id}:${field}`)
+                ? currentProperty[field]
+                : baselineProperty[field],
+            }),
+            { ...baselineProperty },
+          );
+        }),
+      };
+    });
+  }, [presentationBaseline, presentationTouchedFields]);
 
   useEffect(() => {
     setManualOrder((current) => {
@@ -5551,6 +5906,44 @@ function StudyDetail({
     setSavingStatus(true);
     await onUpdate({ status });
     setSavingStatus(false);
+  }
+
+  function updatePresentationTouchedField(key: string, manual: boolean) {
+    setPresentationTouchedFields((current) => {
+      const next = new Set(current);
+      if (manual) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  function updatePresentationClientName(value: string) {
+    updatePresentationTouchedField("clientName", value !== presentationBaseline.clientName);
+    setPresentationDraft((current) => ({ ...current, clientName: value }));
+  }
+
+  function updatePresentationPropertyField(
+    propertyId: string,
+    field: PresentationPropertyField,
+    value: string,
+  ) {
+    const baselineProperty = presentationBaseline.properties.find((property) => property.id === propertyId);
+    updatePresentationTouchedField(
+      `${propertyId}:${field}`,
+      !baselineProperty || value !== baselineProperty[field],
+    );
+    setPresentationDraft((current) => ({
+      ...current,
+      properties: current.properties.map((property) =>
+        property.id === propertyId ? { ...property, [field]: value } : property
+      ),
+    }));
+  }
+
+  function resetPresentationDraft() {
+    setPresentationDraft(presentationBaseline);
+    setPresentationTouchedFields(new Set());
+    onNotice("Dati presentazione ripristinati dalla stima.");
   }
 
   function handlePropertySort(sortKey: Exclude<PropertySortKey, "manual">) {
@@ -5695,8 +6088,21 @@ function StudyDetail({
           </p>
         </div>
         <div className="detail-actions">
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => {
+              const target = document.getElementById("presentation-data");
+              target?.scrollIntoView({ behavior: "smooth", block: "start" });
+              window.setTimeout(() => target?.focus({ preventScroll: true }), 350);
+            }}
+          >
+            <Pencil size={17} />
+            Modifica dati presentazione
+          </button>
           <PresentationAction
             study={study}
+            draft={presentationDraft}
             onNotice={onNotice}
           />
           <button className="button secondary" onClick={onExport}>
@@ -5912,6 +6318,13 @@ function StudyDetail({
           )}
         </div>
       </section>
+      <PresentationDataPreview
+        draft={presentationDraft}
+        manualChanges={presentationTouchedFields.size}
+        onClientNameChange={updatePresentationClientName}
+        onPropertyFieldChange={updatePresentationPropertyField}
+        onReset={resetPresentationDraft}
+      />
       {newPropertyModalOpen && (
         <NewPropertyModal
           study={study}
