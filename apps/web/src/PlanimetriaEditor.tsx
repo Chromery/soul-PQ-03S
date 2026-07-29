@@ -2190,6 +2190,7 @@ export default function PlanimetriaEditor({
       setSavedAt(draft?.savedAt ?? "");
 
       if (!draft) {
+        setDefaultOneri(property.oneri === true);
         applyPropertyScaleFallback();
         if (linkedRemotePlan) {
           void loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName, undefined, true);
