@@ -35,6 +35,7 @@ test("salva e ripristina l'aliquota IMU manuale conservando il valore comunale",
     estimatedImu: null,
     imuRateOverride: null as number | null,
     imuMultiplierOverride: null as number | null,
+    oneri: false,
     hasStudy: true,
     analysisDraft: null,
   };

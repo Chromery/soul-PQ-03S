@@ -455,7 +455,7 @@ export class ErpSyncService {
     const now = new Date();
     const calculatedProperties = study.properties.map((property) => {
       const currentRendita = Number(property.currentRendita);
-      const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft)
+      const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
         ?? Number(property.estimatedRendita);
       const currentCalculation = this.calculateImu(currentRendita, property);
       const estimatedCalculation = estimatedRendita > 0 || property.hasStudy
@@ -511,6 +511,7 @@ export class ErpSyncService {
         provincia: property.provincia,
         categoria: property.categoria,
         titolarita: property.titolarita,
+        oneri: property.oneri,
         rendita_attuale: decimalToString(property.currentRendita),
         rendita_proposta: estimatedRendita.toFixed(2),
         imu_attuale: currentImu === null ? null : currentImu.toFixed(2),

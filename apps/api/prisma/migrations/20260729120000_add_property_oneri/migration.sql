@@ -1,0 +1,2 @@
+ALTER TABLE "Property"
+ADD COLUMN "oneri" BOOLEAN NOT NULL DEFAULT false;

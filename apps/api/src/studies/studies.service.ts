@@ -277,7 +277,8 @@ export class StudiesService {
     const originalRendita = sum(properties.map((property) => Number(property.currentRendita)));
     const totalRendita = sum(
       properties.map((property) =>
-        estimatedRenditaFromAnalysisDraft(property.analysisDraft) ?? Number(property.estimatedRendita),
+        estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
+        ?? Number(property.estimatedRendita),
       ),
     );
     const catDRendita = sum(
@@ -293,7 +294,7 @@ export class StudiesService {
     );
     const estimatedImu = sum(
       properties.map((property) => {
-        const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft)
+        const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
           ?? Number(property.estimatedRendita);
         const calculation = estimatedRendita > 0 ? this.calculateImu(estimatedRendita, property) : null;
         return calculatedAmount(calculation) ?? (property.estimatedImu === null ? 0 : Number(property.estimatedImu));
@@ -338,7 +339,9 @@ export class StudiesService {
     const visura = property.documents.find((document) => document.type === DocumentType.VISURA);
     const elencoSubalterni = property.documents.find((document) => document.type === DocumentType.ELENCO_SUBALTERNI);
     const currentRendita = Number(property.currentRendita);
-    const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft) ?? Number(property.estimatedRendita);
+    const estimatedRendita =
+      estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
+      ?? Number(property.estimatedRendita);
     const currentImuCalculation = this.calculateImu(currentRendita, property);
     const estimatedImuCalculation = estimatedRendita > 0 || property.hasStudy
       ? this.calculateImu(estimatedRendita, property)
@@ -373,6 +376,7 @@ export class StudiesService {
       formapsMunicipalityId: formapsTerritory?.municipalityId ?? property.formapsMunicipalityId,
       categoria: property.categoria,
       titolarita: property.titolarita,
+      oneri: property.oneri,
       currentRendita,
       estimatedRendita,
       diffPercent: currentRendita === 0 ? 0 : ((estimatedRendita - currentRendita) / currentRendita) * 100,

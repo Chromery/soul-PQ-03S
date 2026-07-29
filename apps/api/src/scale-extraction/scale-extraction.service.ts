@@ -24,7 +24,8 @@ type EnqueueDocumentPdfInput = {
   sha256?: string;
 };
 
-type ScaleExtractionResult = {
+type PageScaleExtractionResult = {
+  page_number: number;
   found: boolean;
   scale_denominator: number | null;
   scale_label: string | null;
@@ -34,38 +35,55 @@ type ScaleExtractionResult = {
   warnings: string[];
 };
 
+type ScaleExtractionResult = PageScaleExtractionResult & {
+  pages: PageScaleExtractionResult[];
+};
+
 const DEFAULT_SCALE_MODEL = "qwen/qwen3.5-flash-02-23";
 
 const SCALE_EXTRACTION_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: [
-    "found",
-    "scale_denominator",
-    "scale_label",
-    "sheet_size",
-    "confidence",
-    "evidence",
-    "warnings",
-  ],
+  required: ["pages"],
   properties: {
-    found: { type: "boolean" },
-    scale_denominator: {
-      anyOf: [{ type: "integer", minimum: 20, maximum: 20000 }, { type: "null" }],
-    },
-    scale_label: {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    },
-    sheet_size: {
-      anyOf: [{ type: "string", enum: ["A3", "A4"] }, { type: "null" }],
-    },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
-    evidence: {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    },
-    warnings: {
+    pages: {
       type: "array",
-      items: { type: "string" },
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "page_number",
+          "found",
+          "scale_denominator",
+          "scale_label",
+          "sheet_size",
+          "confidence",
+          "evidence",
+          "warnings",
+        ],
+        properties: {
+          page_number: { type: "integer", minimum: 1 },
+          found: { type: "boolean" },
+          scale_denominator: {
+            anyOf: [{ type: "integer", minimum: 20, maximum: 20000 }, { type: "null" }],
+          },
+          scale_label: {
+            anyOf: [{ type: "string" }, { type: "null" }],
+          },
+          sheet_size: {
+            anyOf: [{ type: "string", enum: ["A3", "A4"] }, { type: "null" }],
+          },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+          evidence: {
+            anyOf: [{ type: "string" }, { type: "null" }],
+          },
+          warnings: {
+            type: "array",
+            items: { type: "string" },
+          },
+        },
+      },
     },
   },
 } as const;
@@ -258,7 +276,7 @@ export class ScaleExtractionService {
         {
           role: "system",
           content:
-            "Sei un tecnico catastale. Estrai solo scale esplicite da planimetrie PDF o elaborati planimetrici catastali. Se leggi una dicitura come 'Scala 1:500' o 'Scala 1 : 500' devi impostare found=true e scale_denominator=500. Rispondi esclusivamente JSON valido conforme allo schema.",
+            "Sei un tecnico catastale. Analizza ogni pagina separatamente ed estrai solo scale esplicite da planimetrie PDF o elaborati planimetrici catastali. Restituisci una voce per ogni pagina del PDF, nel medesimo ordine e con page_number a partire da 1. Non propagare mai la scala di una pagina alle altre. Se leggi una dicitura come 'Scala 1:500' o 'Scala 1 : 500' devi impostare found=true e scale_denominator=500 per quella sola pagina. Rispondi esclusivamente JSON valido conforme allo schema.",
         },
         {
           role: "user",
@@ -266,7 +284,7 @@ export class ScaleExtractionService {
             {
               type: "text",
               text:
-                "Analizza il PDF della planimetria catastale e trova il rapporto di scala, per esempio 'Scala 1:500', 'Scala 1 : 500', '1/200' o simili. Non inferire la scala dal formato foglio A3/A4. La dicitura 'Fattore di scala non utilizzabile' riguarda il fattore di stampa/acquisizione: non usarla come scala e non scartare un'altra dicitura esplicita come 'Scala 1:500'. Se non trovi una scala esplicita, usa found=false e valori null. Riporta in evidence il testo o la zona che giustifica la risposta." +
+                "Analizza separatamente tutte le pagine del PDF della planimetria catastale e trova per ciascuna il rapporto di scala, per esempio 'Scala 1:500', 'Scala 1 : 500', '1/200' o simili. Inserisci sempre una voce per ogni pagina, anche quando la scala non è presente. Non inferire la scala dal formato foglio A3/A4 e non riutilizzare su una pagina la scala letta in un'altra. La dicitura 'Fattore di scala non utilizzabile' riguarda il fattore di stampa/acquisizione: non usarla come scala e non scartare un'altra dicitura esplicita come 'Scala 1:500'. Se in una pagina non trovi una scala esplicita, usa found=false e valori null per quella pagina. Riporta in evidence il testo o la zona che giustifica la risposta." +
                 (retry
                   ? " Questo e un secondo tentativo: controlla con attenzione il testo OCR e, se trovi una riga con 'Scala 1 : N', restituisci quella scala."
                   : ""),
@@ -283,7 +301,7 @@ export class ScaleExtractionService {
       ],
       temperature: 0,
       seed: retry ? 43 : 42,
-      max_tokens: 1500,
+      max_tokens: 4000,
       include_reasoning: false,
       reasoning: {
         exclude: true,
@@ -360,7 +378,8 @@ export class ScaleExtractionService {
       const effectivePropertyScaleSource =
         property.scaleSource === "USER" && !property.aiScaleDenominator ? "DEFAULT" : property.scaleSource;
       const shouldSeedActiveScale =
-        options.forceActiveScale === true || !isUserScaleSource(effectivePropertyScaleSource);
+        result.confidence >= 0.5
+        && (options.forceActiveScale === true || !isUserScaleSource(effectivePropertyScaleSource));
       await tx.property.update({
         where: { id: propertyId },
         data: {
@@ -402,8 +421,9 @@ export class ScaleExtractionService {
           : draft.scaleSource;
       const effectiveDraftScaleSource =
         draftScaleSource === "USER" && !draft.aiScaleDenominator ? "DEFAULT" : draftScaleSource;
-      const shouldSeedDraftScale =
+      const canSeedDraftScale =
         options.forceActiveScale === true || !isUserScaleSource(effectiveDraftScaleSource);
+      const shouldSeedDraftScale = result.confidence >= 0.5 && canSeedDraftScale;
       await tx.planAnalysisDraft.update({
         where: { propertyId },
         data: {
@@ -419,7 +439,13 @@ export class ScaleExtractionService {
           aiSheetSize: result.sheet_size,
           aiScaleConfidence: result.confidence,
           aiScaleDetectedAt: detectedAt,
-          payload: buildDraftPayloadWithDetectedScale(draft.payload, result, detectedAt, shouldSeedDraftScale),
+          payload: buildDraftPayloadWithDetectedScale(
+            draft.payload,
+            result,
+            detectedAt,
+            canSeedDraftScale,
+            options.forceActiveScale === true,
+          ),
         },
       });
     });
@@ -477,6 +503,7 @@ export class ScaleExtractionService {
             sheetSize: job.detectedSheetSize,
           }
         : null,
+      pageScales: apiPageScalesFromRaw(job.rawResponse),
       confidence: job.confidence === null || job.confidence === undefined ? null : Number(job.confidence),
       evidence: job.evidence,
       warnings: Array.isArray(job.warnings) ? job.warnings : [],
@@ -526,6 +553,39 @@ function parseOpenRouterExtraction(rawBody: string) {
 }
 
 function validateExtractionResult(value: Partial<ScaleExtractionResult>, sourceText = ""): ScaleExtractionResult {
+  const pages = Array.isArray(value.pages)
+    ? value.pages
+        .map((page, index) => validatePageExtractionResult(page, "", index + 1))
+        .sort((left, right) => left.page_number - right.page_number)
+    : [];
+  if (pages.length > 0) {
+    const primary = pages.find((page) => page.found) ?? pages[0];
+    return { ...primary, pages };
+  }
+
+  const legacy = validatePageExtractionResult(value, sourceText, 1);
+  return { ...legacy, pages: [legacy] };
+}
+
+export function normalizeScaleExtractionResult(value: unknown) {
+  const input =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? value as Partial<ScaleExtractionResult>
+      : {};
+  return validateExtractionResult(input);
+}
+
+function validatePageExtractionResult(
+  value: Partial<PageScaleExtractionResult>,
+  sourceText = "",
+  fallbackPage = 1,
+): PageScaleExtractionResult {
+  const pageNumber =
+    typeof value.page_number === "number"
+    && Number.isInteger(value.page_number)
+    && value.page_number >= 1
+      ? value.page_number
+      : fallbackPage;
   const found = typeof value.found === "boolean" ? value.found : false;
   const denominator = value.scale_denominator;
   const scaleDenominator =
@@ -547,6 +607,7 @@ function validateExtractionResult(value: Partial<ScaleExtractionResult>, sourceT
   const resultFound = Boolean((found && scaleDenominator !== null) || inferredDenominator);
   const inferredSheetSize = extractSheetSize(sourceText) ?? sheetSize;
   return {
+    page_number: pageNumber,
     found: resultFound,
     scale_denominator: resultFound ? inferredDenominator : null,
     scale_label: label ?? (inferredDenominator ? `1:${inferredDenominator}` : null),
@@ -568,11 +629,55 @@ function buildDraftPayloadWithDetectedScale(
   result: ScaleExtractionResult,
   detectedAt: Date,
   seedActiveScale: boolean,
+  forceActiveScale: boolean,
 ) {
   const base: Record<string, unknown> =
     payload && typeof payload === "object" && !Array.isArray(payload)
       ? { ...(payload as Record<string, unknown>) }
       : {};
+  const existingPageScales =
+    base.pageScales && typeof base.pageScales === "object" && !Array.isArray(base.pageScales)
+      ? { ...(base.pageScales as Record<string, unknown>) }
+      : {};
+  const pageScales: Record<string, unknown> = { ...existingPageScales };
+  result.pages.forEach((page) => {
+    if (!page.found || !page.scale_denominator) return;
+    const key = String(page.page_number);
+    const existing =
+      existingPageScales[key] && typeof existingPageScales[key] === "object"
+      && !Array.isArray(existingPageScales[key])
+        ? { ...(existingPageScales[key] as Record<string, unknown>) }
+        : {};
+    const existingSource =
+      typeof existing.scaleSource === "string"
+        ? existing.scaleSource
+        : typeof base.scaleSource === "string"
+          ? base.scaleSource
+          : "DEFAULT";
+    const shouldSeedPage =
+      page.confidence >= 0.5
+      && (forceActiveScale || (seedActiveScale && !isUserScaleSource(existingSource)));
+    pageScales[key] = {
+      ...existing,
+      ...(shouldSeedPage
+        ? {
+            sheetSize:
+              page.sheet_size
+              ?? (existing.sheetSize === "A3" || existing.sheetSize === "A4"
+                ? existing.sheetSize
+                : base.sheetSize === "A4" ? "A4" : "A3"),
+            scaleDenominator: page.scale_denominator,
+            scaleSource: "AI",
+            calibration: null,
+          }
+        : {}),
+      aiScaleDenominator: page.scale_denominator,
+      aiScaleLabel: page.scale_label,
+      aiSheetSize: page.sheet_size,
+      aiScaleConfidence: page.confidence,
+      aiScaleDetectedAt: detectedAt.toISOString(),
+    };
+  });
   return {
     ...base,
     ...(seedActiveScale
@@ -587,7 +692,36 @@ function buildDraftPayloadWithDetectedScale(
     aiSheetSize: result.sheet_size,
     aiScaleConfidence: result.confidence,
     aiScaleDetectedAt: detectedAt.toISOString(),
+    pageScales,
   } as Prisma.InputJsonValue;
+}
+
+function apiPageScalesFromRaw(rawResponse: unknown) {
+  if (!rawResponse || typeof rawResponse !== "object" || Array.isArray(rawResponse)) return [];
+  const pages = (rawResponse as { pages?: unknown }).pages;
+  if (!Array.isArray(pages)) return [];
+  return pages.map((value, index) => {
+    const page = validatePageExtractionResult(
+      value && typeof value === "object" && !Array.isArray(value)
+        ? value as Partial<PageScaleExtractionResult>
+        : {},
+      "",
+      index + 1,
+    );
+    return {
+      page: page.page_number,
+      scale: page.found && page.scale_denominator
+        ? {
+            denominator: page.scale_denominator,
+            label: page.scale_label ?? `1:${page.scale_denominator}`,
+            sheetSize: page.sheet_size,
+          }
+        : null,
+      confidence: page.confidence,
+      evidence: page.evidence,
+      warnings: page.warnings,
+    };
+  });
 }
 
 function extractScaleDenominator(text: string) {

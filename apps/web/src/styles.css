@@ -3251,10 +3251,15 @@ body.is-resizing-columns {
   box-shadow: inset 3px 0 0 var(--primary);
 }
 
-.property-select-cell input {
+.property-select-cell input,
+.property-oneri-cell input {
   width: 17px;
   height: 17px;
   accent-color: var(--primary);
+}
+
+.property-oneri-cell {
+  text-align: center;
 }
 
 .drag-handle {

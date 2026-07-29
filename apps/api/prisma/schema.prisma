@@ -108,6 +108,7 @@ model Property {
   formapsMunicipalityId String?
   categoria             String
   titolarita            String?
+  oneri                 Boolean               @default(false)
   currentRendita        Decimal               @db.Decimal(14, 2)
   estimatedRendita      Decimal               @db.Decimal(14, 2)
   diffPercent           Decimal               @db.Decimal(10, 2)

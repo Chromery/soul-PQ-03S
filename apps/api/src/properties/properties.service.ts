@@ -22,6 +22,7 @@ type DraftPayload = {
   aiSheetSize?: string | null;
   aiScaleConfidence?: number | null;
   aiScaleDetectedAt?: string | null;
+  pageScales?: Record<string, PageScalePayload>;
   totalArea?: number;
   totalEstimatedAmount?: number;
   totalEstimatedRendita?: number;
@@ -43,6 +44,18 @@ type NormalizedDraftPayload = DraftPayload & {
 };
 
 type ScaleSource = "DEFAULT" | "AI" | "USER" | "CALIBRATION";
+
+type PageScalePayload = {
+  sheetSize: "A3" | "A4";
+  scaleDenominator: number;
+  scaleSource: ScaleSource;
+  aiScaleDenominator: number | null;
+  aiScaleLabel: string | null;
+  aiSheetSize: "A3" | "A4" | null;
+  aiScaleConfidence: number | null;
+  aiScaleDetectedAt: string | null;
+  calibration: unknown | null;
+};
 
 type LotValuation = {
   mode: "percentage" | "per_sqm";
@@ -96,7 +109,7 @@ export class PropertiesService {
     });
     const savedAt = new Date(payload.savedAt);
     const aiScaleDetectedAt = payload.aiScaleDetectedAt ? new Date(payload.aiScaleDetectedAt) : null;
-    const totalEstimatedRendita = estimatedRenditaFromDraftPayload(payload);
+    const totalEstimatedRendita = estimatedRenditaFromDraftPayload(payload, property.oneri);
     const currentImuCalculation = this.calculateImu(Number(property.currentRendita), property);
     const estimatedImuCalculation = totalEstimatedRendita === null
       ? null
@@ -167,8 +180,9 @@ export class PropertiesService {
     const hasOutcome = Object.prototype.hasOwnProperty.call(input, "outcome");
     const hasImuRateOverride = Object.prototype.hasOwnProperty.call(input, "imuRateOverride");
     const hasImuMultiplierOverride = Object.prototype.hasOwnProperty.call(input, "imuMultiplierOverride");
+    const hasOneri = Object.prototype.hasOwnProperty.call(input, "oneri");
     const hasImuOverride = hasImuRateOverride || hasImuMultiplierOverride;
-    if (!hasOutcome && !hasImuOverride) {
+    if (!hasOutcome && !hasImuOverride && !hasOneri) {
       throw new BadRequestException("Nessuna modifica immobile supportata");
     }
     const existing = await this.prisma.property.findUnique({
@@ -187,18 +201,22 @@ export class PropertiesService {
       : existing.imuMultiplierOverride === null
         ? null
         : Number(existing.imuMultiplierOverride);
+    const oneri = hasOneri ? validateOneri(input.oneri) : existing.oneri;
     const property = await this.prisma.property.update({
       where: { id: propertyId },
       data: {
         ...(hasOutcome ? { outcome } : {}),
         ...(hasImuRateOverride ? { imuRateOverride } : {}),
         ...(hasImuMultiplierOverride ? { imuMultiplierOverride } : {}),
+        ...(hasOneri ? { oneri } : {}),
       },
     });
-    if (!hasImuOverride) return { id: property.id, outcome: property.outcome };
+    if (!hasImuOverride && !hasOneri) {
+      return { id: property.id, outcome: property.outcome, oneri: property.oneri };
+    }
 
     const calculationProperty = { ...property, imuRateOverride, imuMultiplierOverride };
-    const estimatedRendita = estimatedRenditaFromAnalysisDraft(existing.analysisDraft)
+    const estimatedRendita = estimatedRenditaFromAnalysisDraft(existing.analysisDraft, oneri)
       ?? Number(property.estimatedRendita);
     const currentImuCalculation = this.calculateImu(Number(property.currentRendita), calculationProperty);
     const estimatedImuCalculation = estimatedRendita > 0 || property.hasStudy
@@ -208,15 +226,28 @@ export class PropertiesService {
       ?? (property.currentImu === null ? null : Number(property.currentImu));
     const estimatedImu = calculatedAmount(estimatedImuCalculation)
       ?? (property.estimatedImu === null ? null : Number(property.estimatedImu));
+    const imuDiff = currentImu === null || estimatedImu === null ? 0 : estimatedImu - currentImu;
+    await this.prisma.property.update({
+      where: { id: propertyId },
+      data: {
+        estimatedRendita,
+        diffPercent: percentageDiff(Number(property.currentRendita), estimatedRendita),
+        estimatedImu,
+        imuDiff,
+      },
+    });
     await this.refreshStudyTotals(property.studyId);
     return {
       id: property.id,
       outcome: property.outcome,
+      oneri,
+      estimatedRendita,
+      diffPercent: percentageDiff(Number(property.currentRendita), estimatedRendita),
       imuRateOverride,
       imuMultiplierOverride,
       currentImu,
       estimatedImu,
-      imuDiff: currentImu === null || estimatedImu === null ? 0 : estimatedImu - currentImu,
+      imuDiff,
       currentImuCalculation: currentImuCalculation.status === "calculated" ? currentImuCalculation : null,
       imuCalculation: estimatedImuCalculation,
       currentImuSource: currentImuCalculation.status === "calculated"
@@ -358,7 +389,9 @@ export class PropertiesService {
     });
     const originalRendita = sum(properties.map((property) => Number(property.currentRendita)));
     const totalRendita = sum(
-      properties.map((property) => estimatedRenditaFromAnalysisDraft(property.analysisDraft) ?? Number(property.estimatedRendita)),
+      properties.map((property) =>
+        estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
+        ?? Number(property.estimatedRendita)),
     );
     const catDRendita = sum(
       properties
@@ -373,7 +406,7 @@ export class PropertiesService {
     );
     const estimatedImu = sum(
       properties.map((property) => {
-        const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft)
+        const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
           ?? Number(property.estimatedRendita);
         return calculatedAmount(this.calculateImu(estimatedRendita, property))
           ?? (property.estimatedImu === null ? 0 : Number(property.estimatedImu));
@@ -425,6 +458,7 @@ export class PropertiesService {
     const aiSheetSize = validateOptionalSheetSize(payload.aiSheetSize, "aiSheetSize");
     const aiScaleConfidence = validateOptionalConfidence(payload.aiScaleConfidence, "aiScaleConfidence");
     const aiScaleDetectedAt = validateOptionalDate(payload.aiScaleDetectedAt, "aiScaleDetectedAt");
+    const pageScales = validatePageScales(payload.pageScales);
     const lotValuation = validateLotValuation(payload.lotValuation);
     if (
       payload.version !== 1 ||
@@ -448,6 +482,7 @@ export class PropertiesService {
       aiSheetSize,
       aiScaleConfidence,
       aiScaleDetectedAt,
+      pageScales,
       lotValuation,
     };
   }
@@ -480,6 +515,11 @@ function normalizeScaleSource(value: unknown): ScaleSource {
 function validatePropertyOutcome(value: unknown) {
   if (value === "Positivo" || value === "Negativo" || value === "Neutro") return value;
   throw new BadRequestException("Esito immobile non valido");
+}
+
+function validateOneri(value: unknown) {
+  if (typeof value === "boolean") return value;
+  throw new BadRequestException("Flag Oneri non valido");
 }
 
 function validateImuRateOverride(value: unknown) {
@@ -546,6 +586,51 @@ function validateOptionalString(value: unknown, field: string) {
   if (value === undefined || value === null || value === "") return null;
   if (typeof value !== "string") throw new BadRequestException(`${field} non valido`);
   return value;
+}
+
+function validatePageScales(value: unknown): Record<string, PageScalePayload> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new BadRequestException("pageScales non valido");
+  }
+  const normalized: Record<string, PageScalePayload> = {};
+  for (const [page, rawScale] of Object.entries(value as Record<string, unknown>)) {
+    const pageNumber = Number(page);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1 || !rawScale
+      || typeof rawScale !== "object" || Array.isArray(rawScale)) {
+      throw new BadRequestException(`pageScales.${page} non valido`);
+    }
+    const scale = rawScale as Record<string, unknown>;
+    const sheetSize = validateOptionalSheetSize(scale.sheetSize, `pageScales.${page}.sheetSize`);
+    const scaleDenominator = validateOptionalScaleDenominator(
+      scale.scaleDenominator,
+      `pageScales.${page}.scaleDenominator`,
+    );
+    if (!sheetSize || scaleDenominator === null) {
+      throw new BadRequestException(`pageScales.${page} non valido`);
+    }
+    normalized[String(pageNumber)] = {
+      sheetSize,
+      scaleDenominator,
+      scaleSource: normalizeScaleSource(scale.scaleSource),
+      aiScaleDenominator: validateOptionalScaleDenominator(
+        scale.aiScaleDenominator,
+        `pageScales.${page}.aiScaleDenominator`,
+      ),
+      aiScaleLabel: validateOptionalString(scale.aiScaleLabel, `pageScales.${page}.aiScaleLabel`),
+      aiSheetSize: validateOptionalSheetSize(scale.aiSheetSize, `pageScales.${page}.aiSheetSize`),
+      aiScaleConfidence: validateOptionalConfidence(
+        scale.aiScaleConfidence,
+        `pageScales.${page}.aiScaleConfidence`,
+      ),
+      aiScaleDetectedAt: validateOptionalDate(
+        scale.aiScaleDetectedAt,
+        `pageScales.${page}.aiScaleDetectedAt`,
+      ),
+      calibration: scale.calibration ?? null,
+    };
+  }
+  return normalized;
 }
 
 function validateLotValuation(value: unknown): LotValuation {

@@ -176,6 +176,7 @@ type EditorProperty = {
   codiceComuneCatastale?: string | null;
   formapsMunicipalityId?: string | null;
   categoria: string;
+  oneri?: boolean;
   currentRendita: number;
   estimatedRendita: number;
   currentImu?: number | null;
@@ -218,6 +219,17 @@ type ScaleExtractionJob = {
     label: string;
     sheetSize: SheetSize | null;
   } | null;
+  pageScales?: Array<{
+    page: number;
+    scale: {
+      denominator: number;
+      label: string;
+      sheetSize: SheetSize | null;
+    } | null;
+    confidence: number;
+    evidence: string | null;
+    warnings: string[];
+  }>;
   confidence: number | null;
   evidence: string | null;
   warnings: string[];
@@ -359,6 +371,26 @@ type AiScaleState = {
   detectedAt: string | null;
 };
 
+type PageScaleState = {
+  sheetSize: SheetSize;
+  scaleDenominator: number;
+  scaleSource: ScaleSource;
+  aiScale: AiScaleState;
+  calibration: SavedCalibration | null;
+};
+
+type SavedPageScale = {
+  sheetSize: SheetSize;
+  scaleDenominator: number;
+  scaleSource: ScaleSource;
+  aiScaleDenominator?: number | null;
+  aiScaleLabel?: string | null;
+  aiSheetSize?: SheetSize | null;
+  aiScaleConfidence?: number | null;
+  aiScaleDetectedAt?: string | null;
+  calibration?: SavedCalibration | null;
+};
+
 type MeasureSegment = {
   page: number;
   start: CanvasPoint;
@@ -378,6 +410,7 @@ type SavedDraft = {
   aiSheetSize?: SheetSize | null;
   aiScaleConfidence?: number | null;
   aiScaleDetectedAt?: string | null;
+  pageScales?: Record<string, SavedPageScale>;
   pageRotations?: Record<string, PageRotation>;
   activeUsage: UsageId;
   activeCustomUsageId?: string | null;
@@ -547,6 +580,8 @@ type EditorSnapshot = {
   sheetSize: SheetSize;
   scaleSource: ScaleSource;
   aiScale: AiScaleState;
+  pageScales: Map<number, PageScaleState>;
+  defaultPageScale: PageScaleState;
   pageRotations: Map<number, PageRotation>;
   activeUsage: UsageId;
   activeCustomUsageId: string | null;
@@ -1293,6 +1328,78 @@ function aiScaleFromProperty(property: EditorProperty): AiScaleState {
   };
 }
 
+function cloneCalibration(value: SavedCalibration | null) {
+  return value
+    ? {
+        ...value,
+        start: { ...value.start },
+        end: { ...value.end },
+      }
+    : null;
+}
+
+function clonePageScale(value: PageScaleState): PageScaleState {
+  return {
+    ...value,
+    aiScale: { ...value.aiScale },
+    calibration: cloneCalibration(value.calibration),
+  };
+}
+
+function pageScaleFromSaved(value: SavedPageScale, fallback: PageScaleState): PageScaleState {
+  return {
+    sheetSize: normalizeSheetSize(value.sheetSize) ?? fallback.sheetSize,
+    scaleDenominator: isValidScaleDenominator(value.scaleDenominator)
+      ? value.scaleDenominator
+      : fallback.scaleDenominator,
+    scaleSource: normalizeScaleSource(value.scaleSource, fallback.scaleSource),
+    aiScale: {
+      denominator: isValidScaleDenominator(value.aiScaleDenominator)
+        ? value.aiScaleDenominator
+        : null,
+      label: typeof value.aiScaleLabel === "string" ? value.aiScaleLabel : null,
+      sheetSize: normalizeSheetSize(value.aiSheetSize),
+      confidence:
+        typeof value.aiScaleConfidence === "number" && Number.isFinite(value.aiScaleConfidence)
+          ? value.aiScaleConfidence
+          : null,
+      detectedAt: typeof value.aiScaleDetectedAt === "string" ? value.aiScaleDetectedAt : null,
+    },
+    calibration: value.calibration ?? null,
+  };
+}
+
+function parseSavedPageScales(value: SavedDraft["pageScales"], fallback: PageScaleState) {
+  const scales = new Map<number, PageScaleState>();
+  if (!value || typeof value !== "object" || Array.isArray(value)) return scales;
+  Object.entries(value).forEach(([page, saved]) => {
+    const pageNumber = Number(page);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1 || !saved || typeof saved !== "object") return;
+    scales.set(pageNumber, pageScaleFromSaved(saved, fallback));
+  });
+  return scales;
+}
+
+function serializePageScale(value: PageScaleState): SavedPageScale {
+  return {
+    sheetSize: value.sheetSize,
+    scaleDenominator: value.scaleDenominator,
+    scaleSource: value.scaleSource,
+    aiScaleDenominator: value.aiScale.denominator,
+    aiScaleLabel: value.aiScale.label,
+    aiSheetSize: value.aiScale.sheetSize,
+    aiScaleConfidence: value.aiScale.confidence,
+    aiScaleDetectedAt: value.aiScale.detectedAt,
+    calibration: cloneCalibration(value.calibration),
+  };
+}
+
+function clonePageScales(source: Map<number, PageScaleState>) {
+  const next = new Map<number, PageScaleState>();
+  source.forEach((scale, page) => next.set(page, clonePageScale(scale)));
+  return next;
+}
+
 export default function PlanimetriaEditor({
   study,
   property,
@@ -1312,6 +1419,14 @@ export default function PlanimetriaEditor({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const subalterniInputRef = useRef<HTMLInputElement | null>(null);
   const runtimeRef = useRef<Runtime>(createRuntime());
+  const defaultPageScaleRef = useRef<PageScaleState>({
+    sheetSize: readEditorPreferences().scale.sheetSize,
+    scaleDenominator: readEditorPreferences().scale.denominator,
+    scaleSource: "DEFAULT",
+    aiScale: emptyAiScale(),
+    calibration: null,
+  });
+  const pageScalesRef = useRef<Map<number, PageScaleState>>(new Map());
   const pendingDraftRef = useRef<SavedDraft | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const marqueeDragRef = useRef<MarqueeDragState | null>(null);
@@ -1414,6 +1529,73 @@ export default function PlanimetriaEditor({
   const [imuOverrideSaving, setImuOverrideSaving] = useState<"rate" | "multiplier" | null>(null);
   const [revision, setRevision] = useState(0);
 
+  function pageScaleFor(page: number): PageScaleState {
+    if (page > 0 && page === currentPage) {
+      return {
+        sheetSize,
+        scaleDenominator,
+        scaleSource,
+        aiScale,
+        calibration,
+      };
+    }
+    return pageScalesRef.current.get(page) ?? defaultPageScaleRef.current;
+  }
+
+  function activatePageScale(page: number) {
+    const next = clonePageScale(
+      pageScalesRef.current.get(page) ?? defaultPageScaleRef.current,
+    );
+    setSheetSize(next.sheetSize);
+    setScaleDenominator(next.scaleDenominator);
+    setScaleSource(next.scaleSource);
+    setAiScale(next.aiScale);
+    setCalibration(next.calibration);
+    setKnownSegmentMeters(next.calibration?.knownMeters ?? 50);
+    setRulerSegment(
+      next.calibration
+        ? {
+            page,
+            start: { ...next.calibration.start },
+            end: { ...next.calibration.end },
+          }
+        : null,
+    );
+    setRulerSegmentSelected(false);
+    setScaleInputValue(String(next.scaleDenominator));
+    setScaleModalSheetSize(next.sheetSize);
+  }
+
+  function putPageScale(page: number, next: PageScaleState, activate = false) {
+    pageScalesRef.current.set(page, clonePageScale(next));
+    if (activate) activatePageScale(page);
+  }
+
+  function pageScalesForDraft() {
+    const serialized: Record<string, SavedPageScale> = {};
+    const pages = Math.max(
+      pageCount,
+      ...Array.from(pageScalesRef.current.keys()),
+      currentPage,
+      1,
+    );
+    for (let page = 1; page <= pages; page += 1) {
+      serialized[String(page)] = serializePageScale(pageScaleFor(page));
+    }
+    return serialized;
+  }
+
+  useEffect(() => {
+    if (currentPage < 1) return;
+    pageScalesRef.current.set(currentPage, {
+      sheetSize,
+      scaleDenominator,
+      scaleSource,
+      aiScale: { ...aiScale },
+      calibration: cloneCalibration(calibration),
+    });
+  }, [aiScale, calibration, currentPage, scaleDenominator, scaleSource, sheetSize]);
+
   useEffect(() => {
     const calculation = property.currentImuCalculation?.status === "calculated"
       ? property.currentImuCalculation
@@ -1479,6 +1661,7 @@ export default function PlanimetriaEditor({
   const baseSelectedAreas = useMemo(
     () =>
       allSelections.map((selection, index) => {
+        const selectionScale = pageScaleFor(selection.page);
         const selectionCustomUsage = customUsageByIdOrLabel(
           customUsages,
           selection.customUsageId,
@@ -1493,8 +1676,8 @@ export default function PlanimetriaEditor({
         const calculatedArea = areaFromPixels(
           selection.region.count,
           selection.totalPixels,
-          sheetSize,
-          scaleDenominator,
+          selectionScale.sheetSize,
+          selectionScale.scaleDenominator,
         );
         const area = effectiveSelectionAreaM2(selection, calculatedArea);
         const calculatedAmount = area * selection.rate;
@@ -1517,14 +1700,15 @@ export default function PlanimetriaEditor({
   const tracedLotArea = useMemo(
     () =>
       allLotBoundaries.reduce(
-        (sum, boundary) =>
-          sum +
-          areaFromPixels(
+        (sum, boundary) => {
+          const boundaryScale = pageScaleFor(boundary.page);
+          return sum + areaFromPixels(
             boundary.region.count,
             boundary.totalPixels,
-            sheetSize,
-            scaleDenominator,
-          ),
+            boundaryScale.sheetSize,
+            boundaryScale.scaleDenominator,
+          );
+        },
         0,
       ),
     [allLotBoundaries, scaleDenominator, sheetSize, revision],
@@ -1564,13 +1748,15 @@ export default function PlanimetriaEditor({
             selectedCount: selectedLotStats.count,
           },
         );
+        const destinationAmount = area.amount * (property.oneri === true ? 1.4 : 1);
         return {
           ...area,
           lotValue,
-          totalAmount: area.amount + lotValue,
+          destinationAmount,
+          totalAmount: destinationAmount + lotValue,
         };
       }),
-    [baseSelectedAreas, resolvedLotValuation.lotValue, selectedLotStats],
+    [baseSelectedAreas, property.oneri, resolvedLotValuation.lotValue, selectedLotStats],
   );
 
   const totals = useMemo(() => {
@@ -1582,15 +1768,18 @@ export default function PlanimetriaEditor({
       },
       { area: 0, baseAmount: 0 },
     );
-    const amount = base.baseAmount + resolvedLotValuation.lotValue;
+    const destinationAmount = base.baseAmount * (property.oneri === true ? 1.4 : 1);
+    const amount = destinationAmount + resolvedLotValuation.lotValue;
     return {
       ...base,
+      destinationAmount,
+      oneriValue: destinationAmount - base.baseAmount,
       lotArea: tracedLotArea,
       lotValue: resolvedLotValuation.lotValue,
       amount,
       rendita: estimatedRenditaFromAmount(amount),
     };
-  }, [resolvedLotValuation.lotValue, selectedAreas, tracedLotArea]);
+  }, [property.oneri, resolvedLotValuation.lotValue, selectedAreas, tracedLotArea]);
 
   const areaBreakdowns = useMemo(() => {
     const grouped = new Map<
@@ -1687,9 +1876,15 @@ export default function PlanimetriaEditor({
     20000,
     Math.max(20, Math.round(parseNumberInput(scaleInputValue) ?? scaleDenominator)),
   );
+  const currentPageExtractionEntry =
+    scaleExtractionJob?.pageScales?.find((item) => item.page === currentPage);
+  const currentPageExtractedScale =
+    currentPageExtractionEntry !== undefined
+      ? currentPageExtractionEntry.scale
+      : currentPage === 1 ? scaleExtractionJob?.scale : null;
   const scaleExtractionLabel =
-    scaleExtractionJob?.status === "SUCCEEDED" && scaleExtractionJob.scale
-      ? `Scala AI ${scaleExtractionJob.scale.label}`
+    scaleExtractionJob?.status === "SUCCEEDED" && currentPageExtractedScale
+      ? `Scala AI ${currentPageExtractedScale.label} · pag. ${currentPage}`
       : scaleExtractionJob?.status === "SUCCEEDED"
         ? "Scala AI non rilevata"
         : scaleExtractionJob?.status === "FAILED"
@@ -1906,6 +2101,14 @@ export default function PlanimetriaEditor({
     let disposed = false;
 
     runtimeRef.current = createRuntime();
+    defaultPageScaleRef.current = {
+      sheetSize: "A3",
+      scaleDenominator: 500,
+      scaleSource: "DEFAULT",
+      aiScale: emptyAiScale(),
+      calibration: null,
+    };
+    pageScalesRef.current = new Map();
     setCurrentPage(0);
     setPageCount(0);
     setFileName("");
@@ -1978,17 +2181,31 @@ export default function PlanimetriaEditor({
         return;
       }
 
-      setSheetSize(draft.sheetSize);
-      setScaleDenominator(draft.scaleDenominator);
-      setScaleSource(normalizeScaleSource(draft.scaleSource, "DEFAULT"));
       const draftAiScale = aiScaleFromDraft(draft);
+      const legacyPageScale: PageScaleState = {
+        sheetSize: draft.sheetSize,
+        scaleDenominator: draft.scaleDenominator,
+        scaleSource: normalizeScaleSource(draft.scaleSource, "DEFAULT"),
+        aiScale: draftAiScale.denominator ? draftAiScale : aiScaleFromProperty(property),
+        calibration: null,
+      };
+      defaultPageScaleRef.current = clonePageScale(legacyPageScale);
+      pageScalesRef.current = parseSavedPageScales(draft.pageScales, legacyPageScale);
+      if (draft.calibration && !pageScalesRef.current.has(draft.calibration.page)) {
+        pageScalesRef.current.set(draft.calibration.page, {
+          ...clonePageScale(legacyPageScale),
+          scaleSource: "CALIBRATION",
+          scaleDenominator: draft.calibration.scaleDenominator,
+          calibration: cloneCalibration(draft.calibration),
+        });
+      }
+      activatePageScale(1);
       const draftCustomUsages = customUsagesFromDraft(draft);
       const draftActiveCustomUsage = customUsageByIdOrLabel(
         draftCustomUsages,
         draft.activeCustomUsageId,
         draft.customUsageLabel,
       );
-      setAiScale(draftAiScale.denominator ? draftAiScale : aiScaleFromProperty(property));
       setActiveUsage(draft.activeUsage === "lotto" ? "sistemazione-esterna" : draft.activeUsage);
       setCustomUsages(draftCustomUsages);
       setActiveCustomUsageId(draftActiveCustomUsage?.id ?? null);
@@ -2005,13 +2222,6 @@ export default function PlanimetriaEditor({
       );
       setLotValuation(normalizeLotValuation(draft.lotValuation));
       setActiveTool(normalizeEditorTool(draft.activeTool));
-      setCalibration(draft.calibration ?? null);
-      setKnownSegmentMeters(draft.calibration?.knownMeters ?? 50);
-      setRulerSegment(
-        draft.calibration
-          ? { page: draft.calibration.page, start: draft.calibration.start, end: draft.calibration.end }
-          : null,
-      );
       if (!draft.document) {
         void restoreDraftSelections(draft);
         setStatus("Bozza manuale ripristinata");
@@ -2053,7 +2263,25 @@ export default function PlanimetriaEditor({
       }
 
       if (!draft) draft = readSavedDraft(property.id);
-      if (!disposed) openInitialDocument(draft);
+      if (disposed) return;
+      openInitialDocument(draft);
+      try {
+        const scaleResponse = await fetch(
+          `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/scale-extraction-jobs/latest`,
+          { signal: abortController.signal },
+        );
+        if (!scaleResponse.ok || disposed) return;
+        const latestJob = (await scaleResponse.json()) as ScaleExtractionJob | null;
+        if (!latestJob || disposed) return;
+        setScaleExtractionJob(latestJob);
+        if (latestJob.status === "SUCCEEDED") {
+          applyScaleExtractionJob(latestJob, { silent: true });
+        }
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.error("Impossibile recuperare l'ultima estrazione scala", error);
+        }
+      }
     }
 
     void loadInitialDocument();
@@ -2116,28 +2344,24 @@ export default function PlanimetriaEditor({
 
   function applyPropertyScaleFallback() {
     const propertyAiScale = aiScaleFromProperty(property);
-    setAiScale(propertyAiScale);
-
     const propertyScale = isValidScaleDenominator(property.scaleDenominator)
       ? property.scaleDenominator
       : propertyAiScale.denominator;
     const propertySheetSize = normalizeSheetSize(property.sheetSize) ?? propertyAiScale.sheetSize ?? "A3";
-
-    if (propertyScale) {
-      setScaleDenominator(propertyScale);
-      setScaleInputValue(String(propertyScale));
-      setScaleSource(
-        isValidScaleDenominator(property.scaleDenominator)
+    const fallback: PageScaleState = {
+      sheetSize: propertySheetSize,
+      scaleDenominator: propertyScale ?? 500,
+      scaleSource: propertyScale
+        ? isValidScaleDenominator(property.scaleDenominator)
           ? normalizeScaleSource(property.scaleSource, propertyAiScale.denominator ? "AI" : "DEFAULT")
-          : "AI",
-      );
-    } else {
-      setScaleDenominator(500);
-      setScaleInputValue("500");
-      setScaleSource("DEFAULT");
-    }
-    setSheetSize(propertySheetSize);
-    setScaleModalSheetSize(propertySheetSize);
+          : "AI"
+        : "DEFAULT",
+      aiScale: propertyAiScale,
+      calibration: null,
+    };
+    defaultPageScaleRef.current = clonePageScale(fallback);
+    pageScalesRef.current = new Map();
+    putPageScale(1, fallback, true);
   }
 
   async function loadRemotePlan(
@@ -2407,44 +2631,80 @@ export default function PlanimetriaEditor({
     setStatus("Analisi scala ancora in corso");
   }
 
-  function applyScaleExtractionJob(job: ScaleExtractionJob, options: { forceActiveScale?: boolean } = {}) {
+  function applyScaleExtractionJob(
+    job: ScaleExtractionJob,
+    options: { forceActiveScale?: boolean; silent?: boolean } = {},
+  ) {
     if (job.status === "FAILED") {
       setStatus("Analisi scala non riuscita");
       return;
     }
-    if (!job.scale) {
+    const extractedPages =
+      job.pageScales && job.pageScales.length > 0
+        ? job.pageScales
+        : job.scale
+          ? [{
+              page: 1,
+              scale: job.scale,
+              confidence: job.confidence ?? 0,
+              evidence: job.evidence,
+              warnings: job.warnings,
+            }]
+          : [];
+    const detectedPages = extractedPages.filter((item) => item.scale);
+    if (detectedPages.length === 0) {
       setStatus("Scala non rilevata nella planimetria");
       return;
     }
-    setAiScale({
-      denominator: job.scale.denominator,
-      label: job.scale.label,
-      sheetSize: job.scale.sheetSize,
-      confidence: job.confidence,
-      detectedAt: job.completedAt ?? job.updatedAt,
+    if (!options.silent) recordUndoState();
+    let appliedCount = 0;
+    let preservedCount = 0;
+    let lowConfidenceCount = 0;
+    extractedPages.forEach((result) => {
+      if (!result.scale) return;
+      const current = clonePageScale(pageScaleFor(result.page));
+      const nextAiScale: AiScaleState = {
+        denominator: result.scale.denominator,
+        label: result.scale.label,
+        sheetSize: result.scale.sheetSize,
+        confidence: result.confidence,
+        detectedAt: job.completedAt ?? job.updatedAt,
+      };
+      const preserveManual =
+        !options.forceActiveScale
+        && (current.calibration !== null || isUserScaleSource(current.scaleSource));
+      const lowConfidence = result.confidence < 0.5;
+      const next: PageScaleState = {
+        ...current,
+        aiScale: nextAiScale,
+        ...(!preserveManual && !lowConfidence
+          ? {
+              scaleDenominator: result.scale.denominator,
+              sheetSize: result.scale.sheetSize ?? current.sheetSize,
+              scaleSource: "AI" as const,
+              calibration: null,
+            }
+          : {}),
+      };
+      putPageScale(result.page, next);
+      if (preserveManual) preservedCount += 1;
+      else if (lowConfidence) lowConfidenceCount += 1;
+      else appliedCount += 1;
     });
-    const confidence = job.confidence ?? 0;
-    if (!options.forceActiveScale && (calibration || isUserScaleSource(scaleSource))) {
-      markDirty();
-      setStatus(`Scala AI rilevata ${job.scale.label}; scala impostata manualmente mantenuta`);
-      return;
+    activatePageScale(runtimeRef.current.currentPage || 1);
+    if (!options.silent) markDirty();
+    bumpRevision();
+    if (appliedCount > 0) {
+      setStatus(
+        `Scala AI applicata su ${appliedCount} ${appliedCount === 1 ? "pagina" : "pagine"}`
+        + (preservedCount > 0 ? `; ${preservedCount} manuali mantenute` : "")
+        + (lowConfidenceCount > 0 ? `; ${lowConfidenceCount} a bassa confidenza non applicate` : ""),
+      );
+    } else if (preservedCount > 0) {
+      setStatus("Scale AI rilevate; scale manuali delle pagine mantenute");
+    } else {
+      setStatus("Scale AI rilevate con confidenza bassa");
     }
-    if (confidence < 0.5) {
-      markDirty();
-      setStatus(`Scala AI rilevata ${job.scale.label} con confidenza bassa`);
-      return;
-    }
-
-    recordUndoState();
-    setScaleDenominator(job.scale.denominator);
-    setScaleSource("AI");
-    setScaleInputValue(String(job.scale.denominator));
-    if (job.scale.sheetSize === "A3" || job.scale.sheetSize === "A4") {
-      setSheetSize(job.scale.sheetSize);
-      setScaleModalSheetSize(job.scale.sheetSize);
-    }
-    markDirty();
-    setStatus(`Scala AI applicata: ${job.scale.label}`);
   }
 
   async function loadPdfFromData(data: ArrayBuffer, name: string) {
@@ -2665,6 +2925,7 @@ export default function PlanimetriaEditor({
       aiSheetSize: aiScale.sheetSize,
       aiScaleConfidence: aiScale.confidence,
       aiScaleDetectedAt: aiScale.detectedAt,
+      pageScales: pageScalesForDraft(),
       pageRotations: serializePageRotations(runtimeRef.current.pageRotations),
       activeUsage,
       activeCustomUsageId,
@@ -2924,6 +3185,7 @@ export default function PlanimetriaEditor({
       runtime.structureCtx = structureLayer.ctx;
       runtime.structureInkPixels = structureLayer.inkPixels;
       runtime.wallSourceIsVector = structureLayer.inkPixels > 600;
+      activatePageScale(pageNumber);
       setCurrentPage(pageNumber);
       applyStageSize();
       redrawMasks();
@@ -4111,6 +4373,8 @@ export default function PlanimetriaEditor({
       sheetSize,
       scaleSource,
       aiScale: { ...aiScale },
+      pageScales: clonePageScales(pageScalesRef.current),
+      defaultPageScale: clonePageScale(defaultPageScaleRef.current),
       pageRotations: new Map(runtimeRef.current.pageRotations),
       activeUsage,
       activeCustomUsageId,
@@ -4187,6 +4451,8 @@ export default function PlanimetriaEditor({
     setRulerSegmentSelected(false);
     setSelectedPolygonVertex(null);
     setHoverPolygonInsert(null);
+    pageScalesRef.current = clonePageScales(snapshot.pageScales);
+    defaultPageScaleRef.current = clonePageScale(snapshot.defaultPageScale);
     setScaleDenominator(snapshot.scaleDenominator);
     setSheetSize(snapshot.sheetSize);
     setScaleSource(snapshot.scaleSource);
@@ -8452,14 +8718,14 @@ export default function PlanimetriaEditor({
               <button
                 className="canvas-scale-button"
                 type="button"
-                title="Modifica scala e formato foglio"
+                title={`Modifica scala e formato della pagina ${currentPage}`}
                 onClick={() => {
                   setScaleInputValue(String(scaleDenominator));
                   setScaleModalSheetSize(sheetSize);
                   setScaleModalOpen(true);
                 }}
               >
-                {sheetSize} 1:{scaleDenominator}
+                Pag. {currentPage} · {sheetSize} 1:{scaleDenominator}
               </button>
               <button
                 className="icon-button panel-toggle"
@@ -9060,7 +9326,10 @@ export default function PlanimetriaEditor({
                           <td colSpan={3}></td>
                         </tr>
                         <tr>
-                          <th colSpan={5}>Rendita catastale (valore complessivo × 2%)</th>
+                          <th colSpan={5}>
+                            Rendita catastale
+                            {property.oneri === true ? " ((destinazioni × 1,4 + lotto) × 2%)" : " (valore complessivo × 2%)"}
+                          </th>
                           <td colSpan={7}>
                             <div className="area-rendita-comparison">
                               <span>
@@ -9281,6 +9550,13 @@ export default function PlanimetriaEditor({
                   <strong>{moneyFormatter.format(totals.baseAmount)}</strong>
                   <small>Valori da validare</small>
                 </div>
+                {property.oneri === true && (
+                  <div>
+                    <span>Oneri</span>
+                    <strong>+ {moneyFormatter.format(totals.oneriValue)}</strong>
+                    <small>{moneyFormatter.format(totals.baseAmount)} × 40%</small>
+                  </div>
+                )}
                 <div className="editor-usage-breakdown" aria-label="Ripartizione superfici">
                   <span>Ripartizione</span>
                   {usageBreakdown.length > 0 ? (
@@ -9377,13 +9653,15 @@ export default function PlanimetriaEditor({
                 <div>
                   <span>Valore complessivo</span>
                   <strong>{moneyFormatter.format(totals.amount)}</strong>
-                  <small>Destinazioni + lotto</small>
+                  <small>{property.oneri === true ? "Destinazioni × 1,4 + lotto" : "Destinazioni + lotto"}</small>
                 </div>
                 <div>
                   <span>Nuova rendita catastale</span>
                   <strong>{moneyFormatter.format(totals.rendita)}</strong>
                   <small>
-                    {moneyFormatter.format(totals.amount)} × 2% = {moneyFormatter.format(totals.rendita)}
+                    {property.oneri === true
+                      ? `(${moneyFormatter.format(totals.baseAmount)} × 1,4 + ${moneyFormatter.format(totals.lotValue)}) × 2% = ${moneyFormatter.format(totals.rendita)}`
+                      : `${moneyFormatter.format(totals.amount)} × 2% = ${moneyFormatter.format(totals.rendita)}`}
                   </small>
                 </div>
                 <section className={`editor-summary-collapse editor-imu-collapse ${imuDetailsCollapsed ? "collapsed" : ""}`}>
@@ -9900,7 +10178,7 @@ export default function PlanimetriaEditor({
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setScaleModalOpen(false)}>
           <div className="editor-modal scale-modal" role="dialog" aria-modal="true" aria-labelledby="scale-modal-title" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal-head">
-              <h2 id="scale-modal-title">Scala planimetria</h2>
+              <h2 id="scale-modal-title">Scala pagina {currentPage}</h2>
               <button className="icon-button" type="button" onClick={() => setScaleModalOpen(false)} aria-label="Chiudi">
                 <X size={18} />
               </button>
@@ -9949,7 +10227,10 @@ export default function PlanimetriaEditor({
                 </strong>
               </div>
             )}
-            <p className="modal-note">La scala aggiorna subito il calcolo delle superfici già tracciate.</p>
+            <p className="modal-note">
+              Formato, scala e taratura si applicano soltanto alla pagina {currentPage}. Le altre pagine
+              mantengono i propri valori.
+            </p>
             <div className="modal-actions">
               <button
                 className="button secondary scale-auto-button"
