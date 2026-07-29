@@ -44,10 +44,10 @@ il caso riguarda soprattutto i tributi provinciali IMI/IMIS di Bolzano e Trento.
 
 L'API restituisce con ogni immobile importo, base imponibile, moltiplicatore, aliquota, anno, indicazione del
 fallback ed estremi/link della delibera. Il link apre il PDF tramite `GET /api/imu/delibere/:sha256`: al primo
-accesso il server recupera il file dalla repository privata, verifica che lo SHA-256 coincida con quello usato
-per il calcolo e lo conserva nella cache persistente `imu_delibere_cache`. Gli accessi successivi non dipendono
-da GitHub. L'IMU attuale ricevuta dall'ERP viene preservata; quella calcolata dalla rendita attuale viene usata
-solo se il dato ERP è assente.
+accesso l'API legge il file dalla libreria persistente locale configurata con `IMU_DOCUMENT_LIBRARY_DIR` e
+verifica che lo SHA-256 coincida con quello usato per il calcolo. Il runtime non effettua download da GitHub.
+L'IMU attuale ricevuta dall'ERP viene preservata; quella calcolata dalla rendita attuale viene usata solo se il
+dato ERP è assente.
 
 ## Aggiornamento delle delibere
 
@@ -60,14 +60,16 @@ npm run test:imu
 npm run build
 ```
 
-Lo script scarica nuovamente `estrazioni.jsonl`, usa `GITHUB_TOKEN`/`GH_TOKEN` oppure la sessione autenticata
-di GitHub CLI, mantiene l'ultima pubblicazione per comune e anno e rigenera il file. In questo modo un nuovo
-prospetto 2026 sostituisce automaticamente il precedente, mentre i comuni ancora privi del 2026 continuano a
-usare il 2025.
+Lo script di build scarica nuovamente `estrazioni.jsonl`, usa `GITHUB_TOKEN`/`GH_TOKEN` oppure la sessione
+autenticata di GitHub CLI, mantiene l'ultima pubblicazione per comune e anno e rigenera il file. In questo modo
+un nuovo prospetto 2026 sostituisce automaticamente il precedente, mentre i comuni ancora privi del 2026
+continuano a usare il 2025.
 
-Il runtime usa `GITHUB_TOKEN` per scaricare al primo accesso i PDF dalla repository privata. In Docker il token
-viene passato come variabile d'ambiente e i documenti verificati vengono salvati sul volume del server, non
-inclusi nell'immagine applicativa.
+Separatamente, l'amministratore sincronizza l'intera cartella `delibere/` nel volume locale
+`imu_delibere_cache`, montato in sola lettura logica dall'API come `/var/lib/soul-pq/imu-delibere`. Prima della
+pubblicazione vanno verificati numero dei file, intestazione PDF e SHA-256 indicato in `estrazioni.jsonl`.
+L'aggiornamento del dataset non deve essere distribuito senza la corrispondente sincronizzazione dei PDF:
+l'API non ha un fallback verso GitHub o altre sorgenti remote.
 
 ## Limiti dichiarati
 
