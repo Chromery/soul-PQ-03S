@@ -27,6 +27,7 @@ type DraftPayload = {
   totalEstimatedAmount?: number;
   totalEstimatedRendita?: number;
   totalBaseAmount?: number;
+  totalOneriAmount?: number;
   totalLotArea?: number;
   totalLotValue?: number;
   lotValuation?: unknown;
@@ -151,6 +152,7 @@ export class PropertiesService {
           aiSheetSize: payload.aiSheetSize,
           aiScaleConfidence: payload.aiScaleConfidence,
           aiScaleDetectedAt,
+          ...(typeof payload.totalOneriAmount === "number" ? { oneri: false } : {}),
           ...(totalEstimatedRendita === null
             ? {}
             : {

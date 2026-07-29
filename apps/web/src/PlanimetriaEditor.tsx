@@ -106,6 +106,7 @@ type AreaSelectionTableColumnId =
   | "area"
   | "usage"
   | "lot"
+  | "oneri"
   | "customName"
   | "surface"
   | "unitValue"
@@ -291,6 +292,7 @@ type AreaSelection = {
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
   includedInLot?: boolean;
+  oneri?: boolean;
   lotInclusionMode?: LotInclusionMode;
   totalPixels: number;
   region: Region;
@@ -324,6 +326,7 @@ type SavedSelection = {
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
   includedInLot?: boolean;
+  oneri?: boolean;
   lotInclusionMode?: LotInclusionMode;
   opacity: number;
   totalPixels: number;
@@ -428,9 +431,11 @@ type SavedDraft = {
   totalEstimatedAmount?: number;
   totalEstimatedRendita?: number;
   totalBaseAmount?: number;
+  totalOneriAmount?: number;
   totalLotArea?: number;
   totalLotValue?: number;
   lotValuation?: LotValuation;
+  defaultOneri?: boolean;
   lotBoundaries?: SavedLotBoundary[];
   estimatedImu?: number | null;
   imuCalculation?: PropertyImuCalculation | null;
@@ -535,6 +540,7 @@ type ClipboardSelection = {
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
   includedInLot?: boolean;
+  oneri?: boolean;
   lotInclusionMode?: LotInclusionMode;
   totalPixels: number;
   source: SelectionSource;
@@ -595,6 +601,7 @@ type EditorSnapshot = {
   wallInclusionRadius: number | null;
   knownSegmentMeters: number;
   lotValuation: LotValuation;
+  defaultOneri: boolean;
 };
 
 type AreaTuningTrial = {
@@ -684,6 +691,7 @@ const AREA_SELECTION_TABLE_COLUMNS = [
   { id: "area", label: "Area", defaultWidth: 74, minWidth: 58, hideable: false },
   { id: "usage", label: "Tipologia", defaultWidth: 132, minWidth: 110, hideable: false },
   { id: "lot", label: "Lotto", defaultWidth: 62, minWidth: 54, hideable: false },
+  { id: "oneri", label: "Oneri", defaultWidth: 62, minWidth: 54, hideable: false },
   { id: "customName", label: "Nome custom", defaultWidth: 82, minWidth: 64, hideable: false },
   { id: "surface", label: "Superficie (m²)", defaultWidth: 94, minWidth: 78, hideable: false },
   { id: "unitValue", label: "Valore unitario (€/m²)", defaultWidth: 88, minWidth: 72, hideable: false },
@@ -1472,6 +1480,7 @@ export default function PlanimetriaEditor({
     SMART_TRACE_DEFAULTS.wallInclusionRadius,
   );
   const [lotValuation, setLotValuation] = useState<LotValuation>(() => ({ ...DEFAULT_LOT_VALUATION }));
+  const [defaultOneri, setDefaultOneri] = useState(false);
   const [areaCalibrationOpen, setAreaCalibrationOpen] = useState(false);
   const [areaTuningTrials, setAreaTuningTrials] = useState<AreaTuningTrial[]>([]);
   const [documentSource, setDocumentSource] = useState<DocumentSource | null>(null);
@@ -1748,15 +1757,17 @@ export default function PlanimetriaEditor({
             selectedCount: selectedLotStats.count,
           },
         );
-        const destinationAmount = area.amount * (property.oneri === true ? 1.4 : 1);
+        const oneriAmount = area.selection.oneri === true ? area.amount * 0.4 : 0;
+        const destinationAmount = area.amount + oneriAmount;
         return {
           ...area,
           lotValue,
+          oneriAmount,
           destinationAmount,
           totalAmount: destinationAmount + lotValue,
         };
       }),
-    [baseSelectedAreas, property.oneri, resolvedLotValuation.lotValue, selectedLotStats],
+    [baseSelectedAreas, resolvedLotValuation.lotValue, selectedLotStats],
   );
 
   const totals = useMemo(() => {
@@ -1764,22 +1775,22 @@ export default function PlanimetriaEditor({
       (acc, area) => {
         acc.area += area.area;
         acc.baseAmount += area.amount;
+        acc.oneriAmount += area.oneriAmount;
         return acc;
       },
-      { area: 0, baseAmount: 0 },
+      { area: 0, baseAmount: 0, oneriAmount: 0 },
     );
-    const destinationAmount = base.baseAmount * (property.oneri === true ? 1.4 : 1);
+    const destinationAmount = base.baseAmount + base.oneriAmount;
     const amount = destinationAmount + resolvedLotValuation.lotValue;
     return {
       ...base,
       destinationAmount,
-      oneriValue: destinationAmount - base.baseAmount,
       lotArea: tracedLotArea,
       lotValue: resolvedLotValuation.lotValue,
       amount,
       rendita: estimatedRenditaFromAmount(amount),
     };
-  }, [property.oneri, resolvedLotValuation.lotValue, selectedAreas, tracedLotArea]);
+  }, [resolvedLotValuation.lotValue, selectedAreas, tracedLotArea]);
 
   const areaBreakdowns = useMemo(() => {
     const grouped = new Map<
@@ -1809,6 +1820,7 @@ export default function PlanimetriaEditor({
       const amount = group.rows.reduce((sum, row) => sum + row.amount, 0);
       const calculatedAmount = group.rows.reduce((sum, row) => sum + row.calculatedAmount, 0);
       const lotValue = group.rows.reduce((sum, row) => sum + row.lotValue, 0);
+      const oneriAmount = group.rows.reduce((sum, row) => sum + row.oneriAmount, 0);
       const totalAmount = group.rows.reduce((sum, row) => sum + row.totalAmount, 0);
       const weightedRate =
         area > 0
@@ -1819,6 +1831,8 @@ export default function PlanimetriaEditor({
       const selectionIds = group.rows.map((row) => row.selection.id);
       const allIncludedInLot = group.rows.every((row) => row.selection.includedInLot === true);
       const someIncludedInLot = group.rows.some((row) => row.selection.includedInLot === true);
+      const allOneri = group.rows.every((row) => row.selection.oneri === true);
+      const someOneri = group.rows.some((row) => row.selection.oneri === true);
       return {
         ...group,
         index,
@@ -1827,12 +1841,15 @@ export default function PlanimetriaEditor({
         amount,
         calculatedAmount,
         lotValue,
+        oneriAmount,
         totalAmount,
         weightedRate,
         opacity,
         selectionIds,
         allIncludedInLot,
         someIncludedInLot,
+        allOneri,
+        someOneri,
         areaOverridden: group.rows.some((row) => row.areaOverridden),
         amountOverridden: group.rows.some((row) => row.amountOverridden),
       };
@@ -2159,6 +2176,7 @@ export default function PlanimetriaEditor({
     setDash(SMART_TRACE_DEFAULTS.dash);
     setWallInclusionRadius(SMART_TRACE_DEFAULTS.wallInclusionRadius);
     setLotValuation({ ...DEFAULT_LOT_VALUATION });
+    setDefaultOneri(false);
     setAreaCalibrationOpen(false);
     setAreaTableHeight(310);
     setDirty(false);
@@ -2221,6 +2239,12 @@ export default function PlanimetriaEditor({
           : SMART_TRACE_DEFAULTS.wallInclusionRadius,
       );
       setLotValuation(normalizeLotValuation(draft.lotValuation));
+      setDefaultOneri(
+        draft.defaultOneri ??
+          (property.oneri === true &&
+            !Object.prototype.hasOwnProperty.call(draft, "totalOneriAmount") &&
+            !draft.selections.some((selection) => Object.prototype.hasOwnProperty.call(selection, "oneri"))),
+      );
       setActiveTool(normalizeEditorTool(draft.activeTool));
       if (!draft.document) {
         void restoreDraftSelections(draft);
@@ -2755,7 +2779,12 @@ export default function PlanimetriaEditor({
 
   async function restoreDraftSelections(draft: SavedDraft) {
     const draftCustomUsages = customUsagesFromDraft(draft);
+    const hasAreaOneriData =
+      Object.prototype.hasOwnProperty.call(draft, "totalOneriAmount") ||
+      draft.selections.some((selection) => Object.prototype.hasOwnProperty.call(selection, "oneri"));
+    const legacyDefaultOneri = property.oneri === true && !hasAreaOneriData;
     setCustomUsages(draftCustomUsages);
+    setDefaultOneri(draft.defaultOneri ?? legacyDefaultOneri);
     const restored = new Map<number, AreaSelection[]>();
     for (const saved of draft.selections) {
       const customUsage =
@@ -2802,6 +2831,9 @@ export default function PlanimetriaEditor({
           saved.lotInclusionMode === "manual"
             ? saved.includedInLot === true
             : true,
+        oneri: Object.prototype.hasOwnProperty.call(saved, "oneri")
+          ? saved.oneri === true
+          : draft.defaultOneri ?? legacyDefaultOneri,
         lotInclusionMode: "manual",
         opacity: saved.opacity,
         totalPixels: saved.totalPixels,
@@ -2875,6 +2907,7 @@ export default function PlanimetriaEditor({
         areaOverrideM2: selection.areaOverrideM2 ?? null,
         amountOverride: selection.amountOverride ?? null,
         includedInLot: selection.includedInLot === true,
+        oneri: selection.oneri === true,
         lotInclusionMode: selection.lotInclusionMode,
         opacity: selection.opacity,
         totalPixels: selection.totalPixels,
@@ -2943,6 +2976,7 @@ export default function PlanimetriaEditor({
       totalEstimatedAmount: totals.amount,
       totalEstimatedRendita: totals.rendita,
       totalBaseAmount: totals.baseAmount,
+      totalOneriAmount: totals.oneriAmount,
       totalLotArea: totals.lotArea,
       totalLotValue: totals.lotValue,
       lotValuation: {
@@ -2950,6 +2984,7 @@ export default function PlanimetriaEditor({
         percentage: resolvedLotValuation.percentage,
         unitValuePerM2: resolvedLotValuation.unitValuePerM2,
       },
+      defaultOneri,
       lotBoundaries: lotBoundariesToSave,
       selections: selectionsToSave,
     };
@@ -4388,6 +4423,7 @@ export default function PlanimetriaEditor({
       wallInclusionRadius,
       knownSegmentMeters,
       lotValuation: { ...lotValuation },
+      defaultOneri,
     };
   }
 
@@ -4472,6 +4508,7 @@ export default function PlanimetriaEditor({
     setWallInclusionRadius(snapshot.wallInclusionRadius);
     setKnownSegmentMeters(snapshot.knownSegmentMeters);
     setLotValuation({ ...snapshot.lotValuation });
+    setDefaultOneri(snapshot.defaultOneri);
     runtimeRef.current.wallMap = null;
     runtimeRef.current.wallKey = "";
     if (currentRotation !== restoredRotation && runtimeRef.current.pdfDoc && runtimeRef.current.currentPage) {
@@ -4525,6 +4562,7 @@ export default function PlanimetriaEditor({
       customUsageLabel?: string;
       color?: string;
       includedInLot?: boolean;
+      oneri?: boolean;
       lotInclusionMode?: LotInclusionMode;
       shape?: AreaShape;
     } = {},
@@ -4572,6 +4610,7 @@ export default function PlanimetriaEditor({
         ? { ...options.shape, center: { ...options.shape.center } }
         : undefined;
       selection.includedInLot = options.includedInLot ?? selection.includedInLot ?? true;
+      selection.oneri = options.oneri ?? selection.oneri ?? defaultOneri;
       selection.lotInclusionMode = "manual";
       redrawMasks();
       setStatus(`Area ${duplicateIndex + 1} aggiornata`);
@@ -4601,6 +4640,7 @@ export default function PlanimetriaEditor({
         ? { ...options.shape, center: { ...options.shape.center } }
         : undefined,
       includedInLot: options.includedInLot ?? true,
+      oneri: options.oneri ?? defaultOneri,
       lotInclusionMode: "manual",
     };
     selectionsForPage.push(selection);
@@ -4644,6 +4684,7 @@ export default function PlanimetriaEditor({
       bitmap: createTintedCanvas(region, usage.color, opacity),
       source: "manual",
       includedInLot: true,
+      oneri: defaultOneri,
       lotInclusionMode: "manual",
     };
     recordUndoState();
@@ -5732,6 +5773,37 @@ export default function PlanimetriaEditor({
     bumpRevision();
   }
 
+  function changeSelectionsOneri(ids: string[], oneri: boolean) {
+    const targetSelections = selectionsForIds(ids);
+    if (
+      targetSelections.length === 0 ||
+      targetSelections.every((selection) => Boolean(selection.oneri) === oneri)
+    ) return;
+    recordUndoState();
+    targetSelections.forEach((selection) => {
+      selection.oneri = oneri;
+    });
+    setStatus(oneri
+      ? `Oneri applicati a ${targetSelections.length} aree`
+      : `Oneri rimossi da ${targetSelections.length} aree`);
+    markDirty();
+    bumpRevision();
+  }
+
+  function toggleAllOneri() {
+    const nextOneri = !defaultOneri;
+    recordUndoState();
+    allSelections.forEach((selection) => {
+      selection.oneri = nextOneri;
+    });
+    setDefaultOneri(nextOneri);
+    setStatus(nextOneri
+      ? "Oneri applicati a tutte le aree e preselezionati per le nuove"
+      : "Oneri rimossi da tutte le aree e dalle nuove");
+    markDirty();
+    bumpRevision();
+  }
+
   function changeBreakdownAreaOverride(
     rows: typeof selectedAreas,
     rawValue: string,
@@ -5854,6 +5926,16 @@ export default function PlanimetriaEditor({
     selection.includedInLot = includedInLot;
     selection.lotInclusionMode = "manual";
     setStatus(includedInLot ? "Area inclusa nel lotto" : "Area esclusa dal lotto");
+    markDirty();
+    bumpRevision();
+  }
+
+  function changeSelectionOneri(id: string, oneri: boolean) {
+    const selection = findSelectionById(id);
+    if (!selection || Boolean(selection.oneri) === oneri) return;
+    recordUndoState();
+    selection.oneri = oneri;
+    setStatus(oneri ? "Oneri applicati all'area" : "Oneri rimossi dall'area");
     markDirty();
     bumpRevision();
   }
@@ -6731,6 +6813,7 @@ export default function PlanimetriaEditor({
       areaOverrideM2: selection.areaOverrideM2,
       amountOverride: selection.amountOverride,
       includedInLot: selection.includedInLot,
+      oneri: selection.oneri,
       lotInclusionMode: selection.lotInclusionMode,
       totalPixels: selection.totalPixels,
       source: selection.source === "merged" ? "merged" : "copy",
@@ -6779,6 +6862,7 @@ export default function PlanimetriaEditor({
         areaOverrideM2: item.areaOverrideM2,
         amountOverride: item.amountOverride,
         includedInLot: item.includedInLot,
+        oneri: item.oneri,
         lotInclusionMode: item.lotInclusionMode,
         opacity: item.opacity,
         totalPixels: getCanvasTotalPixels(),
@@ -6852,6 +6936,7 @@ export default function PlanimetriaEditor({
       customUsageId: activeCustomUsageId ?? undefined,
       customUsageLabel,
       includedInLot: selected.some((selection) => selection.includedInLot),
+      oneri: selected.every((selection) => selection.oneri === true),
       lotInclusionMode: "manual",
     });
     if (mergedId) setSelectedSelectionIds([mergedId]);
@@ -6884,6 +6969,7 @@ export default function PlanimetriaEditor({
       customUsageLabel: first.customUsageLabel,
       color: first.color,
       includedInLot: selected.some((selection) => selection.includedInLot),
+      oneri: selected.every((selection) => selection.oneri === true),
       lotInclusionMode: "manual",
     });
     if (mergedId) setSelectedSelectionIds([mergedId]);
@@ -8815,6 +8901,16 @@ export default function PlanimetriaEditor({
                       <span>{areaBreakdowns.length}</span>
                     </button>
                   </div>
+                  <button
+                    className="button secondary compact-button"
+                    type="button"
+                    onClick={toggleAllOneri}
+                    title={defaultOneri
+                      ? "Rimuove gli oneri da tutte le aree e dalle nuove aree"
+                      : "Applica gli oneri a tutte le aree e li preseleziona per le nuove aree"}
+                  >
+                    {defaultOneri ? "Rimuovi oneri" : "Applica oneri"}
+                  </button>
                   <button className="button secondary compact-button" type="button" onClick={addManualAreaRow}>
                     <Plus size={15} />
                     Aggiungi riga manuale
@@ -8956,6 +9052,17 @@ export default function PlanimetriaEditor({
                                       aria-label={`Includi area ${index + 1} nel lotto`}
                                     />
                                     <span>Lotto</span>
+                                  </label>
+                                </td>
+                                <td>
+                                  <label className="lot-checkbox compact" title="Applica il 40% al valore di questa area, lotto escluso">
+                                    <input
+                                      type="checkbox"
+                                      checked={selection.oneri === true}
+                                      onChange={(event) => changeSelectionOneri(selection.id, event.currentTarget.checked)}
+                                      aria-label={`Applica oneri all'area ${index + 1}`}
+                                    />
+                                    <span>Oneri</span>
                                   </label>
                                 </td>
                                 <td>
@@ -9171,6 +9278,24 @@ export default function PlanimetriaEditor({
                                 </label>
                               </td>
                               <td>
+                                <label className="lot-checkbox compact" title="Applica il 40% alle aree della ripartizione, lotto escluso">
+                                  <input
+                                    ref={(input) => {
+                                      if (input) {
+                                        input.indeterminate = group.someOneri && !group.allOneri;
+                                      }
+                                    }}
+                                    type="checkbox"
+                                    checked={group.allOneri}
+                                    onChange={(event) =>
+                                      changeSelectionsOneri(group.selectionIds, event.currentTarget.checked)
+                                    }
+                                    aria-label={`Applica oneri alla ripartizione ${group.usage.label}`}
+                                  />
+                                  <span>Oneri</span>
+                                </label>
+                              </td>
+                              <td>
                                 {firstSelection.usageId === CUSTOM_USAGE_ID ? (
                                   <input
                                     key={`${group.key}-table-${group.usage.label}`}
@@ -9319,16 +9444,18 @@ export default function PlanimetriaEditor({
                       </tbody>
                       <tfoot>
                         <tr>
-                          <th colSpan={7}>Totali valori</th>
+                          <th colSpan={8}>Totali valori</th>
                           <td><strong>{moneyFormatter.format(totals.baseAmount)}</strong></td>
                           <td><strong>{moneyFormatter.format(totals.lotValue)}</strong></td>
                           <td><strong>{moneyFormatter.format(totals.amount)}</strong></td>
                           <td colSpan={3}></td>
                         </tr>
                         <tr>
-                          <th colSpan={5}>
+                          <th colSpan={6}>
                             Rendita catastale
-                            {property.oneri === true ? " ((destinazioni × 1,4 + lotto) × 2%)" : " (valore complessivo × 2%)"}
+                            {totals.oneriAmount > 0
+                              ? " ((destinazioni + oneri selezionati + lotto) × 2%)"
+                              : " (valore complessivo × 2%)"}
                           </th>
                           <td colSpan={7}>
                             <div className="area-rendita-comparison">
@@ -9550,11 +9677,11 @@ export default function PlanimetriaEditor({
                   <strong>{moneyFormatter.format(totals.baseAmount)}</strong>
                   <small>Valori da validare</small>
                 </div>
-                {property.oneri === true && (
+                {totals.oneriAmount > 0 && (
                   <div>
                     <span>Oneri</span>
-                    <strong>+ {moneyFormatter.format(totals.oneriValue)}</strong>
-                    <small>{moneyFormatter.format(totals.baseAmount)} × 40%</small>
+                    <strong>+ {moneyFormatter.format(totals.oneriAmount)}</strong>
+                    <small>40% sulle sole aree selezionate</small>
                   </div>
                 )}
                 <div className="editor-usage-breakdown" aria-label="Ripartizione superfici">
@@ -9653,15 +9780,14 @@ export default function PlanimetriaEditor({
                 <div>
                   <span>Valore complessivo</span>
                   <strong>{moneyFormatter.format(totals.amount)}</strong>
-                  <small>{property.oneri === true ? "Destinazioni × 1,4 + lotto" : "Destinazioni + lotto"}</small>
+                  <small>Destinazioni + oneri selezionati + lotto</small>
                 </div>
                 <div>
                   <span>Nuova rendita catastale</span>
                   <strong>{moneyFormatter.format(totals.rendita)}</strong>
                   <small>
-                    {property.oneri === true
-                      ? `(${moneyFormatter.format(totals.baseAmount)} × 1,4 + ${moneyFormatter.format(totals.lotValue)}) × 2% = ${moneyFormatter.format(totals.rendita)}`
-                      : `${moneyFormatter.format(totals.amount)} × 2% = ${moneyFormatter.format(totals.rendita)}`}
+                    ({moneyFormatter.format(totals.baseAmount)} + {moneyFormatter.format(totals.oneriAmount)} +{" "}
+                    {moneyFormatter.format(totals.lotValue)}) × 2% = {moneyFormatter.format(totals.rendita)}
                   </small>
                 </div>
                 <section className={`editor-summary-collapse editor-imu-collapse ${imuDetailsCollapsed ? "collapsed" : ""}`}>
@@ -9981,6 +10107,19 @@ export default function PlanimetriaEditor({
                                 aria-label={`Includi area ${index + 1} nel lotto`}
                               />
                               <span>Lotto</span>
+                            </label>
+                            <label
+                              className="lot-checkbox compact area-row-lot"
+                              title="Applica il 40% al valore di questa area, lotto escluso"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selection.oneri === true}
+                                onChange={(event) => changeSelectionOneri(selection.id, event.currentTarget.checked)}
+                                aria-label={`Applica oneri all'area ${index + 1}`}
+                              />
+                              <span>Oneri</span>
                             </label>
                             <button
                               title={withShortcut("Rimuovi area", SHORTCUTS.delete)}

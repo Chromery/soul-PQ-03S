@@ -6,6 +6,7 @@ type DraftEstimatePayload = {
   totalEstimatedAmount?: unknown;
   totalEstimatedRendita?: unknown;
   totalBaseAmount?: unknown;
+  totalOneriAmount?: unknown;
   totalLotValue?: unknown;
 };
 
@@ -17,10 +18,13 @@ export function estimatedRenditaFromEstimatedAmount(amount: number) {
 
 export function estimatedRenditaFromDraftPayload(payload: DraftEstimatePayload, oneri = false) {
   const totalBaseAmount = optionalFiniteNumber(payload.totalBaseAmount);
+  const totalOneriAmount = optionalFiniteNumber(payload.totalOneriAmount);
   const totalLotValue = optionalFiniteNumber(payload.totalLotValue);
   if (totalBaseAmount !== null) {
     return estimatedRenditaFromEstimatedAmount(
-      totalBaseAmount * (oneri ? 1.4 : 1) + (totalLotValue ?? 0),
+      totalBaseAmount +
+        (totalOneriAmount ?? (oneri ? totalBaseAmount * 0.4 : 0)) +
+        (totalLotValue ?? 0),
     );
   }
 

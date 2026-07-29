@@ -68,7 +68,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.53.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.54.0";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -430,7 +430,6 @@ type PropertyTableColumnId =
   | "parcel"
   | "sub"
   | "category"
-  | "oneri"
   | "currentRendita"
   | "estimatedRendita"
   | "renditaDiff"
@@ -477,7 +476,6 @@ const PROPERTY_TABLE_COLUMNS = [
   { id: "parcel", label: "Part.", defaultWidth: 50, minWidth: 40 },
   { id: "sub", label: "Sub", defaultWidth: 44, minWidth: 38 },
   { id: "category", label: "Cat.", defaultWidth: 48, minWidth: 40 },
-  { id: "oneri", label: "Oneri", defaultWidth: 54, minWidth: 48 },
   { id: "currentRendita", label: "Rendita attuale", defaultWidth: 82, minWidth: 64 },
   { id: "estimatedRendita", label: "Rendita proposta", defaultWidth: 86, minWidth: 66 },
   { id: "renditaDiff", label: "Diff. rendita", defaultWidth: 80, minWidth: 64 },
@@ -565,9 +563,11 @@ type PlanAreaDraft = {
   totalEstimatedAmount?: number;
   totalEstimatedRendita?: number;
   totalBaseAmount?: number;
+  totalOneriAmount?: number;
   totalLotArea?: number;
   totalLotValue?: number;
   lotValuation?: LotValuation;
+  defaultOneri?: boolean;
   lotBoundaries?: PlanAreaLotBoundary[];
   estimatedImu?: number | null;
   imuCalculation?: PropertyImuCalculation | null;
@@ -585,6 +585,7 @@ type PlanAreaDraftSelection = {
   areaOverrideM2?: number | null;
   amountOverride?: number | null;
   includedInLot?: boolean;
+  oneri?: boolean;
   lotInclusionMode?: "auto" | "manual";
   opacity: number;
   totalPixels: number;
@@ -1974,6 +1975,21 @@ function planAreaIncludedInLot(selection: PlanAreaDraftSelection) {
     : true;
 }
 
+function planAreaHasAreaOneriData(draft: PlanAreaDraft) {
+  return Object.prototype.hasOwnProperty.call(draft, "totalOneriAmount") ||
+    draft.selections.some((selection) => Object.prototype.hasOwnProperty.call(selection, "oneri"));
+}
+
+function planAreaSelectionHasOneri(
+  selection: PlanAreaDraftSelection,
+  draft: PlanAreaDraft,
+  legacyPropertyOneri = false,
+) {
+  if (Object.prototype.hasOwnProperty.call(selection, "oneri")) return selection.oneri === true;
+  if (planAreaHasAreaOneriData(draft)) return draft.defaultOneri === true;
+  return draft.defaultOneri ?? legacyPropertyOneri;
+}
+
 function planLotAreaFromDraft(draft: PlanAreaDraft) {
   return (draft.lotBoundaries ?? []).reduce((sum, boundary) => {
     const totalPixels =
@@ -2032,12 +2048,18 @@ function planAreaEstimatedRenditaFromAmount(amount: number) {
 
 function planAreaEstimatedRenditaFromDraft(draft: PlanAreaDraft, oneri = false) {
   if (typeof draft.totalBaseAmount === "number" && Number.isFinite(draft.totalBaseAmount)) {
+    const oneriAmount =
+      typeof draft.totalOneriAmount === "number" && Number.isFinite(draft.totalOneriAmount)
+        ? draft.totalOneriAmount
+        : oneri
+          ? draft.totalBaseAmount * 0.4
+          : 0;
     const lotValue =
       typeof draft.totalLotValue === "number" && Number.isFinite(draft.totalLotValue)
         ? draft.totalLotValue
         : 0;
     return planAreaEstimatedRenditaFromAmount(
-      draft.totalBaseAmount * (oneri ? 1.4 : 1) + lotValue,
+      draft.totalBaseAmount + oneriAmount + lotValue,
     );
   }
   if (typeof draft.totalEstimatedRendita === "number" && Number.isFinite(draft.totalEstimatedRendita)) {
@@ -2049,12 +2071,16 @@ function planAreaEstimatedRenditaFromDraft(draft: PlanAreaDraft, oneri = false) 
 }
 
 function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft, oneri = false): PlanAreaDraft {
+  const legacyOneri = oneri && !planAreaHasAreaOneriData(draft);
+  const defaultOneri = draft.defaultOneri ?? legacyOneri;
   const migratedDraft = {
     ...draft,
+    defaultOneri,
     selections: draft.selections.map((selection) => ({
       ...selection,
       includedInLot: planAreaIncludedInLot(selection),
       lotInclusionMode: "manual" as const,
+      oneri: planAreaSelectionHasOneri(selection, draft, legacyOneri),
     })),
   };
   const lot = planAreaLotCalculation(migratedDraft);
@@ -2062,11 +2088,12 @@ function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft, oneri = false): Pl
     (acc, row) => {
       acc.area += row.area;
       acc.baseAmount += row.amount;
+      if (row.selection.oneri) acc.oneriAmount += row.amount * 0.4;
       return acc;
     },
-    { area: 0, baseAmount: 0 },
+    { area: 0, baseAmount: 0, oneriAmount: 0 },
   );
-  const amount = totals.baseAmount * (oneri ? 1.4 : 1) + lot.resolved.lotValue;
+  const amount = totals.baseAmount + totals.oneriAmount + lot.resolved.lotValue;
   return {
     ...migratedDraft,
     lotValuation: {
@@ -2076,6 +2103,7 @@ function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft, oneri = false): Pl
     },
     totalArea: totals.area,
     totalBaseAmount: totals.baseAmount,
+    totalOneriAmount: totals.oneriAmount,
     totalLotArea: lot.lotArea,
     totalLotValue: lot.resolved.lotValue,
     totalEstimatedAmount: amount,
@@ -2794,26 +2822,6 @@ function App() {
     }
   }
 
-  async function updatePropertyOneri(propertyId: string, oneri: boolean) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/properties/${encodeURIComponent(propertyId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ oneri }),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const updated = (await response.json()) as Partial<PropertyItem> & { id: string; oneri: boolean };
-      updatePropertyInStudies(updated.id, (property) => ({ ...property, ...updated }), true);
-      flash(oneri
-        ? "Oneri applicati: +40% alle destinazioni, lotto escluso."
-        : "Oneri rimossi dal calcolo della rendita.");
-      return true;
-    } catch {
-      flash("Impossibile aggiornare il flag Oneri.");
-      return false;
-    }
-  }
-
   async function reorderStudyProperties(studyId: string, propertyIds: string[]) {
     try {
       const response = await fetch(`${API_BASE_URL}/studies/${encodeURIComponent(studyId)}/properties/order`, {
@@ -3013,7 +3021,6 @@ function App() {
           onPropertyEstimateChange={updatePropertyEstimatedValue}
           onImuOverridesSave={savePropertyImuOverrides}
           onOutcomeChange={updatePropertyOutcome}
-          onOneriChange={updatePropertyOneri}
           onOpenEditor={(property) =>
             navigate({ view: "editor", studyId: activeStudy.id, propertyId: property.id })
           }
@@ -5824,7 +5831,6 @@ function StudyDetail({
   onPropertyEstimateChange,
   onImuOverridesSave,
   onOutcomeChange,
-  onOneriChange,
 }: {
   study: FeasibilityStudy;
   onBack: () => void;
@@ -5846,7 +5852,6 @@ function StudyDetail({
     patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
   ) => Promise<PropertyImuOverrideUpdate>;
   onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
-  onOneriChange: (propertyId: string, oneri: boolean) => Promise<boolean>;
 }) {
   const counts = getCounts(study);
   const positiveShare = Math.round((counts.positive / Math.max(counts.total, 1)) * 100);
@@ -6265,7 +6270,6 @@ function StudyDetail({
                 {renderPropertyHeader("parcel", <PropertySortHeader label="Part." sortKey="particella" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "particella")}
                 {renderPropertyHeader("sub", <PropertySortHeader label="Sub" sortKey="subalterno" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "subalterno")}
                 {renderPropertyHeader("category", <PropertySortHeader label="Cat." sortKey="categoria" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "categoria")}
-                {renderPropertyHeader("oneri", <>Oneri</>)}
                 {renderPropertyHeader("currentRendita", <PropertySortHeader label="Rendita attuale" sortKey="currentRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "currentRendita")}
                 {renderPropertyHeader("estimatedRendita", <PropertySortHeader label="Rendita proposta" sortKey="estimatedRendita" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "estimatedRendita")}
                 {renderPropertyHeader("renditaDiff", <PropertySortHeader label="Diff. rendita" sortKey="renditaDiff" activeSort={propertySortKey} direction={propertySortDirection} onSort={handlePropertySort} />, "renditaDiff")}
@@ -6340,21 +6344,6 @@ function StudyDetail({
                     {visiblePropertyColumnIds.has("parcel") && <td className="table-cell-ellipsis" title={property.particella || "In attesa ERP"}>{property.particella || "—"}</td>}
                     {visiblePropertyColumnIds.has("sub") && <td className="table-cell-ellipsis" title={property.subalterno || "In attesa ERP"}>{property.subalterno || "—"}</td>}
                     {visiblePropertyColumnIds.has("category") && <td className="table-cell-ellipsis" title={property.categoria}>{property.categoria || "—"}</td>}
-                    {visiblePropertyColumnIds.has("oneri") && (
-                      <td className="property-oneri-cell">
-                        <input
-                          type="checkbox"
-                          checked={property.oneri === true}
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={(event) => {
-                            event.stopPropagation();
-                            void onOneriChange(property.id, event.target.checked);
-                          }}
-                          aria-label={`Oneri per ${propertyLocation(property)}`}
-                          title="Applica il 40% alle destinazioni prima di sommare il lotto"
-                        />
-                      </td>
-                    )}
                     {visiblePropertyColumnIds.has("currentRendita") && <td>{formatEuro(property.currentRendita)}</td>}
                     {visiblePropertyColumnIds.has("estimatedRendita") && <td>{formatEstimatedValue(property.estimatedRendita)}</td>}
                     {visiblePropertyColumnIds.has("renditaDiff") && (
@@ -6570,7 +6559,9 @@ function PropertyAreaDetail({
       const calculatedAmount = area * rate;
       const amount = planAreaEffectiveAmount(selection, draft);
       const lotValue = lotCalculation.rowValues.get(selection.id) ?? 0;
-      const destinationAmount = amount * (property.oneri === true ? 1.4 : 1);
+      const oneri = planAreaSelectionHasOneri(selection, draft, property.oneri === true);
+      const oneriAmount = oneri ? amount * 0.4 : 0;
+      const destinationAmount = amount + oneriAmount;
       return {
         id: selection.id,
         index: index + 1,
@@ -6583,6 +6574,8 @@ function PropertyAreaDetail({
         amount,
         calculatedAmount,
         lotValue,
+        oneri,
+        oneriAmount,
         destinationAmount,
         totalAmount: destinationAmount + lotValue,
         areaOverridden: typeof selection.areaOverrideM2 === "number" && Number.isFinite(selection.areaOverrideM2),
@@ -6597,12 +6590,13 @@ function PropertyAreaDetail({
         (acc, row) => {
           acc.area += row.area;
           acc.baseAmount += row.amount;
+          acc.oneriAmount += row.oneriAmount;
           return acc;
         },
-        { area: 0, baseAmount: 0 },
+        { area: 0, baseAmount: 0, oneriAmount: 0 },
       );
     const lotValue = lotCalculation?.resolved.lotValue ?? 0;
-    const destinationAmount = base.baseAmount * (property.oneri === true ? 1.4 : 1);
+    const destinationAmount = base.baseAmount + base.oneriAmount;
     const amount = destinationAmount + lotValue;
     return {
       ...base,
@@ -6612,7 +6606,7 @@ function PropertyAreaDetail({
       amount,
       rendita: planAreaEstimatedRenditaFromAmount(amount),
     };
-  }, [lotCalculation, property.oneri, rows]);
+  }, [lotCalculation, rows]);
 
   const breakdown = useMemo(
     () => {
@@ -6642,6 +6636,9 @@ function PropertyAreaDetail({
     destinationValue: 0,
     lotValue: 0,
   };
+  const defaultOneri = draft
+    ? draft.defaultOneri ?? (property.oneri === true && !planAreaHasAreaOneriData(draft))
+    : false;
 
   function updateEditableDraft(updater: (draft: PlanAreaDraft) => void) {
     setEditableDraft((current) => {
@@ -6747,6 +6744,19 @@ function PropertyAreaDetail({
         percentage: lotValuation.percentage,
         unitValuePerM2: lotValuation.unitValuePerM2,
       };
+    });
+  }
+
+  function toggleAllAreaOneri() {
+    updateEditableDraft((nextDraft) => {
+      const nextOneri = !(
+        nextDraft.defaultOneri ??
+        (property.oneri === true && !planAreaHasAreaOneriData(nextDraft))
+      );
+      nextDraft.defaultOneri = nextOneri;
+      nextDraft.selections.forEach((selection) => {
+        selection.oneri = nextOneri;
+      });
     });
   }
 
@@ -7036,10 +7046,10 @@ function PropertyAreaDetail({
               <SummaryStat label="Area totale" value={formatM2(totals.area)} />
               <SummaryStat label="Superficie lotto" value={formatM2(totals.lotArea)} />
               <SummaryStat label="Valore destinazioni" value={formatEuro(totals.baseAmount)} />
-              {property.oneri === true && (
+              {totals.oneriAmount > 0 && (
                 <SummaryStat
                   label="Oneri (40%)"
-                  value={formatEuro(totals.destinationAmount - totals.baseAmount)}
+                  value={formatEuro(totals.oneriAmount)}
                 />
               )}
               <SummaryStat label="Valore lotto" value={formatEuro(totals.lotValue)} />
@@ -7098,6 +7108,16 @@ function PropertyAreaDetail({
             )}
 
             <div className="compact-table-wrap">
+              <div className="property-area-table-actions">
+                <button className="button secondary compact-button" type="button" onClick={toggleAllAreaOneri}>
+                  {defaultOneri ? "Rimuovi oneri" : "Applica oneri"}
+                </button>
+                <small>
+                  {defaultOneri
+                    ? "Preselezionati anche per le nuove aree"
+                    : "Selezionabili anche area per area"}
+                </small>
+              </div>
               <table className="compact-table property-area-table editable-property-area-table">
                 <thead>
                   <tr>
@@ -7105,6 +7125,7 @@ function PropertyAreaDetail({
                     <th>Pagina</th>
                     <th>Tipologia</th>
                     <th>Lotto</th>
+                    <th>Oneri</th>
                     <th>Superficie</th>
                     <th>€/m2</th>
                     <th>Valore destinazione</th>
@@ -7170,6 +7191,22 @@ function PropertyAreaDetail({
                               aria-label={`Includi area ${row.index} nel lotto`}
                             />
                             <span>Lotto</span>
+                          </label>
+                        </td>
+                        <td>
+                          <label className="lot-checkbox" title="Applica il 40% al valore di questa area, lotto escluso">
+                            <input
+                              type="checkbox"
+                              checked={row.oneri}
+                              onChange={(event) => {
+                                const oneri = event.currentTarget.checked;
+                                updateEditableSelection(row.id, (selection) => {
+                                  selection.oneri = oneri;
+                                });
+                              }}
+                              aria-label={`Applica oneri all'area ${row.index}`}
+                            />
+                            <span>Oneri</span>
                           </label>
                         </td>
                         <td>

@@ -28,6 +28,23 @@ test("applica gli Oneri solo alle destinazioni prima di sommare il lotto", () =>
   );
 });
 
+test("usa il totale Oneri selettivo delle singole aree senza maggiorare il lotto", () => {
+  const payload = {
+    totalBaseAmount: 10_000,
+    totalOneriAmount: 1_600,
+    totalLotValue: 1_000,
+    totalEstimatedAmount: 12_600,
+    totalEstimatedRendita: 252,
+  };
+
+  assert.equal(estimatedRenditaFromDraftPayload(payload, false), 252);
+  assert.equal(
+    estimatedRenditaFromDraftPayload(payload, true),
+    252,
+    "il vecchio flag immobile non deve sommarsi ai dati Oneri per area",
+  );
+});
+
 test("mantiene la compatibilità con le bozze precedenti prive dei totali separati", () => {
   assert.equal(
     estimatedRenditaFromDraftPayload(
