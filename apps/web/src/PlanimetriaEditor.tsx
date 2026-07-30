@@ -230,6 +230,12 @@ type ScaleExtractionJob = {
     confidence: number;
     evidence: string | null;
     warnings: string[];
+    orientation: {
+      rotation: PageRotation;
+      confidence: number;
+      evidence: string | null;
+      source: "pdf-text-geometry";
+    } | null;
   }>;
   confidence: number | null;
   evidence: string | null;
@@ -1435,6 +1441,7 @@ export default function PlanimetriaEditor({
     calibration: null,
   });
   const pageScalesRef = useRef<Map<number, PageScaleState>>(new Map());
+  const detectedPageRotationsRef = useRef<Map<number, PageRotation>>(new Map());
   const pendingDraftRef = useRef<SavedDraft | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const marqueeDragRef = useRef<MarqueeDragState | null>(null);
@@ -2126,6 +2133,7 @@ export default function PlanimetriaEditor({
       calibration: null,
     };
     pageScalesRef.current = new Map();
+    detectedPageRotationsRef.current = new Map();
     setCurrentPage(0);
     setPageCount(0);
     setFileName("");
@@ -2300,7 +2308,7 @@ export default function PlanimetriaEditor({
         if (!latestJob || disposed) return;
         setScaleExtractionJob(latestJob);
         if (latestJob.status === "SUCCEEDED") {
-          applyScaleExtractionJob(latestJob, { silent: true });
+          await applyScaleExtractionJob(latestJob, { silent: true });
         }
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -2648,7 +2656,7 @@ export default function PlanimetriaEditor({
       setScaleExtractionJob(job);
       if (job.status === "SUCCEEDED" || job.status === "FAILED") {
         setScaleExtractionBusy(false);
-        applyScaleExtractionJob(job, { forceActiveScale: true });
+        await applyScaleExtractionJob(job, { forceActiveScale: true });
         return;
       }
     }
@@ -2656,7 +2664,7 @@ export default function PlanimetriaEditor({
     setStatus("Analisi scala ancora in corso");
   }
 
-  function applyScaleExtractionJob(
+  async function applyScaleExtractionJob(
     job: ScaleExtractionJob,
     options: { forceActiveScale?: boolean; silent?: boolean } = {},
   ) {
@@ -2674,10 +2682,14 @@ export default function PlanimetriaEditor({
               confidence: job.confidence ?? 0,
               evidence: job.evidence,
               warnings: job.warnings,
+              orientation: null,
             }]
           : [];
     const detectedPages = extractedPages.filter((item) => item.scale);
-    if (detectedPages.length === 0) {
+    const detectedOrientations = extractedPages.filter(
+      (item) => item.orientation && item.orientation.confidence >= 0.65,
+    );
+    if (detectedPages.length === 0 && detectedOrientations.length === 0) {
       setStatus("Scala non rilevata nella planimetria");
       return;
     }
@@ -2685,6 +2697,31 @@ export default function PlanimetriaEditor({
     let appliedCount = 0;
     let preservedCount = 0;
     let lowConfidenceCount = 0;
+    let orientationAppliedCount = 0;
+    let rerenderCurrentPage = false;
+    detectedOrientations.forEach((result) => {
+      const orientation = result.orientation;
+      if (!orientation) return;
+      detectedPageRotationsRef.current.set(result.page, orientation.rotation);
+      const pendingDraft = pendingDraftRef.current;
+      const draftHasRotation = Object.prototype.hasOwnProperty.call(
+        pendingDraft?.pageRotations ?? {},
+        String(result.page),
+      );
+      const pageHasGeometry =
+        pendingDraft?.selections.some((selection) => selection.page === result.page) === true
+        || pendingDraft?.lotBoundaries?.some((boundary) => boundary.page === result.page) === true
+        || (runtimeRef.current.selectionsByPage.get(result.page)?.length ?? 0) > 0
+        || (runtimeRef.current.lotBoundariesByPage.get(result.page)?.length ?? 0) > 0;
+      const runtimeHasRotation = runtimeRef.current.pageRotations.has(result.page);
+      if (draftHasRotation || pageHasGeometry || runtimeHasRotation) return;
+      if (orientation.rotation === 0) return;
+      runtimeRef.current.pageRotations.set(result.page, orientation.rotation);
+      orientationAppliedCount += 1;
+      if (runtimeRef.current.pdfDoc && runtimeRef.current.currentPage === result.page) {
+        rerenderCurrentPage = true;
+      }
+    });
     extractedPages.forEach((result) => {
       if (!result.scale) return;
       const current = clonePageScale(pageScaleFor(result.page));
@@ -2717,13 +2754,24 @@ export default function PlanimetriaEditor({
       else appliedCount += 1;
     });
     activatePageScale(runtimeRef.current.currentPage || 1);
+    if (rerenderCurrentPage) {
+      await renderPage(runtimeRef.current.currentPage);
+      redrawMasks();
+    }
     if (!options.silent) markDirty();
     bumpRevision();
     if (appliedCount > 0) {
       setStatus(
         `Scala AI applicata su ${appliedCount} ${appliedCount === 1 ? "pagina" : "pagine"}`
         + (preservedCount > 0 ? `; ${preservedCount} manuali mantenute` : "")
-        + (lowConfidenceCount > 0 ? `; ${lowConfidenceCount} a bassa confidenza non applicate` : ""),
+        + (lowConfidenceCount > 0 ? `; ${lowConfidenceCount} a bassa confidenza non applicate` : "")
+        + (orientationAppliedCount > 0
+          ? `; orientamento corretto su ${orientationAppliedCount} ${orientationAppliedCount === 1 ? "pagina" : "pagine"}`
+          : ""),
+      );
+    } else if (orientationAppliedCount > 0) {
+      setStatus(
+        `Orientamento corretto su ${orientationAppliedCount} ${orientationAppliedCount === 1 ? "pagina" : "pagine"}`,
       );
     } else if (preservedCount > 0) {
       setStatus("Scale AI rilevate; scale manuali delle pagine mantenute");
@@ -2746,6 +2794,19 @@ export default function PlanimetriaEditor({
       runtime.currentPage = 1;
       runtime.pageCount = pdfDoc.numPages;
       runtime.pageRotations = parsePageRotations(pendingDraftRef.current?.pageRotations);
+      const draftPagesWithGeometry = new Set([
+        ...(pendingDraftRef.current?.selections ?? []).map((selection) => selection.page),
+        ...(pendingDraftRef.current?.lotBoundaries ?? []).map((boundary) => boundary.page),
+      ]);
+      detectedPageRotationsRef.current.forEach((rotation, page) => {
+        if (
+          rotation !== 0
+          && !runtime.pageRotations.has(page)
+          && !draftPagesWithGeometry.has(page)
+        ) {
+          runtime.pageRotations.set(page, rotation);
+        }
+      });
       runtimeRef.current = runtime;
       setZoomPercent(100);
       setFileName(name);

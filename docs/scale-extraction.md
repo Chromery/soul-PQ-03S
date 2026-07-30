@@ -9,6 +9,12 @@ In questo modo legge anche cartigli piccoli o ruotati, resta entro il limite di 
 richiesta e mantiene una scala indipendente per ciascun foglio. Il formato fisico A3/A4 viene ricavato
 direttamente dai metadati PDF, non stimato dal modello.
 
+Nello stesso passaggio il backend analizza programmaticamente la geometria delle righe della text layer
+del PDF. Se il testo principale è verticale o capovolto, salva la rotazione correttiva della singola
+pagina (`90`, `180` o `270` gradi). Questa analisi non usa token AI, non modifica pagine che contengono
+già aree disegnate e lascia sempre prevalere una rotazione manuale dell'operatore. Nei PDF composti
+soltanto da immagini l'orientamento resta invariato.
+
 ## Configurazione
 
 Variabili backend:

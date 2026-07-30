@@ -35,6 +35,9 @@ type PageScaleExtractionResult = {
   scale_denominator: number | null;
   scale_label: string | null;
   sheet_size: "A3" | "A4" | null;
+  orientation_rotation: PageRotation | null;
+  orientation_confidence: number;
+  orientation_evidence: string | null;
   confidence: number;
   evidence: string | null;
   warnings: string[];
@@ -50,6 +53,14 @@ type PdfScaleSource = {
   sizeBytes: number;
 };
 
+type PageRotation = 0 | 90 | 180 | 270;
+
+type PdfPageOrientation = {
+  rotation: PageRotation;
+  confidence: number;
+  evidence: string;
+};
+
 type RenderedPdfPage = {
   pageNumber: number;
   imageDataUrl: string;
@@ -58,6 +69,7 @@ type RenderedPdfPage = {
     imageDataUrl: string;
   }>;
   sheetSize: "A3" | "A4" | null;
+  orientation: PdfPageOrientation | null;
 };
 
 const execFileAsync = promisify(execFile);
@@ -222,6 +234,7 @@ export class ScaleExtractionService {
           completedAt,
         },
       });
+      await this.persistDetectedOrientations(updatedJob.propertyId, result);
       if (result.found && result.scale_denominator) {
         await this.persistDetectedScale(updatedJob.propertyId, result, completedAt, options);
       }
@@ -470,6 +483,45 @@ export class ScaleExtractionService {
     });
   }
 
+  private async persistDetectedOrientations(
+    propertyId: string,
+    result: ScaleExtractionResult,
+  ) {
+    const detected = result.pages.filter(
+      (page): page is PageScaleExtractionResult & { orientation_rotation: PageRotation } =>
+        page.orientation_rotation !== null && page.orientation_confidence >= 0.65,
+    );
+    if (detected.length === 0) return;
+    const draft = await this.prisma.planAnalysisDraft.findUnique({
+      where: { propertyId },
+      select: { payload: true },
+    });
+    if (!draft) return;
+    const payload =
+      draft.payload && typeof draft.payload === "object" && !Array.isArray(draft.payload)
+        ? { ...(draft.payload as Record<string, unknown>) }
+        : {};
+    const existing =
+      payload.pageRotations && typeof payload.pageRotations === "object"
+      && !Array.isArray(payload.pageRotations)
+        ? { ...(payload.pageRotations as Record<string, unknown>) }
+        : {};
+    detected.forEach((page) => {
+      const key = String(page.page_number);
+      if (Object.prototype.hasOwnProperty.call(existing, key)) return;
+      if (page.orientation_rotation !== 0) existing[key] = page.orientation_rotation;
+    });
+    await this.prisma.planAnalysisDraft.update({
+      where: { propertyId },
+      data: {
+        payload: {
+          ...payload,
+          pageRotations: existing,
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
   private validateCreateInput(body: unknown): CreateScaleExtractionInput {
     const input = asRecord(body, "payload");
     const fileName = requiredString(input.file_name, "file_name");
@@ -572,6 +624,7 @@ async function renderPdfPages(
       },
     );
     const pageMetadata = pdfPageMetadata(String(detailedInfo.stdout));
+    const pageOrientations = await detectPdfPageOrientations(pdfPath, temporaryDirectory);
     await execFileAsync(
       "pdftoppm",
       [
@@ -626,6 +679,7 @@ async function renderPdfPages(
         imageDataUrl: `data:image/jpeg;base64,${image.toString("base64")}`,
         detailImages,
         sheetSize: metadata?.sheetSize ?? null,
+        orientation: pageOrientations.get(pageNumber) ?? null,
       });
     }
     return pages;
@@ -673,6 +727,129 @@ function pdfPageMetadata(info: string) {
     }
   }
   return pages;
+}
+
+async function detectPdfPageOrientations(
+  pdfPath: string,
+  temporaryDirectory: string,
+) {
+  const outputPath = path.join(temporaryDirectory, "text-layout.html");
+  try {
+    await execFileAsync("pdftotext", ["-bbox-layout", pdfPath, outputPath], {
+      timeout: 30_000,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    return pageOrientationsFromBboxHtml(await fs.readFile(outputPath, "utf8"));
+  } catch {
+    // Image-only PDFs and malformed text layers remain usable: orientation is simply left unset.
+    return new Map<number, PdfPageOrientation>();
+  }
+}
+
+export function pageOrientationsFromBboxHtml(html: string) {
+  const orientations = new Map<number, PdfPageOrientation>();
+  const pagePattern = /<page\b[^>]*>([\s\S]*?)<\/page>/gi;
+  let pageNumber = 0;
+  for (const pageMatch of html.matchAll(pagePattern)) {
+    pageNumber += 1;
+    const orientation = dominantTextOrientation(pageMatch[1] ?? "");
+    if (orientation) orientations.set(pageNumber, orientation);
+  }
+  return orientations;
+}
+
+function dominantTextOrientation(pageHtml: string): PdfPageOrientation | null {
+  let horizontalWeight = 0;
+  let verticalWeight = 0;
+  let horizontalForward = 0;
+  let horizontalReverse = 0;
+  let verticalDown = 0;
+  let verticalUp = 0;
+  let horizontalLines = 0;
+  let verticalLines = 0;
+  const linePattern = /<line\b([^>]*)>([\s\S]*?)<\/line>/gi;
+  for (const lineMatch of pageHtml.matchAll(linePattern)) {
+    const lineBox = bboxFromAttributes(lineMatch[1] ?? "");
+    if (!lineBox) continue;
+    const width = lineBox.xMax - lineBox.xMin;
+    const height = lineBox.yMax - lineBox.yMin;
+    if (width < 2 || height < 2) continue;
+    const horizontal = width >= height * 1.8;
+    const vertical = height >= width * 1.8;
+    if (!horizontal && !vertical) continue;
+    const weight = Math.max(width, height);
+    const words = Array.from((lineMatch[2] ?? "").matchAll(/<word\b([^>]*)>/gi))
+      .map((match) => bboxFromAttributes(match[1] ?? ""))
+      .filter((box): box is TextBox => box !== null);
+    if (horizontal) {
+      horizontalWeight += weight;
+      horizontalLines += 1;
+      if (words.length >= 2) {
+        const delta = centerX(words.at(-1)!) - centerX(words[0]);
+        if (delta >= 0) horizontalForward += weight;
+        else horizontalReverse += weight;
+      }
+    } else if (vertical) {
+      verticalWeight += weight;
+      verticalLines += 1;
+      if (words.length >= 2) {
+        const delta = centerY(words.at(-1)!) - centerY(words[0]);
+        if (delta >= 0) verticalDown += weight;
+        else verticalUp += weight;
+      }
+    }
+  }
+
+  const totalWeight = horizontalWeight + verticalWeight;
+  const totalLines = horizontalLines + verticalLines;
+  if (totalLines < 2 || totalWeight < 60) return null;
+  const verticalDominant = verticalWeight > horizontalWeight * 1.2;
+  const horizontalDominant = horizontalWeight >= verticalWeight;
+  if (!verticalDominant && !horizontalDominant) return null;
+
+  const confidence = Math.max(horizontalWeight, verticalWeight) / totalWeight;
+  let rotation: PageRotation;
+  if (verticalDominant) {
+    rotation = verticalUp >= verticalDown ? 90 : 270;
+  } else {
+    rotation = horizontalReverse > horizontalForward * 1.2 ? 180 : 0;
+  }
+  return {
+    rotation,
+    confidence: Math.round(confidence * 1_000) / 1_000,
+    evidence:
+      `${horizontalLines} righe orizzontali (${Math.round(horizontalWeight)} pt) e `
+      + `${verticalLines} verticali (${Math.round(verticalWeight)} pt)`,
+  };
+}
+
+type TextBox = {
+  xMin: number;
+  yMin: number;
+  xMax: number;
+  yMax: number;
+};
+
+function bboxFromAttributes(attributes: string): TextBox | null {
+  const numberAttribute = (name: string) => {
+    const value = attributes.match(new RegExp(`\\b${name}="(-?[\\d.]+)"`, "i"))?.[1];
+    return value === undefined ? Number.NaN : Number(value);
+  };
+  const box = {
+    xMin: numberAttribute("xMin"),
+    yMin: numberAttribute("yMin"),
+    xMax: numberAttribute("xMax"),
+    yMax: numberAttribute("yMax"),
+  };
+  return Object.values(box).every(Number.isFinite) ? box : null;
+}
+
+function centerX(box: TextBox) {
+  return (box.xMin + box.xMax) / 2;
+}
+
+function centerY(box: TextBox) {
+  return (box.yMin + box.yMax) / 2;
 }
 
 function sheetSizeFromPdfInfo(
@@ -812,6 +989,9 @@ function parseNeuralwattPageExtraction(rawBody: string, page: RenderedPdfPage) {
     ...result,
     page_number: page.pageNumber,
     sheet_size: page.sheetSize ?? result.sheet_size,
+    orientation_rotation: page.orientation?.rotation ?? null,
+    orientation_confidence: page.orientation?.confidence ?? 0,
+    orientation_evidence: page.orientation?.evidence ?? null,
   };
 }
 
@@ -858,6 +1038,13 @@ function validatePageExtractionResult(
       ? denominator
       : null;
   const sheetSize = value.sheet_size === "A3" || value.sheet_size === "A4" ? value.sheet_size : null;
+  const orientationRotation = normalizePageRotation(value.orientation_rotation);
+  const orientationConfidence =
+    typeof value.orientation_confidence === "number" && Number.isFinite(value.orientation_confidence)
+      ? Math.max(0, Math.min(1, value.orientation_confidence))
+      : 0;
+  const orientationEvidence =
+    typeof value.orientation_evidence === "string" ? value.orientation_evidence : null;
   const confidence =
     typeof value.confidence === "number" && Number.isFinite(value.confidence)
       ? Math.max(0, Math.min(1, value.confidence))
@@ -877,6 +1064,9 @@ function validatePageExtractionResult(
     scale_denominator: resultFound ? inferredDenominator : null,
     scale_label: label ?? (inferredDenominator ? `1:${inferredDenominator}` : null),
     sheet_size: inferredSheetSize,
+    orientation_rotation: orientationRotation,
+    orientation_confidence: orientationConfidence,
+    orientation_evidence: orientationEvidence,
     confidence: explicitDenominator ? Math.max(confidence, 0.9) : confidence,
     evidence: evidence ?? (explicitDenominator ? `Scala esplicita rilevata dal testo OCR: 1:${explicitDenominator}` : null),
     warnings: explicitDenominator
@@ -985,6 +1175,14 @@ function apiPageScalesFromRaw(rawResponse: unknown) {
       confidence: page.confidence,
       evidence: page.evidence,
       warnings: page.warnings,
+      orientation: page.orientation_rotation === null
+        ? null
+        : {
+            rotation: page.orientation_rotation,
+            confidence: page.orientation_confidence,
+            evidence: page.orientation_evidence,
+            source: "pdf-text-geometry",
+          },
     };
   });
 }
@@ -1005,6 +1203,10 @@ function extractSheetSize(text: string): "A3" | "A4" | null {
   const generic = text.match(/\b(A[34])\s*\(\s*\d+\s*x\s*\d+\s*\)/i)?.[1]?.toUpperCase();
   if (generic === "A3" || generic === "A4") return generic;
   return null;
+}
+
+function normalizePageRotation(value: unknown): PageRotation | null {
+  return value === 0 || value === 90 || value === 180 || value === 270 ? value : null;
 }
 
 function messageContentToText(content: unknown) {
