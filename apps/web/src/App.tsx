@@ -28,6 +28,7 @@ import {
   GripVertical,
   Home,
   History,
+  Layers3,
   MapPin,
   MoreVertical,
   PanelLeftClose,
@@ -43,6 +44,7 @@ import {
   Trash2,
   TrendingDown,
   TrendingUp,
+  Unlink2,
   Upload,
   UserRound,
   X,
@@ -68,7 +70,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.54.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.55.6";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -93,6 +95,7 @@ type PriceListItem = {
 
 type PropertyItem = {
   id: string;
+  valuationGroupId?: string | null;
   address: string;
   comune: string;
   provincia?: string | null;
@@ -371,6 +374,9 @@ type SystemStatus = {
     neuralwattConfigured: boolean;
     neuralwattModel: string;
     scaleModel: string;
+    scaleProvider?: string;
+    visuraProvider?: string;
+    openRouterUsage?: string;
     visuraModel: string;
     pdfEngine: string;
     authentication: string;
@@ -1990,8 +1996,8 @@ function planAreaSelectionHasOneri(
   return draft.defaultOneri ?? legacyPropertyOneri;
 }
 
-function planLotAreaFromDraft(draft: PlanAreaDraft) {
-  return (draft.lotBoundaries ?? []).reduce((sum, boundary) => {
+function planLotAreaFromDraft(draft: PlanAreaDraft, hasElaborato = draft.document !== null) {
+  const tracedArea = (draft.lotBoundaries ?? []).reduce((sum, boundary) => {
     const totalPixels =
       typeof boundary.totalPixels === "number" && boundary.totalPixels > 0
         ? boundary.totalPixels
@@ -2003,9 +2009,12 @@ function planLotAreaFromDraft(draft: PlanAreaDraft) {
     return sum + (boundary.region.count / totalPixels) *
       pageRealAreaM2(scale.sheetSize, scale.scaleDenominator);
   }, 0);
+  return tracedArea > 0 || hasElaborato
+    ? tracedArea
+    : normalizeLotValuation(draft.lotValuation).manualAreaM2;
 }
 
-function planAreaLotCalculation(draft: PlanAreaDraft) {
+function planAreaLotCalculation(draft: PlanAreaDraft, hasElaborato = draft.document !== null) {
   const baseRows = draft.selections.map((selection) => ({
     selection,
     area: planAreaEffectiveAreaM2(selection, draft),
@@ -2022,7 +2031,7 @@ function planAreaLotCalculation(draft: PlanAreaDraft) {
     },
     { destinationValue: 0, areaM2: 0, count: 0 },
   );
-  const lotArea = planLotAreaFromDraft(draft);
+  const lotArea = planLotAreaFromDraft(draft, hasElaborato);
   const resolved = resolveLotValuation(
     draft.lotValuation,
     lotArea,
@@ -2070,7 +2079,11 @@ function planAreaEstimatedRenditaFromDraft(draft: PlanAreaDraft, oneri = false) 
     : null;
 }
 
-function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft, oneri = false): PlanAreaDraft {
+function recalculatePlanAreaDraftTotals(
+  draft: PlanAreaDraft,
+  oneri = false,
+  hasElaborato = draft.document !== null,
+): PlanAreaDraft {
   const legacyOneri = oneri && !planAreaHasAreaOneriData(draft);
   const defaultOneri = draft.defaultOneri ?? legacyOneri;
   const migratedDraft = {
@@ -2083,7 +2096,7 @@ function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft, oneri = false): Pl
       oneri: planAreaSelectionHasOneri(selection, draft, legacyOneri),
     })),
   };
-  const lot = planAreaLotCalculation(migratedDraft);
+  const lot = planAreaLotCalculation(migratedDraft, hasElaborato);
   const totals = lot.baseRows.reduce(
     (acc, row) => {
       acc.area += row.area;
@@ -2100,6 +2113,7 @@ function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft, oneri = false): Pl
       mode: lot.resolved.mode,
       percentage: lot.resolved.percentage,
       unitValuePerM2: lot.resolved.unitValuePerM2,
+      manualAreaM2: normalizeLotValuation(migratedDraft.lotValuation).manualAreaM2,
     },
     totalArea: totals.area,
     totalBaseAmount: totals.baseAmount,
@@ -2274,6 +2288,20 @@ function deviationPercent(current: number | null | undefined, estimated: number 
     return null;
   }
   return ((estimated - current) / current) * 100;
+}
+
+function sumNumbers(values: number[]) {
+  return values.reduce((total, value) => total + (Number.isFinite(value) ? value : 0), 0);
+}
+
+function nullableSum(values: Array<number | null | undefined>) {
+  if (values.some((value) => value === null || value === undefined || !Number.isFinite(value))) return null;
+  return sumNumbers(values as number[]);
+}
+
+function compactGroupValues(values: Array<string | null | undefined>) {
+  const uniqueValues = Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean)));
+  return uniqueValues.length > 0 ? uniqueValues.join(", ") : "—";
 }
 
 function propertyRenditaDiffAmount(property: PropertyItem) {
@@ -2778,6 +2806,53 @@ function App() {
     }
   }
 
+  async function groupPropertiesForStudy(studyId: string, propertyIds: string[]) {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/studies/${encodeURIComponent(studyId)}/property-valuation-groups`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ propertyIds }),
+        },
+      );
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { message?: string } | null;
+        throw new Error(payload?.message || `HTTP ${response.status}`);
+      }
+      const updatedStudy = (await response.json()) as FeasibilityStudy;
+      setStudies((current) =>
+        current.map((study) => (study.id === updatedStudy.id ? updatedStudy : study)),
+      );
+      flash("Immobili uniti in una valutazione complessiva.");
+      return true;
+    } catch (error) {
+      console.error(error);
+      flash(error instanceof Error ? error.message : "Impossibile unire gli immobili.");
+      return false;
+    }
+  }
+
+  async function ungroupPropertiesForStudy(studyId: string, groupId: string) {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/studies/${encodeURIComponent(studyId)}/property-valuation-groups/${encodeURIComponent(groupId)}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const updatedStudy = (await response.json()) as FeasibilityStudy;
+      setStudies((current) =>
+        current.map((study) => (study.id === updatedStudy.id ? updatedStudy : study)),
+      );
+      flash("Valutazione complessiva sciolta.");
+      return true;
+    } catch (error) {
+      console.error(error);
+      flash("Impossibile sciogliere la valutazione complessiva.");
+      return false;
+    }
+  }
+
   function updatePropertyDocument(
     propertyId: string,
     type: "planimetria" | "elenco_subalterni",
@@ -3018,6 +3093,8 @@ function App() {
           onReorder={(propertyIds) => reorderStudyProperties(activeStudy.id, propertyIds)}
           onCreateProperty={(form) => createPropertyForStudy(activeStudy.id, form)}
           onDeleteProperties={(propertyIds) => deletePropertiesFromStudy(activeStudy.id, propertyIds)}
+          onGroupProperties={(propertyIds) => groupPropertiesForStudy(activeStudy.id, propertyIds)}
+          onUngroupProperties={(groupId) => ungroupPropertiesForStudy(activeStudy.id, groupId)}
           onPropertyEstimateChange={updatePropertyEstimatedValue}
           onImuOverridesSave={savePropertyImuOverrides}
           onOutcomeChange={updatePropertyOutcome}
@@ -4532,13 +4609,19 @@ function SettingsPage({ appVersion, onNotice }: { appVersion: string; onNotice: 
           <div className="settings-kv-grid">
             <SettingsValue label="Ambiente" value={systemStatus?.environment ?? "Non disponibile"} />
             <SettingsValue label="ERP sync token" value={configuredLabel(systemStatus?.integrations.erpSyncTokenConfigured)} />
-            <SettingsValue label="OpenRouter/Qwen" value={configuredLabel(systemStatus?.integrations.openRouterConfigured)} />
-            <SettingsValue label="Neuralwatt CAPTCHA" value={configuredLabel(systemStatus?.integrations.neuralwattConfigured)} />
+            <SettingsValue
+              label="OpenRouter"
+              value={systemStatus?.integrations.openRouterUsage === "disabled"
+                ? "Disabilitato"
+                : configuredLabel(systemStatus?.integrations.openRouterConfigured)}
+            />
+            <SettingsValue label="NeuralWatt" value={configuredLabel(systemStatus?.integrations.neuralwattConfigured)} />
             <SettingsValue label="Auth utenti" value={systemStatus?.integrations.authentication === "not-configured" ? "Non configurata" : "Configurata"} />
-            <SettingsValue label="Modello scala" value={systemStatus?.integrations.scaleModel ?? "qwen/qwen3.5-flash-02-23"} />
-            <SettingsValue label="Modello visure" value={systemStatus?.integrations.visuraModel ?? "qwen/qwen3.5-flash-02-23"} />
+            <SettingsValue label="Modello scala" value={systemStatus?.integrations.scaleModel ?? "qwen3.6-35b-fast"} />
+            <SettingsValue label="Pipeline visure" value={systemStatus?.integrations.visuraProvider ?? "Locale → NeuralWatt fallback"} />
+            <SettingsValue label="Modello visure" value={systemStatus?.integrations.visuraModel ?? "qwen3.6-35b-fast"} />
             <SettingsValue label="Modello CAPTCHA" value={systemStatus?.integrations.neuralwattModel ?? "qwen3.6-35b-fast"} />
-            <SettingsValue label="OCR PDF" value={systemStatus?.integrations.pdfEngine ?? "mistral-ocr"} />
+            <SettingsValue label="Rendering fallback" value={systemStatus?.integrations.pdfEngine ?? "pdftoppm-jpeg"} />
             <SettingsValue label="Stato letto" value={systemStatus ? formatDateTime(systemStatus.generatedAt) : "Caricamento"} />
           </div>
           <div className="settings-inline-actions">
@@ -5828,6 +5911,8 @@ function StudyDetail({
   onReorder,
   onCreateProperty,
   onDeleteProperties,
+  onGroupProperties,
+  onUngroupProperties,
   onPropertyEstimateChange,
   onImuOverridesSave,
   onOutcomeChange,
@@ -5841,6 +5926,8 @@ function StudyDetail({
   onReorder: (propertyIds: string[]) => Promise<boolean>;
   onCreateProperty: (form: NewPropertyFormState) => Promise<boolean>;
   onDeleteProperties: (propertyIds: string[]) => Promise<boolean>;
+  onGroupProperties: (propertyIds: string[]) => Promise<boolean>;
+  onUngroupProperties: (groupId: string) => Promise<boolean>;
   onPropertyEstimateChange: (
     propertyId: string,
     estimatedRendita: number,
@@ -5866,6 +5953,8 @@ function StudyDetail({
   const [newPropertyBusy, setNewPropertyBusy] = useState(false);
   const [deleteConfirmIds, setDeleteConfirmIds] = useState<string[]>([]);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [valuationGroupBusy, setValuationGroupBusy] = useState(false);
+  const [expandedValuationGroupIds, setExpandedValuationGroupIds] = useState<string[]>([]);
   const presentationBaseline = useMemo(() => presentationDraftFromStudy(study), [study]);
   const [presentationDraft, setPresentationDraft] = useState<PresentationDraft>(() => presentationBaseline);
   const [presentationTouchedFields, setPresentationTouchedFields] = useState<Set<string>>(() => new Set());
@@ -5882,6 +5971,7 @@ function StudyDetail({
     setActivePropertyId(null);
     setNewPropertyModalOpen(false);
     setDeleteConfirmIds([]);
+    setExpandedValuationGroupIds([]);
     setPresentationDraft(presentationDraftFromStudy(study));
     setPresentationTouchedFields(new Set());
   }, [study.id]);
@@ -5950,6 +6040,59 @@ function StudyDetail({
   }, [manualOrder, propertySortDirection, propertySortKey, study.properties]);
 
   const selectedProperties = orderedProperties.filter((property) => selectedPropertyIds.includes(property.id));
+  const valuationGroups = useMemo(() => {
+    const groups = new Map<string, PropertyItem[]>();
+    orderedProperties.forEach((property) => {
+      if (!property.valuationGroupId) return;
+      const members = groups.get(property.valuationGroupId) ?? [];
+      members.push(property);
+      groups.set(property.valuationGroupId, members);
+    });
+    return groups;
+  }, [orderedProperties]);
+  const displayedPropertyRows = useMemo(() => {
+    const rows: Array<
+      | { kind: "property"; property: PropertyItem; groupId?: string }
+      | { kind: "group"; groupId: string; properties: PropertyItem[] }
+    > = [];
+    const renderedGroups = new Set<string>();
+    orderedProperties.forEach((property) => {
+      const groupId = property.valuationGroupId;
+      if (!groupId) {
+        rows.push({ kind: "property", property });
+        return;
+      }
+      if (renderedGroups.has(groupId)) return;
+      renderedGroups.add(groupId);
+      const properties = valuationGroups.get(groupId) ?? [property];
+      rows.push({ kind: "group", groupId, properties });
+      if (expandedValuationGroupIds.includes(groupId)) {
+        properties.forEach((member) => rows.push({ kind: "property", property: member, groupId }));
+      }
+    });
+    return rows;
+  }, [expandedValuationGroupIds, orderedProperties, valuationGroups]);
+  const completeSelectedValuationGroupIds = useMemo(
+    () => Array.from(valuationGroups.entries())
+      .filter(([, properties]) => (
+        properties.length >= 2 &&
+        properties.every((property) => selectedPropertyIds.includes(property.id))
+      ))
+      .map(([groupId]) => groupId),
+    [selectedPropertyIds, valuationGroups],
+  );
+  const selectedPropertiesCoveredByCompleteGroups = useMemo(() => new Set(
+    completeSelectedValuationGroupIds.flatMap((groupId) =>
+      (valuationGroups.get(groupId) ?? []).map((property) => property.id)
+    ),
+  ), [completeSelectedValuationGroupIds, valuationGroups]);
+  const canGroupSelectedProperties =
+    selectedProperties.length >= 2 &&
+    selectedProperties.every((property) => !property.valuationGroupId);
+  const canUngroupSelectedProperties =
+    completeSelectedValuationGroupIds.length === 1 &&
+    selectedPropertyIds.length > 0 &&
+    selectedPropertyIds.every((propertyId) => selectedPropertiesCoveredByCompleteGroups.has(propertyId));
   const allPropertiesSelected =
     orderedProperties.length > 0 &&
     orderedProperties.every((property) => selectedPropertyIds.includes(property.id));
@@ -6023,6 +6166,24 @@ function StudyDetail({
         ? current.filter((selectedId) => selectedId !== propertyId)
         : [...current, propertyId],
     );
+  }
+
+  function toggleValuationGroupSelection(properties: PropertyItem[]) {
+    const propertyIds = properties.map((property) => property.id);
+    const groupSelected = propertyIds.every((propertyId) => selectedPropertyIds.includes(propertyId));
+    setSelectedPropertyIds((current) => (
+      groupSelected
+        ? current.filter((propertyId) => !propertyIds.includes(propertyId))
+        : Array.from(new Set([...current, ...propertyIds]))
+    ));
+  }
+
+  function toggleValuationGroupExpansion(groupId: string) {
+    setExpandedValuationGroupIds((current) => (
+      current.includes(groupId)
+        ? current.filter((selectedGroupId) => selectedGroupId !== groupId)
+        : [...current, groupId]
+    ));
   }
 
   function toggleAllProperties() {
@@ -6102,6 +6263,26 @@ function StudyDetail({
       setSelectedPropertyIds((current) => current.filter((propertyId) => !deleteConfirmIds.includes(propertyId)));
       if (activePropertyId && deleteConfirmIds.includes(activePropertyId)) setActivePropertyId(null);
       setDeleteConfirmIds([]);
+    }
+  }
+
+  async function handleGroupSelectedProperties() {
+    if (!canGroupSelectedProperties || valuationGroupBusy) return;
+    setValuationGroupBusy(true);
+    const success = await onGroupProperties(selectedProperties.map((property) => property.id));
+    setValuationGroupBusy(false);
+    if (success) setSelectedPropertyIds([]);
+  }
+
+  async function handleUngroupSelectedProperties() {
+    const groupId = completeSelectedValuationGroupIds[0];
+    if (!canUngroupSelectedProperties || !groupId || valuationGroupBusy) return;
+    setValuationGroupBusy(true);
+    const success = await onUngroupProperties(groupId);
+    setValuationGroupBusy(false);
+    if (success) {
+      setSelectedPropertyIds([]);
+      setExpandedValuationGroupIds((current) => current.filter((selectedGroupId) => selectedGroupId !== groupId));
     }
   }
 
@@ -6215,9 +6396,35 @@ function StudyDetail({
         <div className="property-selection-toolbar" aria-label="Azioni immobili selezionati">
           <span>
             {selectedProperties.length > 0
-              ? `${selectedProperties.length} immobili selezionati`
+              ? `${selectedProperties.length} ${selectedProperties.length === 1 ? "immobile selezionato" : "immobili selezionati"}`
               : "Seleziona uno o più immobili per azioni multiple"}
           </span>
+          <button
+            className="button primary compact-button"
+            type="button"
+            disabled={!canGroupSelectedProperties || valuationGroupBusy}
+            onClick={() => void handleGroupSelectedProperties()}
+            title={
+              selectedProperties.some((property) => property.valuationGroupId)
+                ? "Sciogli prima il gruppo degli immobili già raggruppati"
+                : "Seleziona almeno due immobili non ancora raggruppati"
+            }
+          >
+            <Layers3 size={15} />
+            {valuationGroupBusy && canGroupSelectedProperties
+              ? "Unione..."
+              : "Uniscili per val. complessiva"}
+          </button>
+          <button
+            className="button secondary compact-button"
+            type="button"
+            disabled={!canUngroupSelectedProperties || valuationGroupBusy}
+            onClick={() => void handleUngroupSelectedProperties()}
+            title="Seleziona la riga della valutazione complessiva per scioglierla"
+          >
+            <Unlink2 size={15} />
+            Sciogli gruppo
+          </button>
           <button
             className="button secondary compact-button"
             disabled={selectedProperties.length === 0}
@@ -6282,12 +6489,113 @@ function StudyDetail({
               </tr>
             </thead>
             <tbody>
-              {orderedProperties.map((property) => {
+              {displayedPropertyRows.map((row) => {
+                if (row.kind === "group") {
+                  const properties = row.properties;
+                  const groupSelected = properties.every((property) => selectedPropertyIds.includes(property.id));
+                  const expanded = expandedValuationGroupIds.includes(row.groupId);
+                  const currentRendita = sumNumbers(properties.map((property) => property.currentRendita));
+                  const completeEstimate = properties.every((property) => property.hasStudy || property.estimatedRendita > 0);
+                  const estimatedRendita = completeEstimate
+                    ? sumNumbers(properties.map((property) => property.estimatedRendita))
+                    : null;
+                  const renditaDiff = estimatedRendita === null ? null : estimatedRendita - currentRendita;
+                  const currentImu = nullableSum(properties.map((property) => property.currentImu));
+                  const estimatedImu = completeEstimate
+                    ? nullableSum(properties.map((property) => property.estimatedImu))
+                    : null;
+                  const imuDiff = currentImu === null || estimatedImu === null ? null : estimatedImu - currentImu;
+                  const commonOutcome = properties.every((property) => property.outcome === properties[0]?.outcome)
+                    ? properties[0]?.outcome
+                    : null;
+                  const planimetrieCount = properties.filter((property) => property.documents.planimetria).length;
+                  const visureCount = properties.filter((property) => property.documents.visura).length;
+                  return (
+                    <tr
+                      key={`valuation-group-${row.groupId}`}
+                      className="property-valuation-group-row data-row-clickable"
+                      onClick={() => toggleValuationGroupExpansion(row.groupId)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        toggleValuationGroupExpansion(row.groupId);
+                      }}
+                      tabIndex={0}
+                      aria-expanded={expanded}
+                      aria-label={`${expanded ? "Comprimi" : "Espandi"} valutazione complessiva di ${properties.length} immobili`}
+                    >
+                      {visiblePropertyColumnIds.has("select") && (
+                        <td className="property-select-cell">
+                          <input
+                            type="checkbox"
+                            checked={groupSelected}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={() => toggleValuationGroupSelection(properties)}
+                            aria-label="Seleziona la valutazione complessiva"
+                          />
+                        </td>
+                      )}
+                      {visiblePropertyColumnIds.has("drag") && (
+                        <td className="property-drag-cell">
+                          <button
+                            className={`valuation-group-toggle ${expanded ? "expanded" : ""}`}
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleValuationGroupExpansion(row.groupId);
+                            }}
+                            aria-label={expanded ? "Comprimi gruppo" : "Espandi gruppo"}
+                          >
+                            <ChevronRight size={17} />
+                          </button>
+                        </td>
+                      )}
+                      {visiblePropertyColumnIds.has("location") && (
+                        <td className="location-cell valuation-group-title">
+                          <span><Layers3 size={15} /> Valutazione complessiva</span>
+                          <small>{properties.length} unità · Sub {compactGroupValues(properties.map((property) => property.subalterno))}</small>
+                        </td>
+                      )}
+                      {visiblePropertyColumnIds.has("sheet") && <td title={compactGroupValues(properties.map((property) => property.foglio))}>{compactGroupValues(properties.map((property) => property.foglio))}</td>}
+                      {visiblePropertyColumnIds.has("parcel") && <td title={compactGroupValues(properties.map((property) => property.particella))}>{compactGroupValues(properties.map((property) => property.particella))}</td>}
+                      {visiblePropertyColumnIds.has("sub") && <td title={compactGroupValues(properties.map((property) => property.subalterno))}>{compactGroupValues(properties.map((property) => property.subalterno))}</td>}
+                      {visiblePropertyColumnIds.has("category") && <td title={compactGroupValues(properties.map((property) => property.categoria))}>{compactGroupValues(properties.map((property) => property.categoria))}</td>}
+                      {visiblePropertyColumnIds.has("currentRendita") && <td><strong>{formatEuro(currentRendita)}</strong></td>}
+                      {visiblePropertyColumnIds.has("estimatedRendita") && <td><strong>{estimatedRendita === null ? "Da stimare" : formatEuro(estimatedRendita)}</strong></td>}
+                      {visiblePropertyColumnIds.has("renditaDiff") && (
+                        <td><MoneyPercentStack amount={renditaDiff} percent={deviationPercent(currentRendita, estimatedRendita)} favorableDirection="down" /></td>
+                      )}
+                      {visiblePropertyColumnIds.has("currentImu") && <td><strong>{currentImu === null ? "—" : formatEuro(currentImu)}</strong></td>}
+                      {visiblePropertyColumnIds.has("estimatedImu") && <td><strong>{estimatedImu === null ? "—" : formatEuro(estimatedImu)}</strong></td>}
+                      {visiblePropertyColumnIds.has("imuDiff") && (
+                        <td><MoneyPercentStack amount={imuDiff} percent={deviationPercent(currentImu, estimatedImu)} /></td>
+                      )}
+                      {visiblePropertyColumnIds.has("documents") && (
+                        <td title={`${planimetrieCount}/${properties.length} elaborati planimetrici · ${visureCount}/${properties.length} visure`}>
+                          <span className="valuation-group-documents">EP {planimetrieCount}/{properties.length} · V {visureCount}/{properties.length}</span>
+                        </td>
+                      )}
+                      {visiblePropertyColumnIds.has("ownership") && (
+                        <td title={compactGroupValues(properties.map((property) => formatTitolarita(property.titolarita, "")))}>
+                          {compactGroupValues(properties.map((property) => formatTitolarita(property.titolarita, "")))}
+                        </td>
+                      )}
+                      {visiblePropertyColumnIds.has("outcome") && (
+                        <td>
+                          {commonOutcome
+                            ? <span className={`status-badge ${outcomeClass(commonOutcome)}`}>{commonOutcome}</span>
+                            : <span className="valuation-group-mixed">Esiti misti</span>}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                }
+                const property = row.property;
                 const imuPercent = deviationPercent(property.currentImu, property.estimatedImu);
                 return (
                   <tr
                     key={property.id}
-                    className={`data-row-clickable ${draggedPropertyId === property.id ? "dragging" : ""} ${activePropertyId === property.id ? "active-property-detail" : ""}`}
+                    className={`data-row-clickable ${row.groupId ? "property-valuation-group-child" : ""} ${draggedPropertyId === property.id ? "dragging" : ""} ${activePropertyId === property.id ? "active-property-detail" : ""}`}
                     onClick={() => setActivePropertyId(property.id)}
                     onKeyDown={(event) => {
                       if (event.key !== "Enter" && event.key !== " ") return;
@@ -6545,9 +6853,10 @@ function PropertyAreaDetail({
   }, [draftState.draft?.propertyId, draftState.draft?.savedAt]);
 
   const draft = editableDraft;
+  const hasElaboratoPlan = Boolean(property.documentUrls?.planimetria || draft?.document);
   const lotCalculation = useMemo(
-    () => (draft ? planAreaLotCalculation(draft) : null),
-    [draft],
+    () => (draft ? planAreaLotCalculation(draft, hasElaboratoPlan) : null),
+    [draft, hasElaboratoPlan],
   );
   const rows = useMemo(() => {
     if (!draft || !lotCalculation) return [];
@@ -6645,7 +6954,11 @@ function PropertyAreaDetail({
       if (!current) return current;
       const next = clonePlanAreaDraft(current);
       updater(next);
-      return recalculatePlanAreaDraftTotals(next, property.oneri === true);
+      return recalculatePlanAreaDraftTotals(
+        next,
+        property.oneri === true,
+        Boolean(property.documentUrls?.planimetria || next.document),
+      );
     });
     setDirty(true);
   }
@@ -6743,6 +7056,7 @@ function PropertyAreaDetail({
         mode,
         percentage: lotValuation.percentage,
         unitValuePerM2: lotValuation.unitValuePerM2,
+        manualAreaM2: lotValuation.manualAreaM2,
       };
     });
   }
@@ -6781,13 +7095,33 @@ function PropertyAreaDetail({
     );
   }
 
+  function handleManualLotAreaBlur(input: HTMLInputElement) {
+    handleNumberBlur(
+      input.value,
+      lotValuation.manualAreaM2,
+      (value) =>
+        updateEditableDraft((nextDraft) => {
+          nextDraft.lotValuation = {
+            ...normalizeLotValuation(nextDraft.lotValuation),
+            manualAreaM2: value,
+          };
+        }),
+      input,
+      "Inserisci una superficie lotto valida.",
+    );
+  }
+
   async function saveAreaDraft() {
     if (!draft || saving) return;
     setSaving(true);
-    const nextDraft = recalculatePlanAreaDraftTotals({
-      ...clonePlanAreaDraft(draft),
-      savedAt: new Date().toISOString(),
-    }, property.oneri === true);
+    const nextDraft = recalculatePlanAreaDraftTotals(
+      {
+        ...clonePlanAreaDraft(draft),
+        savedAt: new Date().toISOString(),
+      },
+      property.oneri === true,
+      Boolean(property.documentUrls?.planimetria || draft.document),
+    );
     try {
       window.localStorage.setItem(planAreaDraftKey(property.id), JSON.stringify(nextDraft));
     } catch {
@@ -6977,10 +7311,31 @@ function PropertyAreaDetail({
               <div>
                 <h3>Valorizzazione lotto</h3>
                 <p>
-                  La superficie deriva dal poligono Lotto. I check stabiliscono quali valori delle destinazioni
-                  entrano nella base percentuale.
+                  {hasElaboratoPlan
+                    ? "La superficie deriva dal poligono Lotto. I check stabiliscono quali valori delle destinazioni entrano nella base percentuale."
+                    : "L’elaborato planimetrico non è presente: inserisci manualmente la superficie del lotto."}
                 </p>
               </div>
+              {!hasElaboratoPlan && (
+                <label className="lot-manual-area-field property-manual-lot-area">
+                  <span>Superficie lotto manuale</span>
+                  <div>
+                    <input
+                      key={`property-manual-lot-area-${lotValuation.manualAreaM2}`}
+                      type="text"
+                      inputMode="decimal"
+                      defaultValue={areaFormatter.format(lotValuation.manualAreaM2)}
+                      onBlur={(event) => handleManualLotAreaBlur(event.currentTarget)}
+                      onKeyDown={(event) =>
+                        handleNumericInputKeyDown(
+                          event,
+                          areaFormatter.format(lotValuation.manualAreaM2),
+                        )}
+                    />
+                    <strong>m²</strong>
+                  </div>
+                </label>
+              )}
               <div className="lot-mode-toggle" role="group" aria-label="Metodo di valorizzazione del lotto">
                 <button
                   type="button"

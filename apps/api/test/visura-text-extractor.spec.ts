@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { extractCadastralDataFromText } from "../src/visura-extraction/visura-text-extractor.js";
+import { parseNeuralwattVisuraExtraction } from "../src/visura-extraction/visura-extraction.service.js";
 
 test("estrae la sezione catastale corrente senza confonderla con riferimenti storici", () => {
   const result = extractCadastralDataFromText(`
@@ -51,4 +52,34 @@ test("ignora una sezione presente soltanto in un riferimento catastale non corre
   `);
   assert.equal(result.found, true);
   assert.equal(result.sezioneCatastale, null);
+});
+
+test("normalizza la risposta visuale NeuralWatt per una visura scansionata", () => {
+  const result = parseNeuralwattVisuraExtraction(JSON.stringify({
+    choices: [{
+      message: {
+        content: `\`\`\`json
+          {
+            "found": true,
+            "provincia": "COMO",
+            "comune": "CASNATE CON BERNATE",
+            "foglio": 4,
+            "particella": 2010,
+            "sezioneCatastale": "B",
+            "codiceComuneCatastale": "B977",
+            "confidence": 0.97,
+            "evidence": "Codice Comune B977 - Sezione B - Particella 2010",
+            "warnings": []
+          }
+        \`\`\``,
+      },
+    }],
+  }));
+
+  assert.equal(result.extractionMethod, "neuralwatt");
+  assert.equal(result.provincia, "CO");
+  assert.equal(result.comune, "Casnate Con Bernate");
+  assert.equal(result.foglio, "4");
+  assert.equal(result.particella, "2010");
+  assert.equal(result.sezioneCatastale, "B");
 });

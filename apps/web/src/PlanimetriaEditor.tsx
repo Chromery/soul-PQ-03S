@@ -230,6 +230,12 @@ type ScaleExtractionJob = {
     confidence: number;
     evidence: string | null;
     warnings: string[];
+    orientation: {
+      rotation: PageRotation;
+      confidence: number;
+      evidence: string | null;
+      source: "pdf-text-geometry";
+    } | null;
   }>;
   confidence: number | null;
   evidence: string | null;
@@ -1435,6 +1441,7 @@ export default function PlanimetriaEditor({
     calibration: null,
   });
   const pageScalesRef = useRef<Map<number, PageScaleState>>(new Map());
+  const detectedPageRotationsRef = useRef<Map<number, PageRotation>>(new Map());
   const pendingDraftRef = useRef<SavedDraft | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const marqueeDragRef = useRef<MarqueeDragState | null>(null);
@@ -1642,6 +1649,7 @@ export default function PlanimetriaEditor({
   const autoWallRadius = autoWallInclusionRadius(inflate, dash);
   const resolvedWallInclusionRadius = wallInclusionRadius ?? autoWallRadius;
   const hasPdf = pageCount > 0;
+  const hasElaboratoPlan = Boolean(hasPdf || linkedRemotePlan || documentSource);
   const allSelections = Array.from(runtimeRef.current.selectionsByPage.values()).flat();
   const allLotBoundaries = Array.from(runtimeRef.current.lotBoundariesByPage.values()).flat();
   const selections = hasPdf ? currentSelections() : [];
@@ -1664,7 +1672,12 @@ export default function PlanimetriaEditor({
     Boolean(selectedLotBoundaryId);
   const hasCurrentPageAreas = selections.length > 0;
   const hasCurrentPageLotBoundary = currentLotBoundaries.length > 0;
-  const canSaveDraft = Boolean(documentSource || allSelections.length > 0 || allLotBoundaries.length > 0);
+  const canSaveDraft = Boolean(
+    documentSource
+    || allSelections.length > 0
+    || allLotBoundaries.length > 0
+    || (!hasElaboratoPlan && lotValuation.manualAreaM2 > 0),
+  );
   const currentPageRotation = currentPage ? runtimeRef.current.pageRotations.get(currentPage) ?? 0 : 0;
 
   const baseSelectedAreas = useMemo(
@@ -1722,6 +1735,7 @@ export default function PlanimetriaEditor({
       ),
     [allLotBoundaries, scaleDenominator, sheetSize, revision],
   );
+  const effectiveLotArea = hasElaboratoPlan ? tracedLotArea : lotValuation.manualAreaM2;
 
   const selectedLotStats = useMemo(
     () =>
@@ -1739,8 +1753,8 @@ export default function PlanimetriaEditor({
   );
 
   const resolvedLotValuation = useMemo(
-    () => resolveLotValuation(lotValuation, tracedLotArea, selectedLotStats.destinationValue),
-    [lotValuation, selectedLotStats.destinationValue, tracedLotArea],
+    () => resolveLotValuation(lotValuation, effectiveLotArea, selectedLotStats.destinationValue),
+    [effectiveLotArea, lotValuation, selectedLotStats.destinationValue],
   );
 
   const selectedAreas = useMemo(
@@ -1785,12 +1799,12 @@ export default function PlanimetriaEditor({
     return {
       ...base,
       destinationAmount,
-      lotArea: tracedLotArea,
+      lotArea: effectiveLotArea,
       lotValue: resolvedLotValuation.lotValue,
       amount,
       rendita: estimatedRenditaFromAmount(amount),
     };
-  }, [resolvedLotValuation.lotValue, selectedAreas, tracedLotArea]);
+  }, [effectiveLotArea, resolvedLotValuation.lotValue, selectedAreas]);
 
   const areaBreakdowns = useMemo(() => {
     const grouped = new Map<
@@ -2126,6 +2140,7 @@ export default function PlanimetriaEditor({
       calibration: null,
     };
     pageScalesRef.current = new Map();
+    detectedPageRotationsRef.current = new Map();
     setCurrentPage(0);
     setPageCount(0);
     setFileName("");
@@ -2300,7 +2315,7 @@ export default function PlanimetriaEditor({
         if (!latestJob || disposed) return;
         setScaleExtractionJob(latestJob);
         if (latestJob.status === "SUCCEEDED") {
-          applyScaleExtractionJob(latestJob, { silent: true });
+          await applyScaleExtractionJob(latestJob, { silent: true });
         }
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -2648,7 +2663,7 @@ export default function PlanimetriaEditor({
       setScaleExtractionJob(job);
       if (job.status === "SUCCEEDED" || job.status === "FAILED") {
         setScaleExtractionBusy(false);
-        applyScaleExtractionJob(job, { forceActiveScale: true });
+        await applyScaleExtractionJob(job, { forceActiveScale: true });
         return;
       }
     }
@@ -2656,7 +2671,7 @@ export default function PlanimetriaEditor({
     setStatus("Analisi scala ancora in corso");
   }
 
-  function applyScaleExtractionJob(
+  async function applyScaleExtractionJob(
     job: ScaleExtractionJob,
     options: { forceActiveScale?: boolean; silent?: boolean } = {},
   ) {
@@ -2674,10 +2689,14 @@ export default function PlanimetriaEditor({
               confidence: job.confidence ?? 0,
               evidence: job.evidence,
               warnings: job.warnings,
+              orientation: null,
             }]
           : [];
     const detectedPages = extractedPages.filter((item) => item.scale);
-    if (detectedPages.length === 0) {
+    const detectedOrientations = extractedPages.filter(
+      (item) => item.orientation && item.orientation.confidence >= 0.65,
+    );
+    if (detectedPages.length === 0 && detectedOrientations.length === 0) {
       setStatus("Scala non rilevata nella planimetria");
       return;
     }
@@ -2685,6 +2704,31 @@ export default function PlanimetriaEditor({
     let appliedCount = 0;
     let preservedCount = 0;
     let lowConfidenceCount = 0;
+    let orientationAppliedCount = 0;
+    let rerenderCurrentPage = false;
+    detectedOrientations.forEach((result) => {
+      const orientation = result.orientation;
+      if (!orientation) return;
+      detectedPageRotationsRef.current.set(result.page, orientation.rotation);
+      const pendingDraft = pendingDraftRef.current;
+      const draftHasRotation = Object.prototype.hasOwnProperty.call(
+        pendingDraft?.pageRotations ?? {},
+        String(result.page),
+      );
+      const pageHasGeometry =
+        pendingDraft?.selections.some((selection) => selection.page === result.page) === true
+        || pendingDraft?.lotBoundaries?.some((boundary) => boundary.page === result.page) === true
+        || (runtimeRef.current.selectionsByPage.get(result.page)?.length ?? 0) > 0
+        || (runtimeRef.current.lotBoundariesByPage.get(result.page)?.length ?? 0) > 0;
+      const runtimeHasRotation = runtimeRef.current.pageRotations.has(result.page);
+      if (draftHasRotation || pageHasGeometry || runtimeHasRotation) return;
+      if (orientation.rotation === 0) return;
+      runtimeRef.current.pageRotations.set(result.page, orientation.rotation);
+      orientationAppliedCount += 1;
+      if (runtimeRef.current.pdfDoc && runtimeRef.current.currentPage === result.page) {
+        rerenderCurrentPage = true;
+      }
+    });
     extractedPages.forEach((result) => {
       if (!result.scale) return;
       const current = clonePageScale(pageScaleFor(result.page));
@@ -2717,13 +2761,24 @@ export default function PlanimetriaEditor({
       else appliedCount += 1;
     });
     activatePageScale(runtimeRef.current.currentPage || 1);
+    if (rerenderCurrentPage) {
+      await renderPage(runtimeRef.current.currentPage);
+      redrawMasks();
+    }
     if (!options.silent) markDirty();
     bumpRevision();
     if (appliedCount > 0) {
       setStatus(
         `Scala AI applicata su ${appliedCount} ${appliedCount === 1 ? "pagina" : "pagine"}`
         + (preservedCount > 0 ? `; ${preservedCount} manuali mantenute` : "")
-        + (lowConfidenceCount > 0 ? `; ${lowConfidenceCount} a bassa confidenza non applicate` : ""),
+        + (lowConfidenceCount > 0 ? `; ${lowConfidenceCount} a bassa confidenza non applicate` : "")
+        + (orientationAppliedCount > 0
+          ? `; orientamento corretto su ${orientationAppliedCount} ${orientationAppliedCount === 1 ? "pagina" : "pagine"}`
+          : ""),
+      );
+    } else if (orientationAppliedCount > 0) {
+      setStatus(
+        `Orientamento corretto su ${orientationAppliedCount} ${orientationAppliedCount === 1 ? "pagina" : "pagine"}`,
       );
     } else if (preservedCount > 0) {
       setStatus("Scale AI rilevate; scale manuali delle pagine mantenute");
@@ -2746,6 +2801,19 @@ export default function PlanimetriaEditor({
       runtime.currentPage = 1;
       runtime.pageCount = pdfDoc.numPages;
       runtime.pageRotations = parsePageRotations(pendingDraftRef.current?.pageRotations);
+      const draftPagesWithGeometry = new Set([
+        ...(pendingDraftRef.current?.selections ?? []).map((selection) => selection.page),
+        ...(pendingDraftRef.current?.lotBoundaries ?? []).map((boundary) => boundary.page),
+      ]);
+      detectedPageRotationsRef.current.forEach((rotation, page) => {
+        if (
+          rotation !== 0
+          && !runtime.pageRotations.has(page)
+          && !draftPagesWithGeometry.has(page)
+        ) {
+          runtime.pageRotations.set(page, rotation);
+        }
+      });
       runtimeRef.current = runtime;
       setZoomPercent(100);
       setFileName(name);
@@ -2984,6 +3052,7 @@ export default function PlanimetriaEditor({
         mode: resolvedLotValuation.mode,
         percentage: resolvedLotValuation.percentage,
         unitValuePerM2: resolvedLotValuation.unitValuePerM2,
+        manualAreaM2: lotValuation.manualAreaM2,
       },
       defaultOneri,
       lotBoundaries: lotBoundariesToSave,
@@ -5948,6 +6017,7 @@ export default function PlanimetriaEditor({
       mode,
       percentage: resolvedLotValuation.percentage,
       unitValuePerM2: resolvedLotValuation.unitValuePerM2,
+      manualAreaM2: lotValuation.manualAreaM2,
     });
     setStatus(mode === "percentage" ? "Lotto valorizzato in percentuale" : "Lotto valorizzato al metro quadro");
     markDirty();
@@ -5968,8 +6038,9 @@ export default function PlanimetriaEditor({
         mode,
         percentage: field === "percentage" ? parsed : resolvedLotValuation.percentage,
         unitValuePerM2: field === "unitValuePerM2" ? parsed : resolvedLotValuation.unitValuePerM2,
+        manualAreaM2: lotValuation.manualAreaM2,
       },
-      tracedLotArea,
+      effectiveLotArea,
       selectedLotStats.destinationValue,
     );
     recordUndoState();
@@ -5977,12 +6048,39 @@ export default function PlanimetriaEditor({
       mode: nextValuation.mode,
       percentage: nextValuation.percentage,
       unitValuePerM2: nextValuation.unitValuePerM2,
+      manualAreaM2: nextValuation.manualAreaM2,
     });
     setStatus(
       field === "percentage"
         ? `Percentuale aggiornata; valore derivato ${areaFormatter.format(nextValuation.unitValuePerM2)} €/m²`
         : `Valore unitario aggiornato; incidenza derivata ${areaFormatter.format(nextValuation.percentage)}%`,
     );
+    markDirty();
+    bumpRevision();
+    return parsed;
+  }
+
+  function changeManualLotArea(rawValue: string) {
+    const parsed = parseNumberInput(rawValue);
+    if (parsed === null || parsed < 0) {
+      setStatus("Inserisci una superficie lotto valida");
+      bumpRevision();
+      return null;
+    }
+    if (lotValuation.manualAreaM2 === parsed) return parsed;
+    const nextValuation = resolveLotValuation(
+      { ...lotValuation, manualAreaM2: parsed },
+      parsed,
+      selectedLotStats.destinationValue,
+    );
+    recordUndoState();
+    setLotValuation({
+      mode: nextValuation.mode,
+      percentage: nextValuation.percentage,
+      unitValuePerM2: nextValuation.unitValuePerM2,
+      manualAreaM2: parsed,
+    });
+    setStatus(`Superficie lotto manuale aggiornata: ${formatM2(parsed)}`);
     markDirty();
     bumpRevision();
     return parsed;
@@ -8119,9 +8217,23 @@ export default function PlanimetriaEditor({
     if (changed) recordUndoState();
     setScaleDenominator(nextScale);
     setSheetSize(scaleModalSheetSize);
-    if (changed) setScaleSource("USER");
+    if (changed) {
+      setScaleSource("USER");
+      setCalibration(null);
+      putPageScale(currentPage, {
+        ...pageScaleFor(currentPage),
+        scaleDenominator: nextScale,
+        sheetSize: scaleModalSheetSize,
+        scaleSource: "USER",
+        calibration: null,
+      });
+    }
     setScaleInputValue(String(nextScale));
-    if (changed) markDirty();
+    if (changed) {
+      markDirty();
+      bumpRevision();
+      setStatus(`Scala manuale 1:${nextScale} applicata alla pagina ${currentPage}`);
+    }
     return nextScale;
   }
 
@@ -9715,6 +9827,29 @@ export default function PlanimetriaEditor({
                   {!lotValuationCollapsed && (
                     <div className="editor-summary-collapse-content">
                       <div className="editor-lot-valuation">
+                        {!hasElaboratoPlan && (
+                          <label className="lot-manual-area-field">
+                            <span>
+                              Superficie lotto manuale
+                              <small>Disponibile perché l’elaborato planimetrico non è presente</small>
+                            </span>
+                            <div>
+                              <input
+                                key={`manual-lot-area-${lotValuation.manualAreaM2}`}
+                                type="text"
+                                inputMode="decimal"
+                                defaultValue={areaFormatter.format(lotValuation.manualAreaM2)}
+                                onBlur={(event) => {
+                                  const nextValue = changeManualLotArea(event.currentTarget.value);
+                                  event.currentTarget.value = areaFormatter.format(
+                                    nextValue ?? lotValuation.manualAreaM2,
+                                  );
+                                }}
+                              />
+                              <strong>m²</strong>
+                            </div>
+                          </label>
+                        )}
                         <div className="lot-mode-toggle" role="group" aria-label="Metodo di valorizzazione del lotto">
                           <button
                             type="button"
@@ -9768,11 +9903,12 @@ export default function PlanimetriaEditor({
                         </div>
                         <small className="lot-calculation-formula">
                           {lotValuation.mode === "percentage"
-                            ? `${moneyFormatter.format(selectedLotStats.destinationValue)} × ${areaFormatter.format(resolvedLotValuation.percentage)}% = ${moneyFormatter.format(resolvedLotValuation.lotValue)}; ${moneyFormatter.format(resolvedLotValuation.lotValue)} ÷ ${formatM2(tracedLotArea)} = ${areaFormatter.format(resolvedLotValuation.unitValuePerM2)} €/m²`
-                            : `${formatM2(tracedLotArea)} × ${areaFormatter.format(resolvedLotValuation.unitValuePerM2)} €/m² = ${moneyFormatter.format(resolvedLotValuation.lotValue)}; ${moneyFormatter.format(resolvedLotValuation.lotValue)} ÷ ${moneyFormatter.format(selectedLotStats.destinationValue)} = ${areaFormatter.format(resolvedLotValuation.percentage)}%`}
+                            ? `${moneyFormatter.format(selectedLotStats.destinationValue)} × ${areaFormatter.format(resolvedLotValuation.percentage)}% = ${moneyFormatter.format(resolvedLotValuation.lotValue)}; ${moneyFormatter.format(resolvedLotValuation.lotValue)} ÷ ${formatM2(effectiveLotArea)} = ${areaFormatter.format(resolvedLotValuation.unitValuePerM2)} €/m²`
+                            : `${formatM2(effectiveLotArea)} × ${areaFormatter.format(resolvedLotValuation.unitValuePerM2)} €/m² = ${moneyFormatter.format(resolvedLotValuation.lotValue)}; ${moneyFormatter.format(resolvedLotValuation.lotValue)} ÷ ${moneyFormatter.format(selectedLotStats.destinationValue)} = ${areaFormatter.format(resolvedLotValuation.percentage)}%`}
                         </small>
                         <small className="editor-lot-selection-meta">
-                          Superficie lotto tracciata: {formatM2(totals.lotArea)} · {selectedLotStats.count} destinazioni incluse
+                          {hasElaboratoPlan ? "Superficie lotto tracciata" : "Superficie lotto manuale"}:{" "}
+                          {formatM2(totals.lotArea)} · {selectedLotStats.count} destinazioni incluse
                         </small>
                       </div>
                     </div>

@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 import { ScaleExtractionStatus } from "../generated/prisma/enums.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -30,6 +35,9 @@ type PageScaleExtractionResult = {
   scale_denominator: number | null;
   scale_label: string | null;
   sheet_size: "A3" | "A4" | null;
+  orientation_rotation: PageRotation | null;
+  orientation_confidence: number;
+  orientation_evidence: string | null;
   confidence: number;
   evidence: string | null;
   warnings: string[];
@@ -39,70 +47,71 @@ type ScaleExtractionResult = PageScaleExtractionResult & {
   pages: PageScaleExtractionResult[];
 };
 
-const DEFAULT_SCALE_MODEL = "qwen/qwen3.5-flash-02-23";
+type PdfScaleSource = {
+  fileName: string;
+  fileBuffer: Buffer;
+  sizeBytes: number;
+};
 
-const SCALE_EXTRACTION_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["pages"],
-  properties: {
-    pages: {
-      type: "array",
-      minItems: 1,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: [
-          "page_number",
-          "found",
-          "scale_denominator",
-          "scale_label",
-          "sheet_size",
-          "confidence",
-          "evidence",
-          "warnings",
-        ],
-        properties: {
-          page_number: { type: "integer", minimum: 1 },
-          found: { type: "boolean" },
-          scale_denominator: {
-            anyOf: [{ type: "integer", minimum: 20, maximum: 20000 }, { type: "null" }],
-          },
-          scale_label: {
-            anyOf: [{ type: "string" }, { type: "null" }],
-          },
-          sheet_size: {
-            anyOf: [{ type: "string", enum: ["A3", "A4"] }, { type: "null" }],
-          },
-          confidence: { type: "number", minimum: 0, maximum: 1 },
-          evidence: {
-            anyOf: [{ type: "string" }, { type: "null" }],
-          },
-          warnings: {
-            type: "array",
-            items: { type: "string" },
-          },
-        },
-      },
-    },
-  },
-} as const;
+type PageRotation = 0 | 90 | 180 | 270;
+
+type PdfPageOrientation = {
+  rotation: PageRotation;
+  confidence: number;
+  evidence: string;
+};
+
+type RenderedPdfPage = {
+  pageNumber: number;
+  imageDataUrl: string;
+  detailImages: Array<{
+    label: string;
+    imageDataUrl: string;
+  }>;
+  sheetSize: "A3" | "A4" | null;
+  orientation: PdfPageOrientation | null;
+};
+
+const execFileAsync = promisify(execFile);
+const DEFAULT_SCALE_MODEL = "qwen3.6-35b-fast";
+const DEFAULT_NEURALWATT_API_URL = "https://api.neuralwatt.com/v1/chat/completions";
+const DEFAULT_RENDER_DPI = 180;
+const DEFAULT_MAX_PAGES = 24;
+const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
 
 @Injectable()
 export class ScaleExtractionService {
   private readonly model: string;
-  private readonly siteUrl: string;
-  private readonly appTitle: string;
-  private readonly pdfEngine: string;
+  private readonly neuralwattApiUrl: string;
+  private readonly renderDpi: number;
+  private readonly maxPages: number;
+  private readonly requestTimeoutMs: number;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {
-    this.model = optionalConfig(config.get<string>("OPENROUTER_SCALE_MODEL")) ?? DEFAULT_SCALE_MODEL;
-    this.siteUrl = optionalConfig(config.get<string>("OPENROUTER_SITE_URL")) ?? "http://localhost:8080";
-    this.appTitle = optionalConfig(config.get<string>("OPENROUTER_APP_TITLE")) ?? "Soul Prospect Qualifier";
-    this.pdfEngine = optionalConfig(config.get<string>("OPENROUTER_PDF_ENGINE")) ?? "mistral-ocr";
+    this.model = optionalConfig(config.get<string>("NEURALWATT_SCALE_MODEL")) ?? DEFAULT_SCALE_MODEL;
+    this.neuralwattApiUrl =
+      optionalConfig(config.get<string>("NEURALWATT_API_URL")) ?? DEFAULT_NEURALWATT_API_URL;
+    this.renderDpi = integerConfig(
+      config.get<string>("NEURALWATT_SCALE_RENDER_DPI"),
+      DEFAULT_RENDER_DPI,
+      120,
+      300,
+    );
+    this.maxPages = integerConfig(
+      config.get<string>("NEURALWATT_SCALE_MAX_PAGES"),
+      DEFAULT_MAX_PAGES,
+      1,
+      100,
+    );
+    this.requestTimeoutMs = integerConfig(
+      config.get<string>("NEURALWATT_SCALE_TIMEOUT_MS"),
+      DEFAULT_REQUEST_TIMEOUT_MS,
+      5_000,
+      120_000,
+    );
   }
 
   async getJobs(propertyId: string) {
@@ -136,7 +145,7 @@ export class ScaleExtractionService {
   async createFromBase64(propertyId: string, body: unknown, wait = false) {
     await this.requireProperty(propertyId);
     const input = this.validateCreateInput(body);
-    const { buffer, sha256, dataUrl } = decodePdfBase64(input.file_base64, input.file_name);
+    const { buffer, sha256 } = decodePdfBase64(input.file_base64, input.file_name);
     if (input.sha256 && input.sha256.toLowerCase() !== sha256) {
       throw new BadRequestException(`SHA256 non coerente per ${input.file_name}`);
     }
@@ -156,7 +165,7 @@ export class ScaleExtractionService {
       job.id,
       {
         fileName: input.file_name,
-        fileData: dataUrl,
+        fileBuffer: buffer,
         sizeBytes: buffer.byteLength,
       },
       { forceActiveScale: input.apply_active_scale === true },
@@ -168,7 +177,7 @@ export class ScaleExtractionService {
   }
 
   async enqueueDocumentPdf(input: EnqueueDocumentPdfInput) {
-    const { buffer, sha256, dataUrl } = decodePdfBase64(input.fileBase64, input.fileName);
+    const { buffer, sha256 } = decodePdfBase64(input.fileBase64, input.fileName);
     if (input.sha256 && input.sha256.toLowerCase() !== sha256) {
       throw new BadRequestException(`SHA256 non coerente per ${input.fileName}`);
     }
@@ -186,7 +195,7 @@ export class ScaleExtractionService {
 
     const process = this.runJob(job.id, {
       fileName: input.fileName,
-      fileData: dataUrl,
+      fileBuffer: buffer,
       sizeBytes: buffer.byteLength,
     });
     void process.catch((error) => console.error("Scale extraction job failed", error));
@@ -195,7 +204,7 @@ export class ScaleExtractionService {
 
   private async runJob(
     jobId: string,
-    source: { fileName: string; fileData: string; sizeBytes: number },
+    source: PdfScaleSource,
     options: { forceActiveScale?: boolean } = {},
   ) {
     const startedAt = new Date();
@@ -225,6 +234,7 @@ export class ScaleExtractionService {
           completedAt,
         },
       });
+      await this.persistDetectedOrientations(updatedJob.propertyId, result);
       if (result.found && result.scale_denominator) {
         await this.persistDetectedScale(updatedJob.propertyId, result, completedAt, options);
       }
@@ -242,33 +252,99 @@ export class ScaleExtractionService {
     }
   }
 
-  private async extractScale(source: { fileName: string; fileData: string; sizeBytes: number }) {
-    const primary = parseOpenRouterExtraction(await this.callOpenRouterScaleExtraction(source, false));
-    if (!primary.found && primary.confidence === 0 && !primary.evidence) {
+  private async extractScale(source: PdfScaleSource): Promise<ScaleExtractionResult> {
+    const renderedPages = await renderPdfPages(source, this.renderDpi, this.maxPages);
+    const pages: PageScaleExtractionResult[] = [];
+    for (const page of renderedPages) {
+      let primary: PageScaleExtractionResult;
       try {
-        const retry = parseOpenRouterExtraction(await this.callOpenRouterScaleExtraction(source, true));
-        if (retry.found || retry.evidence || retry.confidence > primary.confidence) return retry;
+        primary = parseNeuralwattPageExtraction(
+          await this.callNeuralwattScaleExtraction(page, false),
+          page,
+        );
       } catch (error) {
-        return {
-          ...primary,
-          warnings: [
-            ...primary.warnings,
-            error instanceof Error ? `Secondo tentativo non riuscito: ${error.message}` : "Secondo tentativo non riuscito",
-          ],
-        };
+        primary = parseNeuralwattPageExtraction(
+          await this.callNeuralwattScaleExtraction(page, true),
+          page,
+        );
+        primary.warnings = [
+          ...primary.warnings,
+          error instanceof Error
+            ? `Primo tentativo non riuscito: ${error.message}`
+            : "Primo tentativo non riuscito",
+        ];
       }
+      if (!primary.found && primary.confidence === 0 && !primary.evidence) {
+        try {
+          const retry = parseNeuralwattPageExtraction(
+            await this.callNeuralwattScaleExtraction(page, true),
+            page,
+          );
+          if (retry.found || retry.evidence || retry.confidence > primary.confidence) {
+            primary = retry;
+          }
+        } catch (error) {
+          primary.warnings = [
+            ...primary.warnings,
+            error instanceof Error
+              ? `Secondo tentativo non riuscito: ${error.message}`
+              : "Secondo tentativo non riuscito",
+          ];
+        }
+      }
+      pages.push(primary);
     }
-    return primary;
+    const primary = pages.find((page) => page.found) ?? pages[0];
+    if (!primary) throw new Error("Il PDF non contiene pagine renderizzabili");
+    return { ...primary, pages };
   }
 
-  private async callOpenRouterScaleExtraction(
-    source: { fileName: string; fileData: string; sizeBytes: number },
+  private async callNeuralwattScaleExtraction(
+    page: RenderedPdfPage,
     retry: boolean,
   ) {
-    const apiKey = optionalConfig(this.config.get<string>("OPENROUTER_API_KEY"));
+    const apiKey = optionalConfig(this.config.get<string>("NEURALWATT_API_KEY"));
     if (!apiKey || apiKey.includes("REPLACE_")) {
-      throw new InternalServerErrorException("OPENROUTER_API_KEY non configurata per estrazione scala");
+      throw new InternalServerErrorException("NEURALWATT_API_KEY non configurata per estrazione scala");
     }
+
+    const primaryViews = page.detailImages.filter((view) =>
+      view.label === "margine superiore"
+      || view.label === "margine inferiore"
+      || view.label === "margine sinistro, ruotato 90 gradi"
+      || view.label === "margine sinistro, ruotato 270 gradi",
+    );
+    const retryViews = page.detailImages.filter((view) =>
+      view.label === "margine destro"
+      || view.label === "margine destro, ruotato 90 gradi"
+      || view.label === "margine destro, ruotato 270 gradi",
+    );
+    const imageViews =
+      !retry && primaryViews.length > 0
+        ? primaryViews.slice(0, 4)
+        : [
+            { label: "pagina completa", imageDataUrl: page.imageDataUrl },
+            ...retryViews,
+          ].slice(0, 4);
+    const content: JsonRecord[] = [
+      {
+        type: "text",
+        text:
+          `Analizza la pagina ${page.pageNumber}. Cerca una dicitura nel formato 'Scala 1:N', dove N è il denominatore da trascrivere. ` +
+          "Devi accettare SOLO un denominatore adiacente alla parola 'Scala': ignora completamente tutti gli altri numeri nel disegno, anche se sembrano denominatori plausibili. La dicitura può essere piccola, verticale o ruotata: esamina mentalmente ogni vista a 0, 90, 180 e 270 gradi. Le immagini successive sono viste della stessa pagina, non pagine diverse. La frase di footer 'Fattore di scala non utilizzabile' riguarda il fattore del file e non annulla una diversa dicitura stampata 'Scala 1:N'. Se non trovi la parola 'Scala' con il rapporto accanto, usa found=false e valori null. Copia in evidence la dicitura esatta letta. " +
+          `Il formato fisico della pagina PDF rilevato dai metadati è ${page.sheetSize ?? "non determinato"}; non provare a ricavare la scala da questo dato. ` +
+          "Restituisci esattamente questi campi: {\"found\":boolean,\"scale_denominator\":number|null,\"scale_label\":string|null,\"sheet_size\":\"A3\"|\"A4\"|null,\"confidence\":number,\"evidence\":string|null,\"warnings\":string[]}." +
+          (retry
+            ? " Questo è un secondo tentativo: verifica prima i margini della tavola e poi il cartiglio, ruotando mentalmente l'immagine."
+            : ""),
+      },
+    ];
+    imageViews.forEach((view) => {
+      content.push(
+        { type: "text", text: `Vista: ${view.label}` },
+        { type: "image_url", image_url: { url: view.imageDataUrl } },
+      );
+    });
 
     const payload: JsonRecord = {
       model: this.model,
@@ -276,74 +352,30 @@ export class ScaleExtractionService {
         {
           role: "system",
           content:
-            "Sei un tecnico catastale. Analizza ogni pagina separatamente ed estrai solo scale esplicite da planimetrie PDF o elaborati planimetrici catastali. Restituisci una voce per ogni pagina del PDF, nel medesimo ordine e con page_number a partire da 1. Non propagare mai la scala di una pagina alle altre. Se leggi una dicitura come 'Scala 1:500' o 'Scala 1 : 500' devi impostare found=true e scale_denominator=500 per quella sola pagina. Rispondi esclusivamente JSON valido conforme allo schema.",
+            "Sei un tecnico catastale. Devi leggere la scala esplicita stampata in una singola pagina di una planimetria o di un elaborato planimetrico italiano. Accetta il denominatore solo quando appartiene alla stessa etichetta che contiene la parola 'Scala'. Non dedurre mai la scala da particelle, subalterni, quote, protocolli o altri numeri presenti nel disegno. Rispondi esclusivamente con un oggetto JSON valido, senza testo introduttivo.",
         },
         {
           role: "user",
-          content: [
-            {
-              type: "text",
-              text:
-                "Analizza separatamente tutte le pagine del PDF della planimetria catastale e trova per ciascuna il rapporto di scala, per esempio 'Scala 1:500', 'Scala 1 : 500', '1/200' o simili. Inserisci sempre una voce per ogni pagina, anche quando la scala non è presente. Non inferire la scala dal formato foglio A3/A4 e non riutilizzare su una pagina la scala letta in un'altra. La dicitura 'Fattore di scala non utilizzabile' riguarda il fattore di stampa/acquisizione: non usarla come scala e non scartare un'altra dicitura esplicita come 'Scala 1:500'. Se in una pagina non trovi una scala esplicita, usa found=false e valori null per quella pagina. Riporta in evidence il testo o la zona che giustifica la risposta." +
-                (retry
-                  ? " Questo e un secondo tentativo: controlla con attenzione il testo OCR e, se trovi una riga con 'Scala 1 : N', restituisci quella scala."
-                  : ""),
-            },
-            {
-              type: "file",
-              file: {
-                filename: source.fileName,
-                file_data: source.fileData,
-              },
-            },
-          ],
+          content,
         },
       ],
       temperature: 0,
-      seed: retry ? 43 : 42,
-      max_tokens: 4000,
-      include_reasoning: false,
-      reasoning: {
-        exclude: true,
-      },
-      plugins: [
-        {
-          id: "file-parser",
-          pdf: {
-            engine: this.pdfEngine,
-          },
-        },
-      ],
+      max_tokens: 900,
     };
 
-    if (!retry) {
-      payload.response_format = {
-        type: "json_schema",
-        json_schema: {
-          name: "planimetria_scale_extraction",
-          strict: true,
-          schema: SCALE_EXTRACTION_SCHEMA,
-        },
-      };
-      payload.provider = {
-        require_parameters: true,
-      };
-    }
-
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch(this.neuralwattApiUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": this.siteUrl,
-        "X-Title": this.appTitle,
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
     });
 
     const rawBody = await response.text();
     if (!response.ok) {
-      throw new Error(`OpenRouter HTTP ${response.status}: ${rawBody.slice(0, 500)}`);
+      throw new Error(`NeuralWatt HTTP ${response.status}: ${safeProviderError(rawBody)}`);
     }
     return rawBody;
   }
@@ -451,6 +483,45 @@ export class ScaleExtractionService {
     });
   }
 
+  private async persistDetectedOrientations(
+    propertyId: string,
+    result: ScaleExtractionResult,
+  ) {
+    const detected = result.pages.filter(
+      (page): page is PageScaleExtractionResult & { orientation_rotation: PageRotation } =>
+        page.orientation_rotation !== null && page.orientation_confidence >= 0.65,
+    );
+    if (detected.length === 0) return;
+    const draft = await this.prisma.planAnalysisDraft.findUnique({
+      where: { propertyId },
+      select: { payload: true },
+    });
+    if (!draft) return;
+    const payload =
+      draft.payload && typeof draft.payload === "object" && !Array.isArray(draft.payload)
+        ? { ...(draft.payload as Record<string, unknown>) }
+        : {};
+    const existing =
+      payload.pageRotations && typeof payload.pageRotations === "object"
+      && !Array.isArray(payload.pageRotations)
+        ? { ...(payload.pageRotations as Record<string, unknown>) }
+        : {};
+    detected.forEach((page) => {
+      const key = String(page.page_number);
+      if (Object.prototype.hasOwnProperty.call(existing, key)) return;
+      if (page.orientation_rotation !== 0) existing[key] = page.orientation_rotation;
+    });
+    await this.prisma.planAnalysisDraft.update({
+      where: { propertyId },
+      data: {
+        payload: {
+          ...payload,
+          pageRotations: existing,
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
   private validateCreateInput(body: unknown): CreateScaleExtractionInput {
     const input = asRecord(body, "payload");
     const fileName = requiredString(input.file_name, "file_name");
@@ -517,6 +588,376 @@ export class ScaleExtractionService {
   }
 }
 
+async function renderPdfPages(
+  source: PdfScaleSource,
+  dpi: number,
+  maxPages: number,
+): Promise<RenderedPdfPage[]> {
+  if (source.sizeBytes <= 0 || source.fileBuffer.byteLength === 0) {
+    throw new Error(`PDF vuoto: ${source.fileName}`);
+  }
+  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "soul-scale-"));
+  const pdfPath = path.join(temporaryDirectory, "source.pdf");
+  const outputPrefix = path.join(temporaryDirectory, "page");
+  try {
+    await fs.writeFile(pdfPath, source.fileBuffer);
+    const basicInfo = await execFileAsync("pdfinfo", [pdfPath], {
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    const pageCount = pdfPageCount(String(basicInfo.stdout));
+    if (pageCount < 1) throw new Error(`Nessuna pagina trovata in ${source.fileName}`);
+    if (pageCount > maxPages) {
+      throw new Error(
+        `${source.fileName} contiene ${pageCount} pagine; il limite configurato è ${maxPages}`,
+      );
+    }
+
+    const detailedInfo = await execFileAsync(
+      "pdfinfo",
+      ["-f", "1", "-l", String(pageCount), pdfPath],
+      {
+        encoding: "utf8",
+        timeout: 30_000,
+        maxBuffer: 4 * 1024 * 1024,
+      },
+    );
+    const pageMetadata = pdfPageMetadata(String(detailedInfo.stdout));
+    const pageOrientations = await detectPdfPageOrientations(pdfPath, temporaryDirectory);
+    await execFileAsync(
+      "pdftoppm",
+      [
+        "-f",
+        "1",
+        "-l",
+        String(pageCount),
+        "-r",
+        String(dpi),
+        "-jpeg",
+        "-jpegopt",
+        "quality=88,optimize=y",
+        pdfPath,
+        outputPrefix,
+      ],
+      {
+        timeout: 120_000,
+        maxBuffer: 4 * 1024 * 1024,
+      },
+    );
+
+    const renderedFiles = (await fs.readdir(temporaryDirectory))
+      .map((fileName) => ({
+        fileName,
+        pageNumber: Number(fileName.match(/^page-(\d+)\.jpg$/)?.[1] ?? 0),
+      }))
+      .filter((entry) => entry.pageNumber > 0)
+      .sort((left, right) => left.pageNumber - right.pageNumber);
+    if (renderedFiles.length !== pageCount) {
+      throw new Error(
+        `Rendering incompleto di ${source.fileName}: ${renderedFiles.length}/${pageCount} pagine`,
+      );
+    }
+
+    const pages: RenderedPdfPage[] = [];
+    for (const { fileName, pageNumber } of renderedFiles) {
+      const imagePath = path.join(temporaryDirectory, fileName);
+      const image = await fs.readFile(imagePath);
+      const metadata = pageMetadata.get(pageNumber);
+      const detailImages = metadata
+        ? await renderJpegMarginCrops(
+            imagePath,
+            temporaryDirectory,
+            pageNumber,
+            metadata.widthPoints,
+            metadata.heightPoints,
+            dpi,
+          )
+        : [];
+      pages.push({
+        pageNumber,
+        imageDataUrl: `data:image/jpeg;base64,${image.toString("base64")}`,
+        detailImages,
+        sheetSize: metadata?.sheetSize ?? null,
+        orientation: pageOrientations.get(pageNumber) ?? null,
+      });
+    }
+    return pages;
+  } finally {
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+function pdfPageCount(info: string) {
+  const count = Number(info.match(/^Pages:\s+(\d+)$/im)?.[1] ?? 0);
+  return Number.isInteger(count) ? count : 0;
+}
+
+function pdfPageMetadata(info: string) {
+  const pages = new Map<
+    number,
+    { widthPoints: number; heightPoints: number; sheetSize: "A3" | "A4" | null }
+  >();
+  const pagePattern =
+    /^Page\s+(\d+)\s+size:\s+([\d.]+)\s+x\s+([\d.]+)\s+pts(?:\s+\(([^)]+)\))?/gim;
+  for (const match of info.matchAll(pagePattern)) {
+    const pageNumber = Number(match[1]);
+    const widthPoints = Number(match[2]);
+    const heightPoints = Number(match[3]);
+    if (pageNumber > 0 && widthPoints > 0 && heightPoints > 0) {
+      pages.set(pageNumber, {
+        widthPoints,
+        heightPoints,
+        sheetSize: sheetSizeFromPdfInfo(widthPoints, heightPoints, match[4]),
+      });
+    }
+  }
+  if (pages.size === 0) {
+    const singlePage = info.match(
+      /^Page size:\s+([\d.]+)\s+x\s+([\d.]+)\s+pts(?:\s+\(([^)]+)\))?/im,
+    );
+    const widthPoints = Number(singlePage?.[1] ?? 0);
+    const heightPoints = Number(singlePage?.[2] ?? 0);
+    if (widthPoints > 0 && heightPoints > 0) {
+      pages.set(1, {
+        widthPoints,
+        heightPoints,
+        sheetSize: sheetSizeFromPdfInfo(widthPoints, heightPoints, singlePage?.[3]),
+      });
+    }
+  }
+  return pages;
+}
+
+async function detectPdfPageOrientations(
+  pdfPath: string,
+  temporaryDirectory: string,
+) {
+  const outputPath = path.join(temporaryDirectory, "text-layout.html");
+  try {
+    await execFileAsync("pdftotext", ["-bbox-layout", pdfPath, outputPath], {
+      timeout: 30_000,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    return pageOrientationsFromBboxHtml(await fs.readFile(outputPath, "utf8"));
+  } catch {
+    // Image-only PDFs and malformed text layers remain usable: orientation is simply left unset.
+    return new Map<number, PdfPageOrientation>();
+  }
+}
+
+export function pageOrientationsFromBboxHtml(html: string) {
+  const orientations = new Map<number, PdfPageOrientation>();
+  const pagePattern = /<page\b[^>]*>([\s\S]*?)<\/page>/gi;
+  let pageNumber = 0;
+  for (const pageMatch of html.matchAll(pagePattern)) {
+    pageNumber += 1;
+    const orientation = dominantTextOrientation(pageMatch[1] ?? "");
+    if (orientation) orientations.set(pageNumber, orientation);
+  }
+  return orientations;
+}
+
+function dominantTextOrientation(pageHtml: string): PdfPageOrientation | null {
+  let horizontalWeight = 0;
+  let verticalWeight = 0;
+  let horizontalForward = 0;
+  let horizontalReverse = 0;
+  let verticalDown = 0;
+  let verticalUp = 0;
+  let horizontalLines = 0;
+  let verticalLines = 0;
+  const linePattern = /<line\b([^>]*)>([\s\S]*?)<\/line>/gi;
+  for (const lineMatch of pageHtml.matchAll(linePattern)) {
+    const lineBox = bboxFromAttributes(lineMatch[1] ?? "");
+    if (!lineBox) continue;
+    const width = lineBox.xMax - lineBox.xMin;
+    const height = lineBox.yMax - lineBox.yMin;
+    if (width < 2 || height < 2) continue;
+    const horizontal = width >= height * 1.8;
+    const vertical = height >= width * 1.8;
+    if (!horizontal && !vertical) continue;
+    const weight = Math.max(width, height);
+    const words = Array.from((lineMatch[2] ?? "").matchAll(/<word\b([^>]*)>/gi))
+      .map((match) => bboxFromAttributes(match[1] ?? ""))
+      .filter((box): box is TextBox => box !== null);
+    if (horizontal) {
+      horizontalWeight += weight;
+      horizontalLines += 1;
+      if (words.length >= 2) {
+        const delta = centerX(words.at(-1)!) - centerX(words[0]);
+        if (delta >= 0) horizontalForward += weight;
+        else horizontalReverse += weight;
+      }
+    } else if (vertical) {
+      verticalWeight += weight;
+      verticalLines += 1;
+      if (words.length >= 2) {
+        const delta = centerY(words.at(-1)!) - centerY(words[0]);
+        if (delta >= 0) verticalDown += weight;
+        else verticalUp += weight;
+      }
+    }
+  }
+
+  const totalWeight = horizontalWeight + verticalWeight;
+  const totalLines = horizontalLines + verticalLines;
+  if (totalLines < 2 || totalWeight < 60) return null;
+  const verticalDominant = verticalWeight > horizontalWeight * 1.2;
+  const horizontalDominant = horizontalWeight >= verticalWeight;
+  if (!verticalDominant && !horizontalDominant) return null;
+
+  const confidence = Math.max(horizontalWeight, verticalWeight) / totalWeight;
+  let rotation: PageRotation;
+  if (verticalDominant) {
+    rotation = verticalUp >= verticalDown ? 90 : 270;
+  } else {
+    rotation = horizontalReverse > horizontalForward * 1.2 ? 180 : 0;
+  }
+  return {
+    rotation,
+    confidence: Math.round(confidence * 1_000) / 1_000,
+    evidence:
+      `${horizontalLines} righe orizzontali (${Math.round(horizontalWeight)} pt) e `
+      + `${verticalLines} verticali (${Math.round(verticalWeight)} pt)`,
+  };
+}
+
+type TextBox = {
+  xMin: number;
+  yMin: number;
+  xMax: number;
+  yMax: number;
+};
+
+function bboxFromAttributes(attributes: string): TextBox | null {
+  const numberAttribute = (name: string) => {
+    const value = attributes.match(new RegExp(`\\b${name}="(-?[\\d.]+)"`, "i"))?.[1];
+    return value === undefined ? Number.NaN : Number(value);
+  };
+  const box = {
+    xMin: numberAttribute("xMin"),
+    yMin: numberAttribute("yMin"),
+    xMax: numberAttribute("xMax"),
+    yMax: numberAttribute("yMax"),
+  };
+  return Object.values(box).every(Number.isFinite) ? box : null;
+}
+
+function centerX(box: TextBox) {
+  return (box.xMin + box.xMax) / 2;
+}
+
+function centerY(box: TextBox) {
+  return (box.yMin + box.yMax) / 2;
+}
+
+function sheetSizeFromPdfInfo(
+  widthPoints: number,
+  heightPoints: number,
+  label?: string,
+): "A3" | "A4" | null {
+  const normalizedLabel = label?.trim().toUpperCase();
+  if (normalizedLabel === "A3" || normalizedLabel === "A4") return normalizedLabel;
+  const shortEdge = Math.min(widthPoints, heightPoints);
+  const longEdge = Math.max(widthPoints, heightPoints);
+  if (Math.abs(shortEdge - 595) <= 25 && Math.abs(longEdge - 842) <= 35) return "A4";
+  if (Math.abs(shortEdge - 842) <= 35 && Math.abs(longEdge - 1_191) <= 50) return "A3";
+  return null;
+}
+
+async function renderJpegMarginCrops(
+  imagePath: string,
+  temporaryDirectory: string,
+  pageNumber: number,
+  widthPoints: number,
+  heightPoints: number,
+  dpi: number,
+) {
+  const width = Math.max(1, Math.round((widthPoints / 72) * dpi));
+  const height = Math.max(1, Math.round((heightPoints / 72) * dpi));
+  const aligned = (value: number) => Math.max(0, Math.floor(value / 16) * 16);
+  const edgeWidth = Math.max(16, aligned(width * 0.32));
+  const edgeHeight = Math.max(16, aligned(height * 0.32));
+  const rightX = aligned(width - edgeWidth);
+  const bottomY = aligned(height - edgeHeight);
+  const crops = [
+    { label: "margine sinistro", geometry: `${edgeWidth}x${height}+0+0` },
+    { label: "margine destro", geometry: `${width - rightX}x${height}+${rightX}+0` },
+    { label: "margine superiore", geometry: `${width}x${edgeHeight}+0+0` },
+    { label: "margine inferiore", geometry: `${width}x${height - bottomY}+0+${bottomY}` },
+  ];
+  try {
+    const baseCrops = await Promise.all(
+      crops.map(async (crop, index) => {
+        const outputPath = path.join(
+          temporaryDirectory,
+          `page-${pageNumber}-detail-${index + 1}.jpg`,
+        );
+        await execFileAsync(
+          "jpegtran",
+          [
+            "-copy",
+            "none",
+            "-crop",
+            crop.geometry,
+            "-outfile",
+            outputPath,
+            imagePath,
+          ],
+          {
+            timeout: 30_000,
+            maxBuffer: 2 * 1024 * 1024,
+          },
+        );
+        const image = await fs.readFile(outputPath);
+        return {
+          outputPath,
+          label: crop.label,
+          imageDataUrl: `data:image/jpeg;base64,${image.toString("base64")}`,
+        };
+      }),
+    );
+    const rotatedVerticalCrops = await Promise.all(
+      baseCrops.slice(0, 2).flatMap((crop, cropIndex) =>
+        [90, 270].map(async (rotation) => {
+          const outputPath = path.join(
+            temporaryDirectory,
+            `page-${pageNumber}-detail-${cropIndex + 1}-rotate-${rotation}.jpg`,
+          );
+          await execFileAsync(
+            "jpegtran",
+            [
+              "-copy",
+              "none",
+              "-rotate",
+              String(rotation),
+              "-outfile",
+              outputPath,
+              crop.outputPath,
+            ],
+            {
+              timeout: 30_000,
+              maxBuffer: 2 * 1024 * 1024,
+            },
+          );
+          const image = await fs.readFile(outputPath);
+          return {
+            label: `${crop.label}, ruotato ${rotation} gradi`,
+            imageDataUrl: `data:image/jpeg;base64,${image.toString("base64")}`,
+          };
+        }),
+      ),
+    );
+    return [
+      ...baseCrops.map(({ label, imageDataUrl }) => ({ label, imageDataUrl })),
+      ...rotatedVerticalCrops,
+    ];
+  } catch {
+    return [];
+  }
+}
+
 function decodePdfBase64(value: string, fileName: string) {
   const payload = value.includes(",") ? value.slice(value.indexOf(",") + 1) : value;
   if (!payload.trim()) throw new BadRequestException(`file_base64 mancante per ${fileName}`);
@@ -526,30 +967,32 @@ function decodePdfBase64(value: string, fileName: string) {
   return {
     buffer,
     sha256,
-    dataUrl: `data:application/pdf;base64,${buffer.toString("base64")}`,
   };
 }
 
-function parseOpenRouterExtraction(rawBody: string) {
-  const data = parseJsonRecord(rawBody, "risposta OpenRouter");
+function parseNeuralwattPageExtraction(rawBody: string, page: RenderedPdfPage) {
+  const data = parseJsonRecord(rawBody, "risposta NeuralWatt");
   if (!Array.isArray(data.choices)) {
-    const message = openRouterErrorMessage(data);
-    throw new Error(message ? `OpenRouter: ${message}` : "OpenRouter non ha restituito choices");
+    const message = providerErrorMessage(data);
+    throw new Error(message ? `NeuralWatt: ${message}` : "NeuralWatt non ha restituito choices");
   }
   const choices = asArray(data.choices, "choices");
   const choice = choices[0];
   const message = asRecord(asRecord(choice, "choices[0]").message, "choices[0].message");
-  const content = messageContentToText(message.content ?? message.reasoning);
-  const annotationText = messageAnnotationsToText(message.annotations);
-  let parsed: Partial<ScaleExtractionResult> = {};
-  if (content) {
-    try {
-      parsed = parseJsonRecord(content, "contenuto OpenRouter") as Partial<ScaleExtractionResult>;
-    } catch (error) {
-      if (!annotationText) throw error;
-    }
-  }
-  return validateExtractionResult(parsed, annotationText);
+  const content = messageContentToText(
+    message.content ?? message.reasoning_content ?? message.reasoning,
+  );
+  if (!content) throw new Error("NeuralWatt non ha restituito contenuto");
+  const parsed = parseJsonRecord(content, "contenuto NeuralWatt") as Partial<PageScaleExtractionResult>;
+  const result = validatePageExtractionResult(parsed, "", page.pageNumber);
+  return {
+    ...result,
+    page_number: page.pageNumber,
+    sheet_size: page.sheetSize ?? result.sheet_size,
+    orientation_rotation: page.orientation?.rotation ?? null,
+    orientation_confidence: page.orientation?.confidence ?? 0,
+    orientation_evidence: page.orientation?.evidence ?? null,
+  };
 }
 
 function validateExtractionResult(value: Partial<ScaleExtractionResult>, sourceText = ""): ScaleExtractionResult {
@@ -587,12 +1030,21 @@ function validatePageExtractionResult(
       ? value.page_number
       : fallbackPage;
   const found = typeof value.found === "boolean" ? value.found : false;
-  const denominator = value.scale_denominator;
+  const rawDenominator = (value as { scale_denominator?: unknown }).scale_denominator;
+  const denominator =
+    typeof rawDenominator === "string" ? Number(rawDenominator) : rawDenominator;
   const scaleDenominator =
     typeof denominator === "number" && Number.isInteger(denominator) && denominator >= 20 && denominator <= 20000
       ? denominator
       : null;
   const sheetSize = value.sheet_size === "A3" || value.sheet_size === "A4" ? value.sheet_size : null;
+  const orientationRotation = normalizePageRotation(value.orientation_rotation);
+  const orientationConfidence =
+    typeof value.orientation_confidence === "number" && Number.isFinite(value.orientation_confidence)
+      ? Math.max(0, Math.min(1, value.orientation_confidence))
+      : 0;
+  const orientationEvidence =
+    typeof value.orientation_evidence === "string" ? value.orientation_evidence : null;
   const confidence =
     typeof value.confidence === "number" && Number.isFinite(value.confidence)
       ? Math.max(0, Math.min(1, value.confidence))
@@ -612,6 +1064,9 @@ function validatePageExtractionResult(
     scale_denominator: resultFound ? inferredDenominator : null,
     scale_label: label ?? (inferredDenominator ? `1:${inferredDenominator}` : null),
     sheet_size: inferredSheetSize,
+    orientation_rotation: orientationRotation,
+    orientation_confidence: orientationConfidence,
+    orientation_evidence: orientationEvidence,
     confidence: explicitDenominator ? Math.max(confidence, 0.9) : confidence,
     evidence: evidence ?? (explicitDenominator ? `Scala esplicita rilevata dal testo OCR: 1:${explicitDenominator}` : null),
     warnings: explicitDenominator
@@ -720,6 +1175,14 @@ function apiPageScalesFromRaw(rawResponse: unknown) {
       confidence: page.confidence,
       evidence: page.evidence,
       warnings: page.warnings,
+      orientation: page.orientation_rotation === null
+        ? null
+        : {
+            rotation: page.orientation_rotation,
+            confidence: page.orientation_confidence,
+            evidence: page.orientation_evidence,
+            source: "pdf-text-geometry",
+          },
     };
   });
 }
@@ -740,6 +1203,10 @@ function extractSheetSize(text: string): "A3" | "A4" | null {
   const generic = text.match(/\b(A[34])\s*\(\s*\d+\s*x\s*\d+\s*\)/i)?.[1]?.toUpperCase();
   if (generic === "A3" || generic === "A4") return generic;
   return null;
+}
+
+function normalizePageRotation(value: unknown): PageRotation | null {
+  return value === 0 || value === 90 || value === 180 || value === 270 ? value : null;
 }
 
 function messageContentToText(content: unknown) {
@@ -776,8 +1243,8 @@ function asRecord(value: unknown, path: string): JsonRecord {
 
 function asArray(value: unknown, path: string): unknown[] {
   if (!Array.isArray(value)) {
-    const message = openRouterErrorMessage(value);
-    throw new Error(message ? `OpenRouter: ${message}` : `${path} deve essere una lista`);
+    const message = providerErrorMessage(value);
+    throw new Error(message ? `Provider AI: ${message}` : `${path} deve essere una lista`);
   }
   return value;
 }
@@ -795,13 +1262,21 @@ function collectTextParts(value: unknown): string[] {
   return current.concat(...["content", "file", "message"].map((key) => collectTextParts(record[key])));
 }
 
-function openRouterErrorMessage(value: unknown) {
+function providerErrorMessage(value: unknown) {
   if (!value || typeof value !== "object") return null;
   const record = value as JsonRecord;
   const error = record.error;
   if (!error || typeof error !== "object") return null;
   const errorRecord = error as JsonRecord;
   return optionalString(errorRecord.message) ?? optionalString(errorRecord.detail) ?? optionalString(errorRecord.code);
+}
+
+function safeProviderError(rawBody: string) {
+  try {
+    return providerErrorMessage(JSON.parse(rawBody)) ?? rawBody.slice(0, 500);
+  } catch {
+    return rawBody.slice(0, 500);
+  }
 }
 
 function optionalString(value: unknown) {
@@ -828,4 +1303,15 @@ function requiredString(value: unknown, path: string) {
 function optionalConfig(value?: string) {
   const trimmed = value?.trim();
   return trimmed || undefined;
+}
+
+function integerConfig(
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.min(maximum, Math.max(minimum, parsed));
 }

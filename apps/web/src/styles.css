@@ -3251,6 +3251,89 @@ body.is-resizing-columns {
   box-shadow: inset 3px 0 0 var(--primary);
 }
 
+.property-operational-table tr.property-valuation-group-row td {
+  border-top-color: #bed6f6;
+  border-bottom-color: #bed6f6;
+  background: #edf5ff;
+}
+
+.property-operational-table tr.property-valuation-group-row:hover td,
+.property-operational-table tr.property-valuation-group-row:focus-visible td {
+  background: #e3efff;
+}
+
+.property-operational-table tr.property-valuation-group-child td {
+  background: #fbfdff;
+}
+
+.property-operational-table tr.property-valuation-group-child .location-cell {
+  padding-left: 18px;
+}
+
+.property-operational-table tr.property-valuation-group-child .location-cell::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  border-left: 1px solid #9dbde7;
+  border-bottom: 1px solid #9dbde7;
+}
+
+.valuation-group-toggle {
+  display: inline-grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--primary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.valuation-group-toggle:hover,
+.valuation-group-toggle:focus-visible {
+  background: #d7e8ff;
+}
+
+.valuation-group-toggle svg {
+  transition: transform 160ms ease;
+}
+
+.valuation-group-toggle.expanded svg {
+  transform: rotate(90deg);
+}
+
+.valuation-group-title {
+  display: table-cell;
+}
+
+.valuation-group-title > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #123e7a;
+  font-weight: 850;
+}
+
+.valuation-group-title small {
+  display: block;
+  overflow: hidden;
+  margin-top: 1px;
+  color: #52719b;
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.valuation-group-documents,
+.valuation-group-mixed {
+  color: #52719b;
+  font-size: 10px;
+  font-weight: 800;
+}
+
 .property-select-cell input {
   width: 17px;
   height: 17px;
@@ -3962,6 +4045,10 @@ body.is-resizing-columns {
 }
 
 .property-lot-valuation > small {
+  grid-column: 1 / -1;
+}
+
+.property-lot-valuation .property-manual-lot-area {
   grid-column: 1 / -1;
 }
 
@@ -6903,6 +6990,54 @@ body.is-resizing-columns {
 
 .editor-lot-valuation .lot-linked-fields {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.lot-manual-area-field {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #bdd4ef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.lot-manual-area-field > span {
+  display: grid;
+  gap: 2px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.lot-manual-area-field > span small {
+  color: var(--secondary);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.lot-manual-area-field > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid #6ea6eb;
+  border-radius: 7px;
+}
+
+.lot-manual-area-field input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+}
+
+.lot-manual-area-field strong {
+  color: #31567f;
+  font-size: 11px;
 }
 
 .editor-summary-collapse {

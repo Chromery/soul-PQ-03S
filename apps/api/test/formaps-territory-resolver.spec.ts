@@ -4,7 +4,27 @@ import {
   FORMAPS_CATALOG_METADATA,
   resolveFormapsTerritory,
 } from "../src/formaps-territories/formaps-territory-resolver.js";
-import { VisuraExtractionService } from "../src/visura-extraction/visura-extraction.service.js";
+import {
+  hasCompleteVisuraIdentifiers,
+  VisuraExtractionService,
+} from "../src/visura-extraction/visura-extraction.service.js";
+
+test("i dati catastali completi non richiedono una rilettura AI del PDF", () => {
+  assert.equal(hasCompleteVisuraIdentifiers({
+    found: true,
+    provincia: "PR",
+    comune: "Calestano",
+    foglio: "1",
+    particella: "249",
+  }), true);
+  assert.equal(hasCompleteVisuraIdentifiers({
+    found: true,
+    provincia: "PR",
+    comune: "Calestano",
+    foglio: "1",
+    particella: null,
+  }), false);
+});
 
 test("carica il catalogo completo salvato dagli endpoint forMaps", () => {
   assert.equal(FORMAPS_CATALOG_METADATA.provinceCount, 101);
@@ -284,7 +304,8 @@ function extractionService(result: Record<string, unknown>) {
   };
   const service = new VisuraExtractionService(config as never, {} as never);
   Object.assign(service as object, {
-    callOpenRouterVisuraExtraction: async () => JSON.stringify({
+    renderVisuraPdfPages: async () => ["data:image/jpeg;base64,dGVzdA=="],
+    callNeuralwattVisuraExtraction: async () => JSON.stringify({
       choices: [{ message: { content: JSON.stringify(result) } }],
     }),
   });

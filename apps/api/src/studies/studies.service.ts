@@ -227,8 +227,56 @@ export class StudiesService {
     await this.prisma.property.deleteMany({
       where: { studyId, id: { in: input.propertyIds } },
     });
+    await this.pruneValuationGroups(studyId);
     await this.compactPropertyOrder(studyId);
     await this.refreshStudyTotals(studyId);
+    return this.find(studyId);
+  }
+
+  async groupProperties(studyId: string, propertyIds: string[]) {
+    const uniquePropertyIds = validatePropertyValuationGroupSelection(propertyIds);
+    const study = await this.prisma.feasibilityStudy.findUnique({
+      where: { id: studyId },
+      select: {
+        id: true,
+        properties: {
+          where: { id: { in: uniquePropertyIds } },
+          select: { id: true, valuationGroupId: true },
+        },
+      },
+    });
+    if (!study) return null;
+    if (study.properties.length !== uniquePropertyIds.length) {
+      throw new BadRequestException("Uno o piu immobili non appartengono allo studio");
+    }
+    if (study.properties.some((property) => property.valuationGroupId !== null)) {
+      throw new BadRequestException("Sciogli prima il gruppo degli immobili gia raggruppati");
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const group = await tx.propertyValuationGroup.create({ data: { studyId } });
+      await tx.property.updateMany({
+        where: { studyId, id: { in: uniquePropertyIds } },
+        data: { valuationGroupId: group.id },
+      });
+    });
+    return this.find(studyId);
+  }
+
+  async ungroupProperties(studyId: string, groupId: string) {
+    const group = await this.prisma.propertyValuationGroup.findFirst({
+      where: { id: groupId, studyId },
+      select: { id: true },
+    });
+    if (!group) return null;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.property.updateMany({
+        where: { studyId, valuationGroupId: groupId },
+        data: { valuationGroupId: null },
+      });
+      await tx.propertyValuationGroup.delete({ where: { id: groupId } });
+    });
     return this.find(studyId);
   }
 
@@ -267,6 +315,26 @@ export class StudiesService {
         this.prisma.property.update({ where: { id: property.id }, data: { displayOrder } }),
       ),
     );
+  }
+
+  private async pruneValuationGroups(studyId: string) {
+    const groups = await this.prisma.propertyValuationGroup.findMany({
+      where: { studyId },
+      select: { id: true, _count: { select: { properties: true } } },
+    });
+    const undersizedGroupIds = groups
+      .filter((group) => group._count.properties < 2)
+      .map((group) => group.id);
+    if (undersizedGroupIds.length === 0) return;
+    await this.prisma.$transaction([
+      this.prisma.property.updateMany({
+        where: { studyId, valuationGroupId: { in: undersizedGroupIds } },
+        data: { valuationGroupId: null },
+      }),
+      this.prisma.propertyValuationGroup.deleteMany({
+        where: { studyId, id: { in: undersizedGroupIds } },
+      }),
+    ]);
   }
 
   private async refreshStudyTotals(studyId: string) {
@@ -362,6 +430,7 @@ export class StudiesService {
         : "unavailable";
     return {
       id: property.id,
+      valuationGroupId: property.valuationGroupId,
       address: property.address,
       comune: property.comune,
       provincia: property.provincia,
@@ -542,6 +611,21 @@ function validateDeletePropertiesInput(body: unknown): DeletePropertiesInput {
   const uniqueIds = Array.from(new Set(propertyIds));
   if (uniqueIds.length === 0) throw new BadRequestException("Seleziona almeno un immobile");
   return { propertyIds: uniqueIds };
+}
+
+export function validatePropertyValuationGroupSelection(propertyIds: string[]) {
+  if (!Array.isArray(propertyIds)) {
+    throw new BadRequestException("propertyIds obbligatorio");
+  }
+  const uniquePropertyIds = Array.from(new Set(
+    propertyIds
+      .map((propertyId) => optionalString(propertyId, 120))
+      .filter((propertyId): propertyId is string => Boolean(propertyId)),
+  ));
+  if (uniquePropertyIds.length < 2) {
+    throw new BadRequestException("Seleziona almeno due immobili");
+  }
+  return uniquePropertyIds;
 }
 
 function requiredString(value: unknown, field: string, maxLength: number) {

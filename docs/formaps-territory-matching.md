@@ -47,8 +47,9 @@ flusso prova prima `pdftotext` sul PDF originale e legge separatamente:
 
 Le righe `Codice Comune … - Sezione …` vengono usate soltanto quando sono correlate al codice comune e al
 foglio o alla particella dell'immobile principale. I riferimenti storici non correlati vengono ignorati. Se il
-PDF non contiene testo nativo o resta incompleto, OpenRouter esegue il fallback sul PDF; NeuralWatt interviene
-soltanto sull'eventuale shortlist territoriale ancora ambigua.
+PDF non contiene testo nativo o resta incompleto, il backend renderizza fino a quattro pagine come immagini e
+Qwen3.6 35B Fast su NeuralWatt esegue il fallback. NeuralWatt interviene inoltre sull'eventuale shortlist
+territoriale ancora ambigua. OpenRouter è temporaneamente disabilitato e non riceve PDF o testo delle visure.
 
 Il risultato canonico viene salvato nei campi `sezioneCatastale`, `codiceComuneCatastale` e
 `formapsMunicipalityId`. Prima della scrittura il sistema confronta la visura con comune, foglio, particella e
