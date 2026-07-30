@@ -10232,32 +10232,32 @@ export default function PlanimetriaEditor({
                                 </em>
                               )}
                             </div>
-                            <label
-                              className="lot-checkbox compact area-row-lot"
-                              title="Includi questa destinazione nel calcolo del lotto"
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selection.includedInLot === true}
-                                onChange={(event) => changeSelectionLot(selection.id, event.currentTarget.checked)}
-                                aria-label={`Includi area ${index + 1} nel lotto`}
-                              />
-                              <span>Lotto</span>
-                            </label>
-                            <label
-                              className="lot-checkbox compact area-row-lot"
-                              title="Applica il 40% al valore di questa area, lotto escluso"
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selection.oneri === true}
-                                onChange={(event) => changeSelectionOneri(selection.id, event.currentTarget.checked)}
-                                aria-label={`Applica oneri all'area ${index + 1}`}
-                              />
-                              <span>Oneri</span>
-                            </label>
+                            <div className="area-row-flags" onClick={(event) => event.stopPropagation()}>
+                              <label
+                                className="lot-checkbox compact area-row-lot"
+                                title="Includi questa destinazione nel calcolo del lotto"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selection.includedInLot === true}
+                                  onChange={(event) => changeSelectionLot(selection.id, event.currentTarget.checked)}
+                                  aria-label={`Includi area ${index + 1} nel lotto`}
+                                />
+                                <span>Lotto</span>
+                              </label>
+                              <label
+                                className="lot-checkbox compact area-row-lot"
+                                title="Applica il 40% al valore di questa area, lotto escluso"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selection.oneri === true}
+                                  onChange={(event) => changeSelectionOneri(selection.id, event.currentTarget.checked)}
+                                  aria-label={`Applica oneri all'area ${index + 1}`}
+                                />
+                                <span>Oneri</span>
+                              </label>
+                            </div>
                             <button
                               title={withShortcut("Rimuovi area", SHORTCUTS.delete)}
                               onClick={(event) => {
