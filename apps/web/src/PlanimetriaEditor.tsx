@@ -10118,12 +10118,13 @@ export default function PlanimetriaEditor({
               <>
                 <div className="selection-action-row">
                   <button
-                    className="button secondary compact-button"
+                    className="icon-button"
                     type="button"
                     onClick={addManualAreaRow}
+                    title="Crea un'area manualmente"
+                    aria-label="Crea un'area manualmente"
                   >
-                    <Plus size={15} />
-                    Manuale
+                    <Plus size={16} />
                   </button>
                   <button
                     className="icon-button"
