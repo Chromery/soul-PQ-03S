@@ -322,6 +322,9 @@ export class VisuraExtractionService implements OnModuleInit {
       deterministic = deterministicVisuraResult(parsed);
       const resolved = await this.resolveFormapsTerritory(deterministic, false);
       if (resolved.found && resolved.formapsMunicipalityId) return resolved;
+      if (hasCompleteVisuraIdentifiers(deterministic)) {
+        return this.resolveFormapsTerritory(deterministic);
+      }
     } catch (error) {
       deterministicWarning = error instanceof Error
         ? `Estrazione testuale locale non riuscita: ${error.message}`
@@ -603,6 +606,18 @@ export class VisuraExtractionService implements OnModuleInit {
       clearTimeout(timeout);
     }
   }
+}
+
+export function hasCompleteVisuraIdentifiers(
+  result: Pick<VisuraExtractionResult, "found" | "provincia" | "comune" | "foglio" | "particella">,
+) {
+  return Boolean(
+    result.found
+    && result.provincia
+    && result.comune
+    && result.foglio
+    && result.particella,
+  );
 }
 
 function decodePdfBase64(value: string, fileName: string) {

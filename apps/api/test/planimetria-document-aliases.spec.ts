@@ -2,9 +2,36 @@ import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { DocumentType } from "../src/generated/prisma/enums.js";
-import { ErpSyncService } from "../src/erp-sync/erp-sync.service.js";
+import {
+  ErpSyncService,
+  hasDocumentContentChanged,
+} from "../src/erp-sync/erp-sync.service.js";
 import { PropertiesService } from "../src/properties/properties.service.js";
 import { StudiesService } from "../src/studies/studies.service.js";
+
+test("una sync ripetuta non considera modificato lo stesso PDF", () => {
+  assert.equal(
+    hasDocumentContentChanged(
+      { sha256: "A".repeat(64), storageKey: "erp/vecchio-percorso.pdf" },
+      { sha256: "a".repeat(64), storageKey: "erp/nuovo-percorso.pdf" },
+    ),
+    false,
+  );
+  assert.equal(
+    hasDocumentContentChanged(
+      { sha256: "a".repeat(64), storageKey: "erp/documento.pdf" },
+      { sha256: "b".repeat(64), storageKey: "erp/documento.pdf" },
+    ),
+    true,
+  );
+  assert.equal(
+    hasDocumentContentChanged(
+      { sha256: null, storageKey: "erp/documento.pdf" },
+      { sha256: null, storageKey: "erp/documento.pdf" },
+    ),
+    false,
+  );
+});
 
 for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
   test(`il sync normalizza ${alias} come PLANIMETRIA e avvia l'estrazione della scala`, async () => {

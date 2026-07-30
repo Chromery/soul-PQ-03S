@@ -51,6 +51,8 @@ export class SystemService {
         neuralwattModel: optionalConfig(this.config.get<string>("NEURALWATT_MODEL")) ?? "qwen3.6-35b-fast",
         scaleModel: optionalConfig(this.config.get<string>("NEURALWATT_SCALE_MODEL")) ?? "kimi-k2.7-code",
         scaleProvider: "neuralwatt",
+        visuraProvider: "pdftotext-locale-con-fallback-openrouter",
+        openRouterUsage: "fallback-visure-pdf-non-leggibili-localmente",
         visuraModel:
           optionalConfig(this.config.get<string>("OPENROUTER_VISURA_MODEL")) ??
           "qwen/qwen3.5-flash-02-23",

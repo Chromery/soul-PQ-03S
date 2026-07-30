@@ -70,7 +70,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.55.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.55.1";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -375,6 +375,8 @@ type SystemStatus = {
     neuralwattModel: string;
     scaleModel: string;
     scaleProvider?: string;
+    visuraProvider?: string;
+    openRouterUsage?: string;
     visuraModel: string;
     pdfEngine: string;
     authentication: string;
@@ -4599,10 +4601,11 @@ function SettingsPage({ appVersion, onNotice }: { appVersion: string; onNotice: 
           <div className="settings-kv-grid">
             <SettingsValue label="Ambiente" value={systemStatus?.environment ?? "Non disponibile"} />
             <SettingsValue label="ERP sync token" value={configuredLabel(systemStatus?.integrations.erpSyncTokenConfigured)} />
-            <SettingsValue label="OpenRouter/Qwen" value={configuredLabel(systemStatus?.integrations.openRouterConfigured)} />
-            <SettingsValue label="Neuralwatt CAPTCHA" value={configuredLabel(systemStatus?.integrations.neuralwattConfigured)} />
+            <SettingsValue label="OpenRouter (fallback visure)" value={configuredLabel(systemStatus?.integrations.openRouterConfigured)} />
+            <SettingsValue label="NeuralWatt" value={configuredLabel(systemStatus?.integrations.neuralwattConfigured)} />
             <SettingsValue label="Auth utenti" value={systemStatus?.integrations.authentication === "not-configured" ? "Non configurata" : "Configurata"} />
             <SettingsValue label="Modello scala" value={systemStatus?.integrations.scaleModel ?? "kimi-k2.7-code"} />
+            <SettingsValue label="Pipeline visure" value={systemStatus?.integrations.visuraProvider ?? "Locale → OpenRouter fallback"} />
             <SettingsValue label="Modello visure" value={systemStatus?.integrations.visuraModel ?? "qwen/qwen3.5-flash-02-23"} />
             <SettingsValue label="Modello CAPTCHA" value={systemStatus?.integrations.neuralwattModel ?? "qwen3.6-35b-fast"} />
             <SettingsValue label="OCR PDF" value={systemStatus?.integrations.pdfEngine ?? "mistral-ocr"} />

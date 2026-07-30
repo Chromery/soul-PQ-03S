@@ -298,6 +298,10 @@ export class ErpSyncService {
         const previousDocument = await this.prisma.propertyDocument.findUnique({
           where: { propertyId_type: { propertyId: property.id, type: document.type } },
         });
+        const documentChanged = hasDocumentContentChanged(previousDocument, {
+          storageKey: stored.storageKey,
+          sha256: stored.sha256,
+        });
         const storedDocument = await this.prisma.propertyDocument.upsert({
           where: { propertyId_type: { propertyId: property.id, type: document.type } },
           create: {
@@ -330,7 +334,7 @@ export class ErpSyncService {
             console.error("Impossibile eliminare il precedente documento ERP sostituito", error);
           }
         }
-        if (document.type === DocumentType.PLANIMETRIA && document.fileBase64) {
+        if (document.type === DocumentType.PLANIMETRIA && document.fileBase64 && documentChanged) {
           await this.scaleExtraction.enqueueDocumentPdf({
             propertyId: property.id,
             documentId: storedDocument.id,
@@ -339,7 +343,12 @@ export class ErpSyncService {
             sha256: stored.sha256 ?? undefined,
           });
         }
-        if (document.type === DocumentType.VISURA && document.fileBase64 && !hasCompleteCadastralData(property)) {
+        if (
+          document.type === DocumentType.VISURA
+          && document.fileBase64
+          && documentChanged
+          && !hasCompleteCadastralData(property)
+        ) {
           try {
             await this.visuraExtraction.enqueueDocumentPdf({
               propertyId: property.id,
@@ -656,6 +665,17 @@ function uniqueDocuments(documents: NormalizedDocument[]) {
   const byType = new Map<DocumentType, NormalizedDocument>();
   for (const document of documents) byType.set(document.type, document);
   return Array.from(byType.values());
+}
+
+export function hasDocumentContentChanged(
+  previous: { sha256: string | null; storageKey: string } | null,
+  current: { sha256?: string | null; storageKey: string },
+) {
+  if (!previous) return true;
+  if (previous.sha256 && current.sha256) {
+    return previous.sha256.toLowerCase() !== current.sha256.toLowerCase();
+  }
+  return previous.storageKey !== current.storageKey;
 }
 
 function hasCompleteCadastralData(
