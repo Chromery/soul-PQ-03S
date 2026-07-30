@@ -1,0 +1,25 @@
+{
+  "name": "Soul Prospect Qualifier",
+  "short_name": "Soul PQ",
+  "description": "Studi di fattibilità e valutazioni immobiliari Soul Real Estate",
+  "lang": "it",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#061b37",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
