@@ -49,7 +49,7 @@ export class SystemService {
         openRouterConfigured: Boolean(optionalConfig(this.config.get<string>("OPENROUTER_API_KEY"))),
         neuralwattConfigured: Boolean(optionalConfig(this.config.get<string>("NEURALWATT_API_KEY"))),
         neuralwattModel: optionalConfig(this.config.get<string>("NEURALWATT_MODEL")) ?? "qwen3.6-35b-fast",
-        scaleModel: optionalConfig(this.config.get<string>("NEURALWATT_SCALE_MODEL")) ?? "kimi-k2.7-code",
+        scaleModel: optionalConfig(this.config.get<string>("NEURALWATT_SCALE_MODEL")) ?? "qwen3.6-35b-fast",
         scaleProvider: "neuralwatt",
         visuraProvider: "pdftotext-locale-con-fallback-openrouter",
         openRouterUsage: "fallback-visure-pdf-non-leggibili-localmente",

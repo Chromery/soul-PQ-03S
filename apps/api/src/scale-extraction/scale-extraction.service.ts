@@ -61,7 +61,7 @@ type RenderedPdfPage = {
 };
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_SCALE_MODEL = "kimi-k2.7-code";
+const DEFAULT_SCALE_MODEL = "qwen3.6-35b-fast";
 const DEFAULT_NEURALWATT_API_URL = "https://api.neuralwatt.com/v1/chat/completions";
 const DEFAULT_RENDER_DPI = 180;
 const DEFAULT_MAX_PAGES = 24;

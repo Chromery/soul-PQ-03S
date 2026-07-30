@@ -70,7 +70,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.55.1";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.55.2";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -4604,7 +4604,7 @@ function SettingsPage({ appVersion, onNotice }: { appVersion: string; onNotice: 
             <SettingsValue label="OpenRouter (fallback visure)" value={configuredLabel(systemStatus?.integrations.openRouterConfigured)} />
             <SettingsValue label="NeuralWatt" value={configuredLabel(systemStatus?.integrations.neuralwattConfigured)} />
             <SettingsValue label="Auth utenti" value={systemStatus?.integrations.authentication === "not-configured" ? "Non configurata" : "Configurata"} />
-            <SettingsValue label="Modello scala" value={systemStatus?.integrations.scaleModel ?? "kimi-k2.7-code"} />
+            <SettingsValue label="Modello scala" value={systemStatus?.integrations.scaleModel ?? "qwen3.6-35b-fast"} />
             <SettingsValue label="Pipeline visure" value={systemStatus?.integrations.visuraProvider ?? "Locale → OpenRouter fallback"} />
             <SettingsValue label="Modello visure" value={systemStatus?.integrations.visuraModel ?? "qwen/qwen3.5-flash-02-23"} />
             <SettingsValue label="Modello CAPTCHA" value={systemStatus?.integrations.neuralwattModel ?? "qwen3.6-35b-fast"} />
