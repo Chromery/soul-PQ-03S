@@ -35,7 +35,7 @@ enum VisuraExtractionStatus {
 }
 
 model FeasibilityStudy {
-  id              String             @id
+  id              String                   @id
   companyErpId    String?
   company         String
   vat             String
@@ -43,15 +43,15 @@ model FeasibilityStudy {
   provincia       String
   region          String
   status          String
-  createdAt       DateTime           @db.Date
-  concludedAt     DateTime?          @db.Date
-  deadline        DateTime           @db.Date
+  createdAt       DateTime                 @db.Date
+  concludedAt     DateTime?                @db.Date
+  deadline        DateTime                 @db.Date
   nextAppointment DateTime?
-  diffRendita     Decimal            @db.Decimal(12, 2)
-  diffImu         Decimal            @db.Decimal(14, 2)
-  originalRendita Decimal            @db.Decimal(14, 2)
-  totalRendita    Decimal            @db.Decimal(14, 2)
-  catDRendita     Decimal            @db.Decimal(14, 2)
+  diffRendita     Decimal                  @db.Decimal(12, 2)
+  diffImu         Decimal                  @db.Decimal(14, 2)
+  originalRendita Decimal                  @db.Decimal(14, 2)
+  totalRendita    Decimal                  @db.Decimal(14, 2)
+  catDRendita     Decimal                  @db.Decimal(14, 2)
   commercialOwner String
   technicalOwner  String
   notes           String
@@ -59,11 +59,23 @@ model FeasibilityStudy {
   erpImportedAt   DateTime?
   erpUpdatedAt    DateTime?
   sourceSyncId    String?
-  importedAt      DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  importedAt      DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
   properties      Property[]
+  valuationGroups PropertyValuationGroup[]
   versions        StudyVersion[]
   presentations   PresentationDeck[]
+}
+
+model PropertyValuationGroup {
+  id         String           @id @default(cuid())
+  studyId    String
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  study      FeasibilityStudy @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  properties Property[]
+
+  @@index([studyId])
 }
 
 model PresentationDeck {
@@ -94,8 +106,9 @@ model StudyVersion {
 }
 
 model Property {
-  id                    String                @id
+  id                    String                  @id
   studyId               String
+  valuationGroupId      String?
   address               String
   comune                String
   provincia             String?
@@ -108,34 +121,37 @@ model Property {
   formapsMunicipalityId String?
   categoria             String
   titolarita            String?
-  oneri                 Boolean               @default(false)
-  currentRendita        Decimal               @db.Decimal(14, 2)
-  estimatedRendita      Decimal               @db.Decimal(14, 2)
-  diffPercent           Decimal               @db.Decimal(10, 2)
-  currentImu            Decimal?              @db.Decimal(14, 2)
-  estimatedImu          Decimal?              @db.Decimal(14, 2)
-  imuDiff               Decimal               @db.Decimal(14, 2)
-  imuRateOverride       Decimal?              @db.Decimal(7, 4)
-  imuMultiplierOverride Decimal?              @db.Decimal(10, 4)
-  displayOrder          Int                   @default(0)
+  oneri                 Boolean                 @default(false)
+  currentRendita        Decimal                 @db.Decimal(14, 2)
+  estimatedRendita      Decimal                 @db.Decimal(14, 2)
+  diffPercent           Decimal                 @db.Decimal(10, 2)
+  currentImu            Decimal?                @db.Decimal(14, 2)
+  estimatedImu          Decimal?                @db.Decimal(14, 2)
+  imuDiff               Decimal                 @db.Decimal(14, 2)
+  imuRateOverride       Decimal?                @db.Decimal(7, 4)
+  imuMultiplierOverride Decimal?                @db.Decimal(10, 4)
+  displayOrder          Int                     @default(0)
   outcome               String
-  hasStudy              Boolean               @default(false)
+  hasStudy              Boolean                 @default(false)
   sheetSize             String?
   scaleDenominator      Int?
   scaleSource           String?
   aiScaleDenominator    Int?
   aiScaleLabel          String?
   aiSheetSize           String?
-  aiScaleConfidence     Decimal?              @db.Decimal(5, 4)
+  aiScaleConfidence     Decimal?                @db.Decimal(5, 4)
   aiScaleDetectedAt     DateTime?
-  createdAt             DateTime              @default(now())
-  updatedAt             DateTime              @updatedAt
-  study                 FeasibilityStudy      @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  study                 FeasibilityStudy        @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  valuationGroup        PropertyValuationGroup? @relation(fields: [valuationGroupId], references: [id], onDelete: SetNull)
   documents             PropertyDocument[]
   analysisDraft         PlanAnalysisDraft?
   scaleExtractionJobs   ScaleExtractionJob[]
   visuraExtractionJobs  VisuraExtractionJob[]
   priceLists            PropertyPriceList[]
+
+  @@index([valuationGroupId])
 }
 
 model PropertyDocument {
