@@ -371,6 +371,7 @@ type SystemStatus = {
     neuralwattConfigured: boolean;
     neuralwattModel: string;
     scaleModel: string;
+    scaleProvider?: string;
     visuraModel: string;
     pdfEngine: string;
     authentication: string;
@@ -4535,7 +4536,7 @@ function SettingsPage({ appVersion, onNotice }: { appVersion: string; onNotice: 
             <SettingsValue label="OpenRouter/Qwen" value={configuredLabel(systemStatus?.integrations.openRouterConfigured)} />
             <SettingsValue label="Neuralwatt CAPTCHA" value={configuredLabel(systemStatus?.integrations.neuralwattConfigured)} />
             <SettingsValue label="Auth utenti" value={systemStatus?.integrations.authentication === "not-configured" ? "Non configurata" : "Configurata"} />
-            <SettingsValue label="Modello scala" value={systemStatus?.integrations.scaleModel ?? "qwen/qwen3.5-flash-02-23"} />
+            <SettingsValue label="Modello scala" value={systemStatus?.integrations.scaleModel ?? "kimi-k2.7-code"} />
             <SettingsValue label="Modello visure" value={systemStatus?.integrations.visuraModel ?? "qwen/qwen3.5-flash-02-23"} />
             <SettingsValue label="Modello CAPTCHA" value={systemStatus?.integrations.neuralwattModel ?? "qwen3.6-35b-fast"} />
             <SettingsValue label="OCR PDF" value={systemStatus?.integrations.pdfEngine ?? "mistral-ocr"} />

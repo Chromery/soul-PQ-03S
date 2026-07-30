@@ -49,10 +49,10 @@ export class SystemService {
         openRouterConfigured: Boolean(optionalConfig(this.config.get<string>("OPENROUTER_API_KEY"))),
         neuralwattConfigured: Boolean(optionalConfig(this.config.get<string>("NEURALWATT_API_KEY"))),
         neuralwattModel: optionalConfig(this.config.get<string>("NEURALWATT_MODEL")) ?? "qwen3.6-35b-fast",
-        scaleModel: optionalConfig(this.config.get<string>("OPENROUTER_SCALE_MODEL")) ?? "qwen/qwen3.5-flash-02-23",
+        scaleModel: optionalConfig(this.config.get<string>("NEURALWATT_SCALE_MODEL")) ?? "kimi-k2.7-code",
+        scaleProvider: "neuralwatt",
         visuraModel:
           optionalConfig(this.config.get<string>("OPENROUTER_VISURA_MODEL")) ??
-          optionalConfig(this.config.get<string>("OPENROUTER_SCALE_MODEL")) ??
           "qwen/qwen3.5-flash-02-23",
         pdfEngine: optionalConfig(this.config.get<string>("OPENROUTER_PDF_ENGINE")) ?? "mistral-ocr",
         authentication: "not-configured",

@@ -8119,9 +8119,23 @@ export default function PlanimetriaEditor({
     if (changed) recordUndoState();
     setScaleDenominator(nextScale);
     setSheetSize(scaleModalSheetSize);
-    if (changed) setScaleSource("USER");
+    if (changed) {
+      setScaleSource("USER");
+      setCalibration(null);
+      putPageScale(currentPage, {
+        ...pageScaleFor(currentPage),
+        scaleDenominator: nextScale,
+        sheetSize: scaleModalSheetSize,
+        scaleSource: "USER",
+        calibration: null,
+      });
+    }
     setScaleInputValue(String(nextScale));
-    if (changed) markDirty();
+    if (changed) {
+      markDirty();
+      bumpRevision();
+      setStatus(`Scala manuale 1:${nextScale} applicata alla pagina ${currentPage}`);
+    }
     return nextScale;
   }
 
