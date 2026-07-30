@@ -44,3 +44,23 @@ test("la quota lotto viene ripartita solo tra le destinazioni selezionate", () =
 test("le bozze precedenti ricevono il fallback percentuale del 12%", () => {
   assert.deepEqual(normalizeLotValuation(undefined), DEFAULT_LOT_VALUATION);
 });
+
+test("le bozze precedenti senza superficie lotto manuale restano compatibili", () => {
+  assert.deepEqual(
+    normalizeLotValuation({ mode: "per_sqm", percentage: 5, unitValuePerM2: 3 }),
+    { mode: "per_sqm", percentage: 5, unitValuePerM2: 3, manualAreaM2: 0 },
+  );
+});
+
+test("la superficie lotto manuale alimenta la valorizzazione al metro quadro", () => {
+  const normalized = normalizeLotValuation({
+    mode: "per_sqm",
+    percentage: 0,
+    unitValuePerM2: 2,
+    manualAreaM2: 1000,
+  });
+  const valuation = resolveLotValuation(normalized, normalized.manualAreaM2, 10000);
+
+  assert.equal(valuation.lotValue, 2000);
+  assert.equal(valuation.percentage, 20);
+});

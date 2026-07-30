@@ -70,7 +70,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.55.3";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.55.4";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -1996,8 +1996,8 @@ function planAreaSelectionHasOneri(
   return draft.defaultOneri ?? legacyPropertyOneri;
 }
 
-function planLotAreaFromDraft(draft: PlanAreaDraft) {
-  return (draft.lotBoundaries ?? []).reduce((sum, boundary) => {
+function planLotAreaFromDraft(draft: PlanAreaDraft, hasElaborato = draft.document !== null) {
+  const tracedArea = (draft.lotBoundaries ?? []).reduce((sum, boundary) => {
     const totalPixels =
       typeof boundary.totalPixels === "number" && boundary.totalPixels > 0
         ? boundary.totalPixels
@@ -2009,9 +2009,12 @@ function planLotAreaFromDraft(draft: PlanAreaDraft) {
     return sum + (boundary.region.count / totalPixels) *
       pageRealAreaM2(scale.sheetSize, scale.scaleDenominator);
   }, 0);
+  return tracedArea > 0 || hasElaborato
+    ? tracedArea
+    : normalizeLotValuation(draft.lotValuation).manualAreaM2;
 }
 
-function planAreaLotCalculation(draft: PlanAreaDraft) {
+function planAreaLotCalculation(draft: PlanAreaDraft, hasElaborato = draft.document !== null) {
   const baseRows = draft.selections.map((selection) => ({
     selection,
     area: planAreaEffectiveAreaM2(selection, draft),
@@ -2028,7 +2031,7 @@ function planAreaLotCalculation(draft: PlanAreaDraft) {
     },
     { destinationValue: 0, areaM2: 0, count: 0 },
   );
-  const lotArea = planLotAreaFromDraft(draft);
+  const lotArea = planLotAreaFromDraft(draft, hasElaborato);
   const resolved = resolveLotValuation(
     draft.lotValuation,
     lotArea,
@@ -2076,7 +2079,11 @@ function planAreaEstimatedRenditaFromDraft(draft: PlanAreaDraft, oneri = false) 
     : null;
 }
 
-function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft, oneri = false): PlanAreaDraft {
+function recalculatePlanAreaDraftTotals(
+  draft: PlanAreaDraft,
+  oneri = false,
+  hasElaborato = draft.document !== null,
+): PlanAreaDraft {
   const legacyOneri = oneri && !planAreaHasAreaOneriData(draft);
   const defaultOneri = draft.defaultOneri ?? legacyOneri;
   const migratedDraft = {
@@ -2089,7 +2096,7 @@ function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft, oneri = false): Pl
       oneri: planAreaSelectionHasOneri(selection, draft, legacyOneri),
     })),
   };
-  const lot = planAreaLotCalculation(migratedDraft);
+  const lot = planAreaLotCalculation(migratedDraft, hasElaborato);
   const totals = lot.baseRows.reduce(
     (acc, row) => {
       acc.area += row.area;
@@ -2106,6 +2113,7 @@ function recalculatePlanAreaDraftTotals(draft: PlanAreaDraft, oneri = false): Pl
       mode: lot.resolved.mode,
       percentage: lot.resolved.percentage,
       unitValuePerM2: lot.resolved.unitValuePerM2,
+      manualAreaM2: normalizeLotValuation(migratedDraft.lotValuation).manualAreaM2,
     },
     totalArea: totals.area,
     totalBaseAmount: totals.baseAmount,
@@ -6840,9 +6848,10 @@ function PropertyAreaDetail({
   }, [draftState.draft?.propertyId, draftState.draft?.savedAt]);
 
   const draft = editableDraft;
+  const hasElaboratoPlan = Boolean(property.documentUrls?.planimetria || draft?.document);
   const lotCalculation = useMemo(
-    () => (draft ? planAreaLotCalculation(draft) : null),
-    [draft],
+    () => (draft ? planAreaLotCalculation(draft, hasElaboratoPlan) : null),
+    [draft, hasElaboratoPlan],
   );
   const rows = useMemo(() => {
     if (!draft || !lotCalculation) return [];
@@ -6940,7 +6949,11 @@ function PropertyAreaDetail({
       if (!current) return current;
       const next = clonePlanAreaDraft(current);
       updater(next);
-      return recalculatePlanAreaDraftTotals(next, property.oneri === true);
+      return recalculatePlanAreaDraftTotals(
+        next,
+        property.oneri === true,
+        Boolean(property.documentUrls?.planimetria || next.document),
+      );
     });
     setDirty(true);
   }
@@ -7038,6 +7051,7 @@ function PropertyAreaDetail({
         mode,
         percentage: lotValuation.percentage,
         unitValuePerM2: lotValuation.unitValuePerM2,
+        manualAreaM2: lotValuation.manualAreaM2,
       };
     });
   }
@@ -7076,13 +7090,33 @@ function PropertyAreaDetail({
     );
   }
 
+  function handleManualLotAreaBlur(input: HTMLInputElement) {
+    handleNumberBlur(
+      input.value,
+      lotValuation.manualAreaM2,
+      (value) =>
+        updateEditableDraft((nextDraft) => {
+          nextDraft.lotValuation = {
+            ...normalizeLotValuation(nextDraft.lotValuation),
+            manualAreaM2: value,
+          };
+        }),
+      input,
+      "Inserisci una superficie lotto valida.",
+    );
+  }
+
   async function saveAreaDraft() {
     if (!draft || saving) return;
     setSaving(true);
-    const nextDraft = recalculatePlanAreaDraftTotals({
-      ...clonePlanAreaDraft(draft),
-      savedAt: new Date().toISOString(),
-    }, property.oneri === true);
+    const nextDraft = recalculatePlanAreaDraftTotals(
+      {
+        ...clonePlanAreaDraft(draft),
+        savedAt: new Date().toISOString(),
+      },
+      property.oneri === true,
+      Boolean(property.documentUrls?.planimetria || draft.document),
+    );
     try {
       window.localStorage.setItem(planAreaDraftKey(property.id), JSON.stringify(nextDraft));
     } catch {
@@ -7272,10 +7306,31 @@ function PropertyAreaDetail({
               <div>
                 <h3>Valorizzazione lotto</h3>
                 <p>
-                  La superficie deriva dal poligono Lotto. I check stabiliscono quali valori delle destinazioni
-                  entrano nella base percentuale.
+                  {hasElaboratoPlan
+                    ? "La superficie deriva dal poligono Lotto. I check stabiliscono quali valori delle destinazioni entrano nella base percentuale."
+                    : "L’elaborato planimetrico non è presente: inserisci manualmente la superficie del lotto."}
                 </p>
               </div>
+              {!hasElaboratoPlan && (
+                <label className="lot-manual-area-field property-manual-lot-area">
+                  <span>Superficie lotto manuale</span>
+                  <div>
+                    <input
+                      key={`property-manual-lot-area-${lotValuation.manualAreaM2}`}
+                      type="text"
+                      inputMode="decimal"
+                      defaultValue={areaFormatter.format(lotValuation.manualAreaM2)}
+                      onBlur={(event) => handleManualLotAreaBlur(event.currentTarget)}
+                      onKeyDown={(event) =>
+                        handleNumericInputKeyDown(
+                          event,
+                          areaFormatter.format(lotValuation.manualAreaM2),
+                        )}
+                    />
+                    <strong>m²</strong>
+                  </div>
+                </label>
+              )}
               <div className="lot-mode-toggle" role="group" aria-label="Metodo di valorizzazione del lotto">
                 <button
                   type="button"

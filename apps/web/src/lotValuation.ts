@@ -4,12 +4,14 @@ export type LotValuation = {
   mode: LotValuationMode;
   percentage: number;
   unitValuePerM2: number;
+  manualAreaM2: number;
 };
 
 export const DEFAULT_LOT_VALUATION: LotValuation = {
   mode: "percentage",
   percentage: 12,
   unitValuePerM2: 0,
+  manualAreaM2: 0,
 };
 
 export type ResolvedLotValuation = LotValuation & {
@@ -27,6 +29,7 @@ export function normalizeLotValuation(value: unknown): LotValuation {
     mode: input.mode === "per_sqm" ? "per_sqm" : "percentage",
     percentage: nonNegativeFinite(input.percentage, DEFAULT_LOT_VALUATION.percentage),
     unitValuePerM2: nonNegativeFinite(input.unitValuePerM2, DEFAULT_LOT_VALUATION.unitValuePerM2),
+    manualAreaM2: nonNegativeFinite(input.manualAreaM2, DEFAULT_LOT_VALUATION.manualAreaM2),
   };
 }
 

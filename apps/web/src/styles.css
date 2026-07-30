@@ -4048,6 +4048,10 @@ body.is-resizing-columns {
   grid-column: 1 / -1;
 }
 
+.property-lot-valuation .property-manual-lot-area {
+  grid-column: 1 / -1;
+}
+
 .property-area-modal-actions {
   position: sticky;
   bottom: -18px;
@@ -6986,6 +6990,54 @@ body.is-resizing-columns {
 
 .editor-lot-valuation .lot-linked-fields {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.lot-manual-area-field {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #bdd4ef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.lot-manual-area-field > span {
+  display: grid;
+  gap: 2px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.lot-manual-area-field > span small {
+  color: var(--secondary);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.lot-manual-area-field > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid #6ea6eb;
+  border-radius: 7px;
+}
+
+.lot-manual-area-field input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+}
+
+.lot-manual-area-field strong {
+  color: #31567f;
+  font-size: 11px;
 }
 
 .editor-summary-collapse {

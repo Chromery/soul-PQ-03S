@@ -1649,6 +1649,7 @@ export default function PlanimetriaEditor({
   const autoWallRadius = autoWallInclusionRadius(inflate, dash);
   const resolvedWallInclusionRadius = wallInclusionRadius ?? autoWallRadius;
   const hasPdf = pageCount > 0;
+  const hasElaboratoPlan = Boolean(hasPdf || linkedRemotePlan || documentSource);
   const allSelections = Array.from(runtimeRef.current.selectionsByPage.values()).flat();
   const allLotBoundaries = Array.from(runtimeRef.current.lotBoundariesByPage.values()).flat();
   const selections = hasPdf ? currentSelections() : [];
@@ -1671,7 +1672,12 @@ export default function PlanimetriaEditor({
     Boolean(selectedLotBoundaryId);
   const hasCurrentPageAreas = selections.length > 0;
   const hasCurrentPageLotBoundary = currentLotBoundaries.length > 0;
-  const canSaveDraft = Boolean(documentSource || allSelections.length > 0 || allLotBoundaries.length > 0);
+  const canSaveDraft = Boolean(
+    documentSource
+    || allSelections.length > 0
+    || allLotBoundaries.length > 0
+    || (!hasElaboratoPlan && lotValuation.manualAreaM2 > 0),
+  );
   const currentPageRotation = currentPage ? runtimeRef.current.pageRotations.get(currentPage) ?? 0 : 0;
 
   const baseSelectedAreas = useMemo(
@@ -1729,6 +1735,7 @@ export default function PlanimetriaEditor({
       ),
     [allLotBoundaries, scaleDenominator, sheetSize, revision],
   );
+  const effectiveLotArea = hasElaboratoPlan ? tracedLotArea : lotValuation.manualAreaM2;
 
   const selectedLotStats = useMemo(
     () =>
@@ -1746,8 +1753,8 @@ export default function PlanimetriaEditor({
   );
 
   const resolvedLotValuation = useMemo(
-    () => resolveLotValuation(lotValuation, tracedLotArea, selectedLotStats.destinationValue),
-    [lotValuation, selectedLotStats.destinationValue, tracedLotArea],
+    () => resolveLotValuation(lotValuation, effectiveLotArea, selectedLotStats.destinationValue),
+    [effectiveLotArea, lotValuation, selectedLotStats.destinationValue],
   );
 
   const selectedAreas = useMemo(
@@ -1792,12 +1799,12 @@ export default function PlanimetriaEditor({
     return {
       ...base,
       destinationAmount,
-      lotArea: tracedLotArea,
+      lotArea: effectiveLotArea,
       lotValue: resolvedLotValuation.lotValue,
       amount,
       rendita: estimatedRenditaFromAmount(amount),
     };
-  }, [resolvedLotValuation.lotValue, selectedAreas, tracedLotArea]);
+  }, [effectiveLotArea, resolvedLotValuation.lotValue, selectedAreas]);
 
   const areaBreakdowns = useMemo(() => {
     const grouped = new Map<
@@ -3045,6 +3052,7 @@ export default function PlanimetriaEditor({
         mode: resolvedLotValuation.mode,
         percentage: resolvedLotValuation.percentage,
         unitValuePerM2: resolvedLotValuation.unitValuePerM2,
+        manualAreaM2: lotValuation.manualAreaM2,
       },
       defaultOneri,
       lotBoundaries: lotBoundariesToSave,
@@ -6009,6 +6017,7 @@ export default function PlanimetriaEditor({
       mode,
       percentage: resolvedLotValuation.percentage,
       unitValuePerM2: resolvedLotValuation.unitValuePerM2,
+      manualAreaM2: lotValuation.manualAreaM2,
     });
     setStatus(mode === "percentage" ? "Lotto valorizzato in percentuale" : "Lotto valorizzato al metro quadro");
     markDirty();
@@ -6029,8 +6038,9 @@ export default function PlanimetriaEditor({
         mode,
         percentage: field === "percentage" ? parsed : resolvedLotValuation.percentage,
         unitValuePerM2: field === "unitValuePerM2" ? parsed : resolvedLotValuation.unitValuePerM2,
+        manualAreaM2: lotValuation.manualAreaM2,
       },
-      tracedLotArea,
+      effectiveLotArea,
       selectedLotStats.destinationValue,
     );
     recordUndoState();
@@ -6038,12 +6048,39 @@ export default function PlanimetriaEditor({
       mode: nextValuation.mode,
       percentage: nextValuation.percentage,
       unitValuePerM2: nextValuation.unitValuePerM2,
+      manualAreaM2: nextValuation.manualAreaM2,
     });
     setStatus(
       field === "percentage"
         ? `Percentuale aggiornata; valore derivato ${areaFormatter.format(nextValuation.unitValuePerM2)} €/m²`
         : `Valore unitario aggiornato; incidenza derivata ${areaFormatter.format(nextValuation.percentage)}%`,
     );
+    markDirty();
+    bumpRevision();
+    return parsed;
+  }
+
+  function changeManualLotArea(rawValue: string) {
+    const parsed = parseNumberInput(rawValue);
+    if (parsed === null || parsed < 0) {
+      setStatus("Inserisci una superficie lotto valida");
+      bumpRevision();
+      return null;
+    }
+    if (lotValuation.manualAreaM2 === parsed) return parsed;
+    const nextValuation = resolveLotValuation(
+      { ...lotValuation, manualAreaM2: parsed },
+      parsed,
+      selectedLotStats.destinationValue,
+    );
+    recordUndoState();
+    setLotValuation({
+      mode: nextValuation.mode,
+      percentage: nextValuation.percentage,
+      unitValuePerM2: nextValuation.unitValuePerM2,
+      manualAreaM2: parsed,
+    });
+    setStatus(`Superficie lotto manuale aggiornata: ${formatM2(parsed)}`);
     markDirty();
     bumpRevision();
     return parsed;
@@ -9790,6 +9827,29 @@ export default function PlanimetriaEditor({
                   {!lotValuationCollapsed && (
                     <div className="editor-summary-collapse-content">
                       <div className="editor-lot-valuation">
+                        {!hasElaboratoPlan && (
+                          <label className="lot-manual-area-field">
+                            <span>
+                              Superficie lotto manuale
+                              <small>Disponibile perché l’elaborato planimetrico non è presente</small>
+                            </span>
+                            <div>
+                              <input
+                                key={`manual-lot-area-${lotValuation.manualAreaM2}`}
+                                type="text"
+                                inputMode="decimal"
+                                defaultValue={areaFormatter.format(lotValuation.manualAreaM2)}
+                                onBlur={(event) => {
+                                  const nextValue = changeManualLotArea(event.currentTarget.value);
+                                  event.currentTarget.value = areaFormatter.format(
+                                    nextValue ?? lotValuation.manualAreaM2,
+                                  );
+                                }}
+                              />
+                              <strong>m²</strong>
+                            </div>
+                          </label>
+                        )}
                         <div className="lot-mode-toggle" role="group" aria-label="Metodo di valorizzazione del lotto">
                           <button
                             type="button"
@@ -9843,11 +9903,12 @@ export default function PlanimetriaEditor({
                         </div>
                         <small className="lot-calculation-formula">
                           {lotValuation.mode === "percentage"
-                            ? `${moneyFormatter.format(selectedLotStats.destinationValue)} × ${areaFormatter.format(resolvedLotValuation.percentage)}% = ${moneyFormatter.format(resolvedLotValuation.lotValue)}; ${moneyFormatter.format(resolvedLotValuation.lotValue)} ÷ ${formatM2(tracedLotArea)} = ${areaFormatter.format(resolvedLotValuation.unitValuePerM2)} €/m²`
-                            : `${formatM2(tracedLotArea)} × ${areaFormatter.format(resolvedLotValuation.unitValuePerM2)} €/m² = ${moneyFormatter.format(resolvedLotValuation.lotValue)}; ${moneyFormatter.format(resolvedLotValuation.lotValue)} ÷ ${moneyFormatter.format(selectedLotStats.destinationValue)} = ${areaFormatter.format(resolvedLotValuation.percentage)}%`}
+                            ? `${moneyFormatter.format(selectedLotStats.destinationValue)} × ${areaFormatter.format(resolvedLotValuation.percentage)}% = ${moneyFormatter.format(resolvedLotValuation.lotValue)}; ${moneyFormatter.format(resolvedLotValuation.lotValue)} ÷ ${formatM2(effectiveLotArea)} = ${areaFormatter.format(resolvedLotValuation.unitValuePerM2)} €/m²`
+                            : `${formatM2(effectiveLotArea)} × ${areaFormatter.format(resolvedLotValuation.unitValuePerM2)} €/m² = ${moneyFormatter.format(resolvedLotValuation.lotValue)}; ${moneyFormatter.format(resolvedLotValuation.lotValue)} ÷ ${moneyFormatter.format(selectedLotStats.destinationValue)} = ${areaFormatter.format(resolvedLotValuation.percentage)}%`}
                         </small>
                         <small className="editor-lot-selection-meta">
-                          Superficie lotto tracciata: {formatM2(totals.lotArea)} · {selectedLotStats.count} destinazioni incluse
+                          {hasElaboratoPlan ? "Superficie lotto tracciata" : "Superficie lotto manuale"}:{" "}
+                          {formatM2(totals.lotArea)} · {selectedLotStats.count} destinazioni incluse
                         </small>
                       </div>
                     </div>

@@ -62,6 +62,7 @@ type LotValuation = {
   mode: "percentage" | "per_sqm";
   percentage: number;
   unitValuePerM2: number;
+  manualAreaM2: number;
 };
 
 type DocumentUploadInput = {
@@ -637,7 +638,7 @@ function validatePageScales(value: unknown): Record<string, PageScalePayload> | 
 
 function validateLotValuation(value: unknown): LotValuation {
   if (value === undefined || value === null) {
-    return { mode: "percentage", percentage: 12, unitValuePerM2: 0 };
+    return { mode: "percentage", percentage: 12, unitValuePerM2: 0, manualAreaM2: 0 };
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new BadRequestException("lotValuation non valido");
@@ -652,9 +653,14 @@ function validateLotValuation(value: unknown): LotValuation {
   if (typeof input.unitValuePerM2 !== "number" || !Number.isFinite(input.unitValuePerM2) || input.unitValuePerM2 < 0) {
     throw new BadRequestException("lotValuation.unitValuePerM2 non valido");
   }
+  const manualAreaM2 = input.manualAreaM2 ?? 0;
+  if (typeof manualAreaM2 !== "number" || !Number.isFinite(manualAreaM2) || manualAreaM2 < 0) {
+    throw new BadRequestException("lotValuation.manualAreaM2 non valido");
+  }
   return {
     mode: input.mode,
     percentage: input.percentage,
     unitValuePerM2: input.unitValuePerM2,
+    manualAreaM2,
   };
 }
