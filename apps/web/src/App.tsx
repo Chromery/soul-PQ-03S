@@ -70,7 +70,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.55.4";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.55.6";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -4609,14 +4609,19 @@ function SettingsPage({ appVersion, onNotice }: { appVersion: string; onNotice: 
           <div className="settings-kv-grid">
             <SettingsValue label="Ambiente" value={systemStatus?.environment ?? "Non disponibile"} />
             <SettingsValue label="ERP sync token" value={configuredLabel(systemStatus?.integrations.erpSyncTokenConfigured)} />
-            <SettingsValue label="OpenRouter (fallback visure)" value={configuredLabel(systemStatus?.integrations.openRouterConfigured)} />
+            <SettingsValue
+              label="OpenRouter"
+              value={systemStatus?.integrations.openRouterUsage === "disabled"
+                ? "Disabilitato"
+                : configuredLabel(systemStatus?.integrations.openRouterConfigured)}
+            />
             <SettingsValue label="NeuralWatt" value={configuredLabel(systemStatus?.integrations.neuralwattConfigured)} />
             <SettingsValue label="Auth utenti" value={systemStatus?.integrations.authentication === "not-configured" ? "Non configurata" : "Configurata"} />
             <SettingsValue label="Modello scala" value={systemStatus?.integrations.scaleModel ?? "qwen3.6-35b-fast"} />
-            <SettingsValue label="Pipeline visure" value={systemStatus?.integrations.visuraProvider ?? "Locale → OpenRouter fallback"} />
-            <SettingsValue label="Modello visure" value={systemStatus?.integrations.visuraModel ?? "qwen/qwen3.5-flash-02-23"} />
+            <SettingsValue label="Pipeline visure" value={systemStatus?.integrations.visuraProvider ?? "Locale → NeuralWatt fallback"} />
+            <SettingsValue label="Modello visure" value={systemStatus?.integrations.visuraModel ?? "qwen3.6-35b-fast"} />
             <SettingsValue label="Modello CAPTCHA" value={systemStatus?.integrations.neuralwattModel ?? "qwen3.6-35b-fast"} />
-            <SettingsValue label="OCR PDF" value={systemStatus?.integrations.pdfEngine ?? "mistral-ocr"} />
+            <SettingsValue label="Rendering fallback" value={systemStatus?.integrations.pdfEngine ?? "pdftoppm-jpeg"} />
             <SettingsValue label="Stato letto" value={systemStatus ? formatDateTime(systemStatus.generatedAt) : "Caricamento"} />
           </div>
           <div className="settings-inline-actions">

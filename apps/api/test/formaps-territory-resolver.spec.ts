@@ -304,7 +304,8 @@ function extractionService(result: Record<string, unknown>) {
   };
   const service = new VisuraExtractionService(config as never, {} as never);
   Object.assign(service as object, {
-    callOpenRouterVisuraExtraction: async () => JSON.stringify({
+    renderVisuraPdfPages: async () => ["data:image/jpeg;base64,dGVzdA=="],
+    callNeuralwattVisuraExtraction: async () => JSON.stringify({
       choices: [{ message: { content: JSON.stringify(result) } }],
     }),
   });

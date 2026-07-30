@@ -11,7 +11,5 @@ cinque pagine complessive. Le scale attese erano `1:1000`, `1:2000`, `1:1000`, `
 
 Qwen3.6 35B Fast ha eguagliato Kimi in accuratezza ed è risultato circa 2,3 volte più rapido.
 
-Le varianti `qwen3.6-5b-fast` e `qwen3.6-5b` non risultavano nel catalogo `/v1/models` di NeuralWatt
-e l'API ha risposto `404 Model not found` per entrambe. Per questo non sono state configurate come
-fallback delle visure e OpenRouter resta, temporaneamente, il solo fallback per PDF privi di testo
-estraibile localmente.
+Il riferimento iniziale alle varianti 5B era un refuso. Il confronto corretto per il fallback visure tra
+`qwen3.6-35b-fast` e `qwen3.6-35b` è documentato in `visura-model-benchmark-20260730.md`.

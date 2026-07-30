@@ -1,7 +1,12 @@
 import { BadRequestException, Injectable, InternalServerErrorException, Optional } from "@nestjs/common";
 import type { OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 import {
   formapsTerritoryByMunicipalityId,
   resolveFormapsTerritory,
@@ -45,69 +50,26 @@ export type VisuraExtractionResult = {
   sezioneCatastale: string | null;
   codiceComuneCatastale: string | null;
   formapsMunicipalityId: string | null;
-  extractionMethod: "deterministic_pdf_text" | "openrouter" | "hybrid";
+  extractionMethod: "deterministic_pdf_text" | "neuralwatt" | "hybrid";
   confidence: number;
   evidence: string | null;
   warnings: string[];
 };
 
-const DEFAULT_VISURA_MODEL = "qwen/qwen3.5-flash-02-23";
+const execFileAsync = promisify(execFile);
+const DEFAULT_VISURA_MODEL = "qwen3.6-35b-fast";
 const DEFAULT_NEURALWATT_API_URL = "https://api.neuralwatt.com/v1/chat/completions";
 const DEFAULT_NEURALWATT_MODEL = "qwen3.6-35b-fast";
-
-const VISURA_EXTRACTION_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "found",
-    "provincia",
-    "comune",
-    "foglio",
-    "particella",
-    "sezioneCatastale",
-    "codiceComuneCatastale",
-    "confidence",
-    "evidence",
-    "warnings",
-  ],
-  properties: {
-    found: { type: "boolean" },
-    provincia: {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    },
-    comune: {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    },
-    foglio: {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    },
-    particella: {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    },
-    sezioneCatastale: {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    },
-    codiceComuneCatastale: {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
-    evidence: {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    },
-    warnings: {
-      type: "array",
-      items: { type: "string" },
-    },
-  },
-} as const;
+const DEFAULT_VISURA_RENDER_DPI = 150;
+const DEFAULT_VISURA_MAX_PAGES = 4;
+const DEFAULT_VISURA_TIMEOUT_MS = 90_000;
 
 @Injectable()
 export class VisuraExtractionService implements OnModuleInit {
   private readonly model: string;
-  private readonly siteUrl: string;
-  private readonly appTitle: string;
-  private readonly pdfEngine: string;
   private readonly timeoutMs: number;
+  private readonly renderDpi: number;
+  private readonly maxPages: number;
   private readonly neuralwattApiUrl: string;
   private readonly neuralwattModel: string;
   private readonly territoryMatchEnabled: boolean;
@@ -119,13 +81,23 @@ export class VisuraExtractionService implements OnModuleInit {
     @Optional() private readonly priceLists?: PriceListsService,
   ) {
     this.model =
-      optionalConfig(config.get<string>("OPENROUTER_VISURA_MODEL")) ??
-      optionalConfig(config.get<string>("OPENROUTER_SCALE_MODEL")) ??
+      optionalConfig(config.get<string>("NEURALWATT_VISURA_MODEL")) ??
       DEFAULT_VISURA_MODEL;
-    this.siteUrl = optionalConfig(config.get<string>("OPENROUTER_SITE_URL")) ?? "http://localhost:8080";
-    this.appTitle = optionalConfig(config.get<string>("OPENROUTER_APP_TITLE")) ?? "Soul Prospect Qualifier";
-    this.pdfEngine = optionalConfig(config.get<string>("OPENROUTER_PDF_ENGINE")) ?? "mistral-ocr";
-    this.timeoutMs = positiveIntegerConfig(config.get<string>("OPENROUTER_VISURA_TIMEOUT_MS")) ?? 180_000;
+    this.timeoutMs =
+      positiveIntegerConfig(config.get<string>("NEURALWATT_VISURA_TIMEOUT_MS")) ??
+      DEFAULT_VISURA_TIMEOUT_MS;
+    this.renderDpi = boundedIntegerConfig(
+      config.get<string>("NEURALWATT_VISURA_RENDER_DPI"),
+      DEFAULT_VISURA_RENDER_DPI,
+      120,
+      240,
+    );
+    this.maxPages = boundedIntegerConfig(
+      config.get<string>("NEURALWATT_VISURA_MAX_PAGES"),
+      DEFAULT_VISURA_MAX_PAGES,
+      1,
+      4,
+    );
     this.neuralwattApiUrl = optionalConfig(config.get<string>("NEURALWATT_API_URL")) ?? DEFAULT_NEURALWATT_API_URL;
     this.neuralwattModel = optionalConfig(config.get<string>("NEURALWATT_MODEL")) ?? DEFAULT_NEURALWATT_MODEL;
     this.territoryMatchEnabled = config.get<string>("NEURALWATT_TERRITORY_MATCH_ENABLED")?.trim().toLowerCase() !== "false";
@@ -150,20 +122,19 @@ export class VisuraExtractionService implements OnModuleInit {
   }
 
   async extractFromBase64(input: ExtractVisuraInput) {
-    const { buffer, sha256, dataUrl } = decodePdfBase64(input.fileBase64, input.fileName);
+    const { buffer, sha256 } = decodePdfBase64(input.fileBase64, input.fileName);
     if (input.sha256 && input.sha256.toLowerCase() !== sha256) {
       throw new BadRequestException(`SHA256 non coerente per ${input.fileName}`);
     }
     return this.extractVisura({
       fileName: input.fileName,
-      fileData: dataUrl,
       buffer,
       sizeBytes: buffer.byteLength,
     });
   }
 
   async enqueueDocumentPdf(input: EnqueueVisuraDocumentInput) {
-    const { buffer, sha256, dataUrl } = decodePdfBase64(input.fileBase64, input.fileName);
+    const { buffer, sha256 } = decodePdfBase64(input.fileBase64, input.fileName);
     if (input.sha256 && input.sha256.toLowerCase() !== sha256) {
       throw new BadRequestException(`SHA256 non coerente per ${input.fileName}`);
     }
@@ -181,7 +152,6 @@ export class VisuraExtractionService implements OnModuleInit {
 
     const process = this.runJob(job.id, {
       fileName: input.fileName,
-      fileData: dataUrl,
       buffer,
       sizeBytes: buffer.byteLength,
     });
@@ -200,7 +170,7 @@ export class VisuraExtractionService implements OnModuleInit {
 
   private async runJob(
     jobId: string,
-    source: { fileName: string; fileData: string; buffer: Buffer; sizeBytes: number },
+    source: { fileName: string; buffer: Buffer; sizeBytes: number },
   ) {
     const startedAt = new Date();
     await this.prisma.visuraExtractionJob.update({
@@ -312,7 +282,7 @@ export class VisuraExtractionService implements OnModuleInit {
   }
 
   private async extractVisura(
-    source: { fileName: string; fileData: string; buffer: Buffer; sizeBytes: number },
+    source: { fileName: string; buffer: Buffer; sizeBytes: number },
   ) {
     let deterministic: VisuraExtractionResult | null = null;
     let deterministicWarning: string | null = null;
@@ -331,9 +301,13 @@ export class VisuraExtractionService implements OnModuleInit {
         : "Estrazione testuale locale non riuscita";
     }
 
-    let primary: VisuraExtractionResult;
+    let renderedPages: string[];
     try {
-      primary = parseOpenRouterVisuraExtraction(await this.callOpenRouterVisuraExtraction(source, false));
+      renderedPages = await this.renderVisuraPdfPages(
+        source,
+        this.renderDpi,
+        this.maxPages,
+      );
     } catch (error) {
       if (!deterministic?.found) throw error;
       return this.resolveFormapsTerritory({
@@ -341,15 +315,35 @@ export class VisuraExtractionService implements OnModuleInit {
         warnings: [
           ...deterministic.warnings,
           error instanceof Error
-            ? `Fallback OpenRouter non riuscito: ${error.message}`
-            : "Fallback OpenRouter non riuscito",
+            ? `Rendering fallback NeuralWatt non riuscito: ${error.message}`
+            : "Rendering fallback NeuralWatt non riuscito",
+        ],
+      });
+    }
+
+    let primary: VisuraExtractionResult;
+    try {
+      primary = parseNeuralwattVisuraExtraction(
+        await this.callNeuralwattVisuraExtraction(renderedPages, false),
+      );
+    } catch (error) {
+      if (!deterministic?.found) throw error;
+      return this.resolveFormapsTerritory({
+        ...deterministic,
+        warnings: [
+          ...deterministic.warnings,
+          error instanceof Error
+            ? `Fallback NeuralWatt non riuscito: ${error.message}`
+            : "Fallback NeuralWatt non riuscito",
         ],
       });
     }
     let result = mergeExtractionResults(primary, deterministic, deterministicWarning);
     if (!result.found || !result.provincia || !result.comune || !result.foglio || !result.particella) {
       try {
-        const retry = parseOpenRouterVisuraExtraction(await this.callOpenRouterVisuraExtraction(source, true));
+        const retry = parseNeuralwattVisuraExtraction(
+          await this.callNeuralwattVisuraExtraction(renderedPages, true),
+        );
         if (scoreExtraction(retry) > scoreExtraction(primary)) {
           result = mergeExtractionResults(retry, deterministic, deterministicWarning);
         }
@@ -508,85 +502,64 @@ export class VisuraExtractionService implements OnModuleInit {
     }
   }
 
-  private async callOpenRouterVisuraExtraction(
-    source: { fileName: string; fileData: string; sizeBytes: number },
+  private renderVisuraPdfPages(
+    source: { fileName: string; buffer: Buffer; sizeBytes: number },
+    dpi: number,
+    maxPages: number,
+  ) {
+    return renderVisuraPdfPages(source, dpi, maxPages);
+  }
+
+  private async callNeuralwattVisuraExtraction(
+    renderedPages: string[],
     retry: boolean,
   ) {
-    const apiKey = optionalConfig(this.config.get<string>("OPENROUTER_API_KEY"));
+    const apiKey = optionalConfig(this.config.get<string>("NEURALWATT_API_KEY"));
     if (!apiKey || apiKey.includes("REPLACE_")) {
-      throw new InternalServerErrorException("OPENROUTER_API_KEY non configurata per estrazione visura");
+      throw new InternalServerErrorException("NEURALWATT_API_KEY non configurata per estrazione visura");
     }
 
+    const content: JsonRecord[] = [
+      {
+        type: "text",
+        text:
+          "Analizza le immagini consecutive della stessa visura catastale italiana. Estrai l'immobile principale indicato nei Dati della richiesta o nella prima riga dei DATI IDENTIFICATIVI. Non usare il nome file. Per provincia restituisci la sigla automobilistica. ATTENZIONE: la scritta di intestazione di colonna Sezione Urbana non e un valore; se la cella sotto e vuota la sezione e null. Un valore sotto Sez. Urb. e una sezione urbana, ma se nei Mappali Terreni Correlati compare Codice Comune ... - Sezione ... correlato alla stessa particella, restituisci quella Sezione catastale. Non prendere sezioni da eventi storici non correlati. Foglio e particella sono stringhe senza subalterno. Se un dato non e leggibile usa null. Riporta in evidence le parole lette nella visura, includendo codice comune e sezione. Restituisci soltanto JSON valido: {\"found\":boolean,\"provincia\":string|null,\"comune\":string|null,\"foglio\":string|null,\"particella\":string|null,\"sezioneCatastale\":string|null,\"codiceComuneCatastale\":string|null,\"confidence\":number,\"evidence\":string|null,\"warnings\":string[]}." +
+          (retry
+            ? " Questo e un secondo tentativo: controlla nuovamente intestazione, riga corrente dei dati identificativi e Mappali Terreni Correlati, senza confondere intestazioni o dati storici con valori correnti."
+            : ""),
+      },
+    ];
+    renderedPages.forEach((imageDataUrl, index) => {
+      content.push(
+        { type: "text", text: `Pagina ${index + 1}` },
+        { type: "image_url", image_url: { url: imageDataUrl } },
+      );
+    });
     const payload: JsonRecord = {
       model: this.model,
       messages: [
         {
           role: "system",
           content:
-            "Sei un tecnico catastale italiano. Estrai solo dati espliciti da visure catastali PDF. Non usare il nome file. Rispondi esclusivamente con JSON valido conforme allo schema.",
+            "Sei un tecnico catastale italiano. Estrai solo dati espliciti dalle immagini della visura. Non usare il nome file e non inventare sezioni. Rispondi esclusivamente con JSON valido.",
         },
         {
           role: "user",
-          content: [
-            {
-              type: "text",
-              text:
-                "Analizza la visura e restituisci i dati dell'immobile principale indicati nei Dati della richiesta o nella prima riga dei DATI IDENTIFICATIVI: provincia, comune, codiceComuneCatastale, sezioneCatastale, foglio e particella. Per provincia preferisci la sigla automobilistica se e esplicita o ricavabile dalla denominazione (es. COMO -> CO, VARESE -> VA, TREVISO -> TV). Per comune usa il nome senza codice catastale e senza suffisso di sezione. Leggi la sezione corrente da 'Sez. Urb.' oppure dalla riga 'Codice Comune ... - Sezione ...' riferita allo stesso foglio e alla stessa particella; non usare sezioni citate soltanto in eventi storici. Foglio e particella devono rimanere stringhe esatte, senza zeri aggiunti e senza includere il subalterno. Se un dato non e leggibile usa null. Riporta in evidence le parole lette nella visura, includendo codice comune e sezione." +
-                (retry
-                  ? " Questo e un secondo tentativo: controlla in particolare l'intestazione 'Dati della richiesta', 'Comune di', 'Provincia di', 'Foglio:' e 'Particella:'."
-                  : ""),
-            },
-            {
-              type: "file",
-              file: {
-                filename: source.fileName,
-                file_data: source.fileData,
-              },
-            },
-          ],
+          content,
         },
       ],
       temperature: 0,
-      seed: retry ? 101 : 100,
       max_tokens: 1200,
-      include_reasoning: false,
-      reasoning: {
-        exclude: true,
-      },
-      plugins: [
-        {
-          id: "file-parser",
-          pdf: {
-            engine: this.pdfEngine,
-          },
-        },
-      ],
     };
-
-    if (!retry) {
-      payload.response_format = {
-        type: "json_schema",
-        json_schema: {
-          name: "visura_catastale_identificativi",
-          strict: true,
-          schema: VISURA_EXTRACTION_SCHEMA,
-        },
-      };
-      payload.provider = {
-        require_parameters: true,
-      };
-    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const response = await fetch(this.neuralwattApiUrl, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": this.siteUrl,
-          "X-Title": this.appTitle,
         },
         body: JSON.stringify(payload),
         signal: controller.signal,
@@ -594,12 +567,12 @@ export class VisuraExtractionService implements OnModuleInit {
 
       const rawBody = await response.text();
       if (!response.ok) {
-        throw new Error(`OpenRouter HTTP ${response.status}: ${rawBody.slice(0, 500)}`);
+        throw new Error(`NeuralWatt HTTP ${response.status}: ${safeProviderError(rawBody)}`);
       }
       return rawBody;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
-        throw new Error(`OpenRouter timeout visura dopo ${Math.round(this.timeoutMs / 1000)}s`);
+        throw new Error(`NeuralWatt timeout visura dopo ${Math.round(this.timeoutMs / 1000)}s`);
       }
       throw error;
     } finally {
@@ -629,30 +602,90 @@ function decodePdfBase64(value: string, fileName: string) {
   return {
     buffer,
     sha256,
-    dataUrl: `data:application/pdf;base64,${buffer.toString("base64")}`,
   };
 }
 
-function parseOpenRouterVisuraExtraction(rawBody: string) {
-  const data = parseJsonRecord(rawBody, "risposta OpenRouter");
+async function renderVisuraPdfPages(
+  source: { fileName: string; buffer: Buffer; sizeBytes: number },
+  dpi: number,
+  maxPages: number,
+) {
+  if (source.sizeBytes <= 0 || source.buffer.byteLength === 0) {
+    throw new Error(`PDF vuoto: ${source.fileName}`);
+  }
+  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "soul-visura-"));
+  const pdfPath = path.join(temporaryDirectory, "source.pdf");
+  const outputPrefix = path.join(temporaryDirectory, "page");
+  try {
+    await fs.writeFile(pdfPath, source.buffer);
+    const info = await execFileAsync("pdfinfo", [pdfPath], {
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    const totalPages = Number(String(info.stdout).match(/^Pages:\s+(\d+)$/im)?.[1] ?? 0);
+    if (!Number.isInteger(totalPages) || totalPages < 1) {
+      throw new Error(`Nessuna pagina trovata in ${source.fileName}`);
+    }
+    const pagesToRender = Math.min(totalPages, maxPages);
+    await execFileAsync(
+      "pdftoppm",
+      [
+        "-f",
+        "1",
+        "-l",
+        String(pagesToRender),
+        "-r",
+        String(dpi),
+        "-jpeg",
+        "-jpegopt",
+        "quality=88,optimize=y",
+        pdfPath,
+        outputPrefix,
+      ],
+      {
+        timeout: 120_000,
+        maxBuffer: 4 * 1024 * 1024,
+      },
+    );
+    const renderedFiles = (await fs.readdir(temporaryDirectory))
+      .map((fileName) => ({
+        fileName,
+        pageNumber: Number(fileName.match(/^page-(\d+)\.jpg$/)?.[1] ?? 0),
+      }))
+      .filter((entry) => entry.pageNumber > 0)
+      .sort((left, right) => left.pageNumber - right.pageNumber);
+    if (renderedFiles.length !== pagesToRender) {
+      throw new Error(
+        `Rendering incompleto di ${source.fileName}: ${renderedFiles.length}/${pagesToRender} pagine`,
+      );
+    }
+    return Promise.all(
+      renderedFiles.map(async ({ fileName }) => {
+        const image = await fs.readFile(path.join(temporaryDirectory, fileName));
+        return `data:image/jpeg;base64,${image.toString("base64")}`;
+      }),
+    );
+  } finally {
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+export function parseNeuralwattVisuraExtraction(rawBody: string) {
+  const data = parseJsonRecord(rawBody, "risposta NeuralWatt");
   if (!Array.isArray(data.choices)) {
-    const message = openRouterErrorMessage(data);
-    throw new Error(message ? `OpenRouter: ${message}` : "OpenRouter non ha restituito choices");
+    const message = providerErrorMessage(data);
+    throw new Error(message ? `NeuralWatt: ${message}` : "NeuralWatt non ha restituito choices");
   }
   const choices = asArray(data.choices, "choices");
   const choice = choices[0];
   const message = asRecord(asRecord(choice, "choices[0]").message, "choices[0].message");
-  const content = messageContentToText(message.content ?? message.reasoning);
-  const annotationText = messageAnnotationsToText(message.annotations);
-  let parsed: Partial<VisuraExtractionResult> = {};
-  if (content) {
-    try {
-      parsed = parseJsonRecord(content, "contenuto OpenRouter") as Partial<VisuraExtractionResult>;
-    } catch (error) {
-      if (!annotationText) throw error;
-    }
-  }
-  return validateVisuraExtractionResult(parsed, [annotationText, content].filter(Boolean).join("\n"));
+  const content = messageContentToText(
+    message.content ?? message.reasoning_content ?? message.reasoning,
+  );
+  if (!content) throw new Error("NeuralWatt non ha restituito contenuto");
+  const parsed = parseJsonRecord(content, "contenuto NeuralWatt") as Partial<VisuraExtractionResult>;
+  return validateVisuraExtractionResult(parsed, content);
 }
 
 function validateVisuraExtractionResult(value: Partial<VisuraExtractionResult>, sourceText = ""): VisuraExtractionResult {
@@ -689,7 +722,7 @@ function validateVisuraExtractionResult(value: Partial<VisuraExtractionResult>, 
     sezioneCatastale,
     codiceComuneCatastale,
     formapsMunicipalityId: null,
-    extractionMethod: "openrouter",
+    extractionMethod: "neuralwatt",
     confidence: fallback.found && found ? Math.max(confidence, 0.9) : confidence,
     evidence,
     warnings,
@@ -890,19 +923,6 @@ function messageContentToText(content: unknown) {
   return "";
 }
 
-function messageAnnotationsToText(annotations: unknown) {
-  return collectTextParts(annotations).join("\n").trim();
-}
-
-function collectTextParts(value: unknown): string[] {
-  if (typeof value === "string") return [value];
-  if (!value || typeof value !== "object") return [];
-  if (Array.isArray(value)) return value.flatMap(collectTextParts);
-  const record = value as JsonRecord;
-  const current = record.type === "text" && typeof record.text === "string" ? [record.text] : [];
-  return current.concat(...["content", "file", "message"].map((key) => collectTextParts(record[key])));
-}
-
 function parseJsonRecord(value: string, label: string): JsonRecord {
   try {
     return JSON.parse(value) as JsonRecord;
@@ -922,19 +942,27 @@ function asRecord(value: unknown, path: string): JsonRecord {
 
 function asArray(value: unknown, path: string): unknown[] {
   if (!Array.isArray(value)) {
-    const message = openRouterErrorMessage(value);
-    throw new Error(message ? `OpenRouter: ${message}` : `${path} deve essere una lista`);
+    const message = providerErrorMessage(value);
+    throw new Error(message ? `Provider AI: ${message}` : `${path} deve essere una lista`);
   }
   return value;
 }
 
-function openRouterErrorMessage(value: unknown) {
+function providerErrorMessage(value: unknown) {
   if (!value || typeof value !== "object") return null;
   const record = value as JsonRecord;
   const error = record.error;
   if (!error || typeof error !== "object") return null;
   const errorRecord = error as JsonRecord;
   return optionalString(errorRecord.message) ?? optionalString(errorRecord.detail) ?? optionalString(errorRecord.code);
+}
+
+function safeProviderError(rawBody: string) {
+  try {
+    return providerErrorMessage(JSON.parse(rawBody)) ?? rawBody.slice(0, 500);
+  } catch {
+    return rawBody.slice(0, 500);
+  }
 }
 
 function optionalString(value: unknown) {
@@ -954,6 +982,17 @@ function positiveIntegerConfig(value?: string) {
   if (!raw) return undefined;
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function boundedIntegerConfig(
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.min(maximum, Math.max(minimum, parsed));
 }
 
 const PROVINCE_CODES_BY_NAME: Record<string, string> = {
