@@ -127,8 +127,8 @@ Non chiamarlo dopo await, timeout, polling o callback non direttamente collegati
 
 `captureCaptcha`:
 
-- `true`: quando forMaps mostra il CAPTCHA, l'estensione salva file diagnostici in `Downloads/formaps-open/` e invia l'immagine al proxy Qwen se `qwenCaptchaEndpoint` e valido.
-- `false`: disabilita la cattura diagnostica.
+- `true`: quando forMaps mostra il CAPTCHA, l'estensione invia l'immagine al servizio di lettura senza salvarla nei download del browser.
+- `false`: disabilita l'invio del CAPTCHA al servizio di lettura.
 
 Il pannello di stato dell'estensione è posizionato sotto i comandi in alto a destra di forMaps. Il pulsante
 `−` lo riduce alla sola intestazione, mentre `+` ripristina il messaggio operativo.
@@ -157,7 +157,7 @@ simile soltanto quando supera soglia e margine di sicurezza; le sezioni ambigue 
 4. Cliccare il pulsante "Apri in forMaps".
 5. Verificare che venga aperta una scheda forMaps per ogni particella.
 6. Verificare che l'estensione compili provincia, comune, foglio e particella.
-7. Se compare CAPTCHA, verificare che l'estensione salvi i file in `Downloads/formaps-open/` e compili il codice letto via Neuralwatt/Qwen.
+7. Se compare CAPTCHA, verificare che l'estensione compili il codice senza scaricare immagini o altri file nel browser.
 
 ## Dati Di Test
 

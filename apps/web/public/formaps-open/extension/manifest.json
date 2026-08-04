@@ -1,12 +1,10 @@
 {
   "manifest_version": 3,
   "name": "forMaps Open",
-  "version": "0.51.0",
+  "version": "0.56.0",
   "description": "Compila automaticamente la ricerca particelle in forMaps dai dati aperti da Soul PQ.",
   "permissions": [
-    "downloads",
-    "storage",
-    "tabs"
+    "storage"
   ],
   "host_permissions": [
     "https://www.formaps.it/*",

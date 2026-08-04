@@ -131,10 +131,15 @@
 
   const panelUi = makePanel();
   const panel = panelUi.panel;
+  window.setTimeout(() => panel.remove(), 2000);
 
   function setStatus(message, tone = "info") {
     panelUi.message.textContent = message;
     panel.style.background = tone === "error" ? "#8a1f11" : tone === "warn" ? "#7a5400" : "#1f2428";
+  }
+
+  function setFinalStatus(message, tone = "info") {
+    setStatus(message, tone);
   }
 
   async function fetchJsonp(path, params) {
@@ -664,10 +669,8 @@
   function buildCaptchaTroubleshooting(captureResponse, codiceVerificaInput) {
     const qwen = extractQwenEnvelope(captureResponse);
     const result = extractQwenResult(captureResponse);
-    const files = captureResponse && captureResponse.results ? captureResponse.results.files : null;
     const details = {
       reason: "unknown",
-      metadataFile: files ? files.metadata : null,
       qwen,
       result,
       extractedCode: codiceVerificaInput || ""
@@ -708,8 +711,7 @@
   }
 
   function troubleshootingStatus(details) {
-    const fileHint = details.metadataFile ? ` Dettagli: Downloads/${details.metadataFile}.` : "";
-    return `${details.reason}.${fileHint}`;
+    return `${details.reason}.`;
   }
 
   async function captureCaptcha(suffix, entry, options, phase) {
@@ -1124,16 +1126,15 @@
           const submitted = await submitCaptchaConfirmation(suffix, captchaInput);
 
           if (submitted) {
-            setStatus("captcha confermato.");
-            window.setTimeout(() => panel.remove(), 6000);
+            setFinalStatus("captcha confermato.");
           } else {
-            setStatus("captcha compilato, ma non trovo il pulsante Conferma.", "error");
+            setFinalStatus("captcha compilato, ma non trovo il pulsante Conferma.", "error");
           }
 
           return;
         }
 
-        setStatus(`captcha compilato (${visibility}). Premi Conferma per continuare.`, "warn");
+        setFinalStatus(`captcha compilato (${visibility}). Premi Conferma per continuare.`, "warn");
         return;
       }
 
@@ -1143,19 +1144,18 @@
 
       const troubleshooting = buildCaptchaTroubleshooting(captureResponse, codiceVerificaInput);
       console.warn("forMaps Open CAPTCHA troubleshooting", troubleshooting);
-      setStatus(
+      setFinalStatus(
         `captcha catturato (${visibility}), ma Qwen non ha restituito un codice leggibile: ${troubleshootingStatus(troubleshooting)}`,
         "error"
       );
       return;
     }
 
-    setStatus("ricerca inviata.");
-    window.setTimeout(() => panel.remove(), 6000);
+    setFinalStatus("ricerca inviata.");
   }
 
   run().catch((error) => {
     console.error(error);
-    setStatus(error.message || "errore durante l'automazione.", "error");
+    setFinalStatus(error.message || "errore durante l'automazione.", "error");
   });
 })();

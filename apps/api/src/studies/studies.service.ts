@@ -74,7 +74,7 @@ export class StudiesService {
   async list() {
     const studies = await this.prisma.feasibilityStudy.findMany({
       include: {
-        properties: { include: propertyInclude(), orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
+        properties: { include: propertyInclude(), orderBy: propertyOrderBy() },
         versions: { orderBy: { versionNumber: "desc" } },
       },
       orderBy: { createdAt: "desc" },
@@ -86,7 +86,7 @@ export class StudiesService {
     const study = await this.prisma.feasibilityStudy.findUnique({
       where: { id },
       include: {
-        properties: { include: propertyInclude(), orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
+        properties: { include: propertyInclude(), orderBy: propertyOrderBy() },
         versions: { orderBy: { versionNumber: "desc" } },
       },
     });
@@ -101,7 +101,7 @@ export class StudiesService {
       where: { id },
       data: input,
       include: {
-        properties: { include: propertyInclude(), orderBy: [{ displayOrder: "asc" }, { id: "asc" }] },
+        properties: { include: propertyInclude(), orderBy: propertyOrderBy() },
         versions: { orderBy: { versionNumber: "desc" } },
       },
     });
@@ -296,8 +296,11 @@ export class StudiesService {
     }
 
     await this.prisma.$transaction(
-      propertyIds.map((propertyId, displayOrder) =>
-        this.prisma.property.update({ where: { id: propertyId }, data: { displayOrder } }),
+      propertyIds.map((propertyId, index) =>
+        this.prisma.property.update({
+          where: { id: propertyId },
+          data: { displayOrder: propertyIds.length - index },
+        }),
       ),
     );
     return this.find(id);
@@ -307,12 +310,15 @@ export class StudiesService {
     const properties = await this.prisma.property.findMany({
       where: { studyId },
       select: { id: true },
-      orderBy: [{ displayOrder: "asc" }, { id: "asc" }],
+      orderBy: propertyOrderBy(),
     });
     if (properties.length === 0) return;
     await this.prisma.$transaction(
-      properties.map((property, displayOrder) =>
-        this.prisma.property.update({ where: { id: property.id }, data: { displayOrder } }),
+      properties.map((property, index) =>
+        this.prisma.property.update({
+          where: { id: property.id },
+          data: { displayOrder: properties.length - index },
+        }),
       ),
     );
   }
@@ -536,6 +542,13 @@ function propertyInclude() {
       orderBy: { rank: "asc" as const },
     },
   };
+}
+
+function propertyOrderBy() {
+  return [
+    { displayOrder: "desc" as const },
+    { id: "desc" as const },
+  ];
 }
 
 function normalizePropertyOutcome(value: string | null | undefined) {

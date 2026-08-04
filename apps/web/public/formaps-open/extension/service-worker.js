@@ -1,28 +1,3 @@
-function slugTimestamp() {
-  return new Date().toISOString().replace(/[:.]/g, "-");
-}
-
-function encodeJsonDataUrl(value) {
-  const json = JSON.stringify(value, null, 2);
-  const bytes = new TextEncoder().encode(json);
-  let binary = "";
-
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-
-  return `data:application/json;base64,${btoa(binary)}`;
-}
-
-function downloadDataUrl(url, filename) {
-  return chrome.downloads.download({
-    url,
-    filename,
-    conflictAction: "uniquify",
-    saveAs: false
-  });
-}
-
 const defaultQwenCaptchaEndpoint = "https://soul-pq-alpha.rainailab.com/api/qwen-captcha";
 const hostedQwenCaptchaEndpoints = [
   "https://soul-pq-alpha.rainailab.com/api/qwen-captcha",
@@ -192,26 +167,7 @@ async function sendCaptchaToQwen(imageDataUrl, metadata) {
   };
 }
 
-async function captureVisibleTab(sender, filename) {
-  if (!sender.tab || typeof sender.tab.windowId !== "number") {
-    return { ok: false, error: "missing_sender_tab" };
-  }
-
-  try {
-    const dataUrl = await chrome.tabs.captureVisibleTab(sender.tab.windowId, {
-      format: "png"
-    });
-    await downloadDataUrl(dataUrl, filename);
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error && error.message ? error.message : String(error)
-    };
-  }
-}
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.source !== "formaps-open-page") {
     return false;
   }
@@ -235,42 +191,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   (async () => {
-    const stamp = slugTimestamp();
-    const basePath = `formaps-open/captcha-${stamp}`;
-    const files = {
-      image: `${basePath}.png`,
-      metadata: `${basePath}.json`,
-      viewport: `${basePath}-viewport.png`
-    };
     const results = {
-      files,
-      image: null,
-      metadata: null,
-      viewport: null,
       qwen: null
     };
-    const qwenPromise = sendCaptchaToQwen(message.imageDataUrl, message.metadata);
-
-    if (typeof message.imageDataUrl === "string" && message.imageDataUrl.startsWith("data:image/")) {
-      results.image = await downloadDataUrl(message.imageDataUrl, files.image);
-    }
-
-    results.qwen = await qwenPromise;
-    results.viewport = await captureVisibleTab(sender, files.viewport);
-
-    const metadata = {
-      capturedAt: new Date().toISOString(),
-      pageUrl: sender.tab ? sender.tab.url : null,
-      captureVisibleTab: results.viewport,
-      files,
-      ...message.metadata,
-      qwen: results.qwen
-    };
-
-    results.metadata = await downloadDataUrl(
-      encodeJsonDataUrl(metadata),
-      files.metadata
-    );
+    results.qwen = await sendCaptchaToQwen(message.imageDataUrl, message.metadata);
     sendResponse({ ok: true, results });
   })().catch((error) => {
     sendResponse({
