@@ -70,7 +70,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.56.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.56.1";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -5944,8 +5944,8 @@ function StudyDetail({
   const positiveShare = Math.round((counts.positive / Math.max(counts.total, 1)) * 100);
   const [savingStatus, setSavingStatus] = useState(false);
   const [selectedPropertyIds, setSelectedPropertyIds] = useState<string[]>([]);
-  const [propertySortKey, setPropertySortKey] = useState<PropertySortKey>("manual");
-  const [propertySortDirection, setPropertySortDirection] = useState<"asc" | "desc">("asc");
+  const [propertySortKey, setPropertySortKey] = useState<PropertySortKey>("currentRendita");
+  const [propertySortDirection, setPropertySortDirection] = useState<"asc" | "desc">("desc");
   const [manualOrder, setManualOrder] = useState<string[]>(() => study.properties.map((property) => property.id));
   const [draggedPropertyId, setDraggedPropertyId] = useState("");
   const [activePropertyId, setActivePropertyId] = useState<string | null>(null);
@@ -5966,7 +5966,8 @@ function StudyDetail({
 
   useEffect(() => {
     setSelectedPropertyIds([]);
-    setPropertySortKey("manual");
+    setPropertySortKey("currentRendita");
+    setPropertySortDirection("desc");
     setManualOrder(study.properties.map((property) => property.id));
     setActivePropertyId(null);
     setNewPropertyModalOpen(false);
@@ -6009,6 +6010,18 @@ function StudyDetail({
     });
   }, [study.properties]);
 
+  const valuationGroupCurrentRenditaById = useMemo(() => {
+    const totals = new Map<string, number>();
+    study.properties.forEach((property) => {
+      if (!property.valuationGroupId) return;
+      totals.set(
+        property.valuationGroupId,
+        (totals.get(property.valuationGroupId) ?? 0) + property.currentRendita,
+      );
+    });
+    return totals;
+  }, [study.properties]);
+
   const orderedProperties = useMemo(() => {
     const byId = new Map(study.properties.map((property) => [property.id, property]));
     const properties = manualOrder.map((propertyId) => byId.get(propertyId)).filter((property): property is PropertyItem => Boolean(property));
@@ -6021,7 +6034,14 @@ function StudyDetail({
         particella: [first.particella ?? "", second.particella ?? ""],
         subalterno: [first.subalterno ?? "", second.subalterno ?? ""],
         categoria: [first.categoria, second.categoria],
-        currentRendita: [first.currentRendita, second.currentRendita],
+        currentRendita: [
+          first.valuationGroupId
+            ? (valuationGroupCurrentRenditaById.get(first.valuationGroupId) ?? first.currentRendita)
+            : first.currentRendita,
+          second.valuationGroupId
+            ? (valuationGroupCurrentRenditaById.get(second.valuationGroupId) ?? second.currentRendita)
+            : second.currentRendita,
+        ],
         estimatedRendita: [first.estimatedRendita, second.estimatedRendita],
         renditaDiff: [propertyRenditaDiffAmount(first) ?? -Infinity, propertyRenditaDiffAmount(second) ?? -Infinity],
         currentImu: [first.currentImu ?? -Infinity, second.currentImu ?? -Infinity],
@@ -6037,7 +6057,7 @@ function StudyDetail({
           : Number(left) - Number(right);
       return propertySortDirection === "asc" ? comparison : -comparison;
     });
-  }, [manualOrder, propertySortDirection, propertySortKey, study.properties]);
+  }, [manualOrder, propertySortDirection, propertySortKey, study.properties, valuationGroupCurrentRenditaById]);
 
   const selectedProperties = orderedProperties.filter((property) => selectedPropertyIds.includes(property.id));
   const valuationGroups = useMemo(() => {

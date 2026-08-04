@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { StudiesService } from "../src/studies/studies.service.js";
 
-test("restituisce gli immobili di ogni studio in ordine decrescente", async () => {
+test("l'API conserva l'ordine manuale degli immobili", async () => {
   let query: Record<string, any> | null = null;
   const prisma = {
     feasibilityStudy: {
@@ -17,12 +17,12 @@ test("restituisce gli immobili di ogni studio in ordine decrescente", async () =
   await service.list();
 
   assert.deepEqual(query?.include.properties.orderBy, [
-    { displayOrder: "desc" },
-    { id: "desc" },
+    { displayOrder: "asc" },
+    { id: "asc" },
   ]);
 });
 
-test("salva il trascinamento mantenendo il primo immobile in cima all'ordine decrescente", async () => {
+test("salva il trascinamento nello stesso ordine mostrato dall'interfaccia", async () => {
   const writes: Array<{ id: string; displayOrder: number }> = [];
   const prisma = {
     feasibilityStudy: {
@@ -43,8 +43,8 @@ test("salva il trascinamento mantenendo il primo immobile in cima all'ordine dec
   await service.reorderProperties("STUDIO-1", ["IMM-3", "IMM-1", "IMM-2"]);
 
   assert.deepEqual(writes, [
-    { id: "IMM-3", displayOrder: 3 },
-    { id: "IMM-1", displayOrder: 2 },
-    { id: "IMM-2", displayOrder: 1 },
+    { id: "IMM-3", displayOrder: 0 },
+    { id: "IMM-1", displayOrder: 1 },
+    { id: "IMM-2", displayOrder: 2 },
   ]);
 });

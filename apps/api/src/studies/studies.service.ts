@@ -296,10 +296,10 @@ export class StudiesService {
     }
 
     await this.prisma.$transaction(
-      propertyIds.map((propertyId, index) =>
+      propertyIds.map((propertyId, displayOrder) =>
         this.prisma.property.update({
           where: { id: propertyId },
-          data: { displayOrder: propertyIds.length - index },
+          data: { displayOrder },
         }),
       ),
     );
@@ -314,10 +314,10 @@ export class StudiesService {
     });
     if (properties.length === 0) return;
     await this.prisma.$transaction(
-      properties.map((property, index) =>
+      properties.map((property, displayOrder) =>
         this.prisma.property.update({
           where: { id: property.id },
-          data: { displayOrder: properties.length - index },
+          data: { displayOrder },
         }),
       ),
     );
@@ -546,8 +546,8 @@ function propertyInclude() {
 
 function propertyOrderBy() {
   return [
-    { displayOrder: "desc" as const },
-    { id: "desc" as const },
+    { displayOrder: "asc" as const },
+    { id: "asc" as const },
   ];
 }
 
