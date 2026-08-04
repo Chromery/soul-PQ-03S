@@ -70,7 +70,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.56.1";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.56.2";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -161,6 +161,7 @@ type PropertyImuOverrideUpdate = {
 
 type FeasibilityStudy = {
   id: string;
+  studyGroupId?: string | null;
   company: string;
   vat: string;
   comune: string;
@@ -183,6 +184,10 @@ type FeasibilityStudy = {
   erpUrl: string;
   properties: PropertyItem[];
 };
+
+type StudyTableRow =
+  | { kind: "study"; study: FeasibilityStudy }
+  | { kind: "group"; groupId: string; studies: FeasibilityStudy[] };
 
 type PresentationDeck = {
   id: string;
@@ -2459,6 +2464,20 @@ function getSortValue(study: FeasibilityStudy, sortKey: SortKey) {
   }
 }
 
+function compareStudies(
+  firstStudy: FeasibilityStudy,
+  secondStudy: FeasibilityStudy,
+  sortKey: SortKey,
+  sortDirection: "asc" | "desc",
+) {
+  const first = getSortValue(firstStudy, sortKey);
+  const second = getSortValue(secondStudy, sortKey);
+  const comparison = typeof first === "string" && typeof second === "string"
+    ? first.localeCompare(second, "it")
+    : Number(first) - Number(second);
+  return sortDirection === "asc" ? comparison : -comparison;
+}
+
 function App() {
   const [studies, setStudies] = useState<FeasibilityStudy[]>(demoStudies);
   const [route, setRoute] = useState<AppRoute>(routeFromLocation);
@@ -2470,6 +2489,8 @@ function App() {
   const [appointmentOnly, setAppointmentOnly] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [selectedStudyIds, setSelectedStudyIds] = useState<string[]>([]);
+  const [studyGroupBusy, setStudyGroupBusy] = useState(false);
+  const [expandedStudyGroupIds, setExpandedStudyGroupIds] = useState<string[]>([]);
   const [editorDirty, setEditorDirty] = useState(false);
   const [newStudyModalOpen, setNewStudyModalOpen] = useState(false);
   const [newStudyBusy, setNewStudyBusy] = useState(false);
@@ -2566,19 +2587,7 @@ function App() {
         const matchesAppointment = !appointmentOnly || Boolean(study.nextAppointment);
         return matchesText && matchesStatus && matchesRegion && matchesAppointment;
       })
-      .sort((a, b) => {
-        const first = getSortValue(a, sortKey);
-        const second = getSortValue(b, sortKey);
-        let comparison = 0;
-
-        if (typeof first === "string" && typeof second === "string") {
-          comparison = first.localeCompare(second, "it");
-        } else {
-          comparison = Number(first) - Number(second);
-        }
-
-        return sortDirection === "asc" ? comparison : -comparison;
-      });
+      .sort((first, second) => compareStudies(first, second, sortKey, sortDirection));
   }, [appointmentOnly, query, regionFilter, sortDirection, sortKey, statusFilter, studies]);
 
   const regions = useMemo(
@@ -2620,10 +2629,54 @@ function App() {
     appointmentOnly,
   ].filter(Boolean).length;
 
+  const studyGroups = useMemo(() => {
+    const groups = new Map<string, FeasibilityStudy[]>();
+    studies.forEach((study) => {
+      if (!study.studyGroupId) return;
+      const members = groups.get(study.studyGroupId) ?? [];
+      members.push(study);
+      groups.set(study.studyGroupId, members);
+    });
+    groups.forEach((members) => members.sort(
+      (first, second) => compareStudies(first, second, sortKey, sortDirection),
+    ));
+    return groups;
+  }, [sortDirection, sortKey, studies]);
+  const displayedStudyRows = useMemo<StudyTableRow[]>(() => {
+    const renderedGroups = new Set<string>();
+    const rows: StudyTableRow[] = [];
+    filteredStudies.forEach((study) => {
+      if (!study.studyGroupId) {
+        rows.push({ kind: "study", study });
+        return;
+      }
+      if (renderedGroups.has(study.studyGroupId)) return;
+      renderedGroups.add(study.studyGroupId);
+      rows.push({
+        kind: "group",
+        groupId: study.studyGroupId,
+        studies: studyGroups.get(study.studyGroupId) ?? [study],
+      });
+    });
+    return rows;
+  }, [filteredStudies, studyGroups]);
+  const visibleStudyIds = useMemo(
+    () => Array.from(new Set(displayedStudyRows.flatMap((row) => (
+      row.kind === "study" ? [row.study.id] : row.studies.map((study) => study.id)
+    )))),
+    [displayedStudyRows],
+  );
   const selectedStudies = studies.filter((study) => selectedStudyIds.includes(study.id));
   const allVisibleSelected =
-    filteredStudies.length > 0 &&
-    filteredStudies.every((study) => selectedStudyIds.includes(study.id));
+    visibleStudyIds.length > 0 &&
+    visibleStudyIds.every((studyId) => selectedStudyIds.includes(studyId));
+  const completeSelectedStudyGroupIds = Array.from(studyGroups.entries())
+    .filter(([, members]) => members.every((study) => selectedStudyIds.includes(study.id)))
+    .map(([groupId]) => groupId);
+  const canGroupSelectedStudies = selectedStudies.length >= 2
+    && selectedStudies.every((study) => !study.studyGroupId);
+  const canUngroupSelectedStudies = completeSelectedStudyGroupIds.length === 1
+    && selectedStudies.length === (studyGroups.get(completeSelectedStudyGroupIds[0] ?? "")?.length ?? 0);
 
   function flash(message: string) {
     setToast(message);
@@ -2647,6 +2700,58 @@ function App() {
     } catch {
       flash("Impossibile salvare le modifiche dello studio.");
       return false;
+    }
+  }
+
+  async function groupSelectedStudies() {
+    if (!canGroupSelectedStudies || studyGroupBusy) return;
+    setStudyGroupBusy(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/studies/groups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studyIds: selectedStudies.map((study) => study.id) }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { message?: string } | null;
+        throw new Error(payload?.message || `HTTP ${response.status}`);
+      }
+      const updatedStudies = (await response.json()) as FeasibilityStudy[];
+      const groupId = updatedStudies.find((study) => selectedStudyIds.includes(study.id))?.studyGroupId;
+      setStudies(updatedStudies);
+      setSelectedStudyIds([]);
+      if (groupId) {
+        setExpandedStudyGroupIds((current) => Array.from(new Set([...current, groupId])));
+      }
+      flash("Studi uniti in un gruppo complessivo.");
+    } catch (error) {
+      console.error(error);
+      flash(error instanceof Error ? error.message : "Impossibile unire gli studi selezionati.");
+    } finally {
+      setStudyGroupBusy(false);
+    }
+  }
+
+  async function ungroupSelectedStudies() {
+    const groupId = completeSelectedStudyGroupIds[0];
+    if (!canUngroupSelectedStudies || !groupId || studyGroupBusy) return;
+    setStudyGroupBusy(true);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/studies/groups/${encodeURIComponent(groupId)}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const updatedStudies = (await response.json()) as FeasibilityStudy[];
+      setStudies(updatedStudies);
+      setSelectedStudyIds([]);
+      setExpandedStudyGroupIds((current) => current.filter((id) => id !== groupId));
+      flash("Gruppo di studi sciolto.");
+    } catch (error) {
+      console.error(error);
+      flash("Impossibile sciogliere il gruppo di studi.");
+    } finally {
+      setStudyGroupBusy(false);
     }
   }
 
@@ -3041,12 +3146,30 @@ function App() {
     );
   }
 
+  function toggleStudyGroupSelection(groupStudies: FeasibilityStudy[]) {
+    const groupStudyIds = groupStudies.map((study) => study.id);
+    const groupSelected = groupStudyIds.every((studyId) => selectedStudyIds.includes(studyId));
+    setSelectedStudyIds((current) => (
+      groupSelected
+        ? current.filter((studyId) => !groupStudyIds.includes(studyId))
+        : Array.from(new Set([...current, ...groupStudyIds]))
+    ));
+  }
+
+  function toggleStudyGroupExpansion(groupId: string) {
+    setExpandedStudyGroupIds((current) => (
+      current.includes(groupId)
+        ? current.filter((id) => id !== groupId)
+        : [...current, groupId]
+    ));
+  }
+
   function toggleVisibleSelection() {
     setSelectedStudyIds((current) => {
       if (allVisibleSelected) {
-        return current.filter((selectedId) => !filteredStudies.some((study) => study.id === selectedId));
+        return current.filter((selectedId) => !visibleStudyIds.includes(selectedId));
       }
-      return Array.from(new Set([...current, ...filteredStudies.map((study) => study.id)]));
+      return Array.from(new Set([...current, ...visibleStudyIds]));
     });
   }
 
@@ -3393,6 +3516,30 @@ function App() {
                     ? `${selectedStudies.length} studi selezionati`
                     : "Seleziona gli studi da elaborare"}
                 </span>
+                <button
+                  className="button primary compact-button"
+                  type="button"
+                  disabled={!canGroupSelectedStudies || studyGroupBusy}
+                  onClick={() => void groupSelectedStudies()}
+                  title={
+                    selectedStudies.some((study) => study.studyGroupId)
+                      ? "Sciogli prima il gruppo degli studi già raggruppati"
+                      : "Seleziona almeno due studi non ancora raggruppati"
+                  }
+                >
+                  <Layers3 size={16} />
+                  {studyGroupBusy && canGroupSelectedStudies ? "Unione..." : "Unisci studi"}
+                </button>
+                <button
+                  className="button secondary compact-button"
+                  type="button"
+                  disabled={!canUngroupSelectedStudies || studyGroupBusy}
+                  onClick={() => void ungroupSelectedStudies()}
+                  title="Seleziona un gruppo completo per scioglierlo"
+                >
+                  <Unlink2 size={16} />
+                  Sciogli gruppo
+                </button>
                 <button className="button secondary" disabled={selectedStudies.length === 0} onClick={downloadSelectedCsv}>
                   <FileSpreadsheet size={17} />
                   Esporta selezione CSV
@@ -3547,15 +3694,29 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredStudies.map((study) => (
+                  {displayedStudyRows.map((row) => row.kind === "study" ? (
                     <StudyRows
-                      key={study.id}
-                      study={study}
-                      selected={selectedStudyIds.includes(study.id)}
+                      key={row.study.id}
+                      study={row.study}
+                      selected={selectedStudyIds.includes(row.study.id)}
                       visibleColumns={visibleStudyColumnIds}
-                      onSelect={() => toggleStudySelection(study.id)}
-                      onOpenDetail={() => navigate({ view: "study", studyId: study.id })}
-                      onUpdate={(input) => updateStudy(study.id, input)}
+                      onSelect={() => toggleStudySelection(row.study.id)}
+                      onOpenDetail={() => navigate({ view: "study", studyId: row.study.id })}
+                      onUpdate={(input) => updateStudy(row.study.id, input)}
+                    />
+                  ) : (
+                    <StudyGroupRows
+                      key={row.groupId}
+                      groupId={row.groupId}
+                      studies={row.studies}
+                      expanded={expandedStudyGroupIds.includes(row.groupId)}
+                      selectedStudyIds={selectedStudyIds}
+                      visibleColumns={visibleStudyColumnIds}
+                      onToggle={() => toggleStudyGroupExpansion(row.groupId)}
+                      onSelect={() => toggleStudyGroupSelection(row.studies)}
+                      onSelectStudy={toggleStudySelection}
+                      onOpenStudy={(studyId) => navigate({ view: "study", studyId })}
+                      onUpdateStudy={updateStudy}
                     />
                   ))}
                 </tbody>
@@ -4905,6 +5066,168 @@ function PendingPage({
   );
 }
 
+function StudyGroupRows({
+  groupId,
+  studies,
+  expanded,
+  selectedStudyIds,
+  visibleColumns,
+  onToggle,
+  onSelect,
+  onSelectStudy,
+  onOpenStudy,
+  onUpdateStudy,
+}: {
+  groupId: string;
+  studies: FeasibilityStudy[];
+  expanded: boolean;
+  selectedStudyIds: string[];
+  visibleColumns: ReadonlySet<StudyTableColumnId>;
+  onToggle: () => void;
+  onSelect: () => void;
+  onSelectStudy: (studyId: string) => void;
+  onOpenStudy: (studyId: string) => void;
+  onUpdateStudy: (studyId: string, input: StudyUpdate) => Promise<boolean>;
+}) {
+  const allSelected = studies.every((study) => selectedStudyIds.includes(study.id));
+  const someSelected = studies.some((study) => selectedStudyIds.includes(study.id));
+  const propertiesCount = studies.reduce((total, study) => total + study.properties.length, 0);
+  const originalRendita = sumNumbers(studies.map((study) => study.originalRendita));
+  const totalRendita = sumNumbers(studies.map((study) => study.totalRendita));
+  const diffRendita = sumNumbers(studies.map((study) => studyRenditaDiffAmount(study)));
+  const currentImu = sumNumbers(studies.flatMap((study) => (
+    study.properties.map((property) => property.currentImu ?? 0)
+  )));
+  const diffImu = sumNumbers(studies.map((study) => study.diffImu));
+  const commonStatus = studies.every((study) => study.status === studies[0]?.status)
+    ? studies[0]?.status
+    : null;
+  const commonCommercialOwner = studies.every(
+    (study) => study.commercialOwner === studies[0]?.commercialOwner,
+  ) ? studies[0]?.commercialOwner : null;
+  const latestImportedAt = studies.reduce(
+    (latest, study) => Math.max(latest, new Date(study.importedAt).getTime()),
+    0,
+  );
+  const earliestDeadline = studies.reduce(
+    (earliest, study) => Math.min(earliest, new Date(study.deadline).getTime()),
+    Number.POSITIVE_INFINITY,
+  );
+  const nextAppointments = studies
+    .map((study) => study.nextAppointment ? new Date(study.nextAppointment).getTime() : null)
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const nextAppointment = nextAppointments.length > 0 ? Math.min(...nextAppointments) : null;
+  const companyNames = Array.from(new Set(studies.map((study) => study.company)));
+
+  return (
+    <>
+      <tr
+        className="study-row study-group-row data-row-clickable"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Comprimi" : "Espandi"} gruppo di ${studies.length} studi`}
+        onClick={onToggle}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onToggle();
+          }
+        }}
+      >
+        {visibleColumns.has("select") && (
+          <td className="selection-cell">
+            <input
+              ref={(input) => {
+                if (input) input.indeterminate = someSelected && !allSelected;
+              }}
+              type="checkbox"
+              checked={allSelected}
+              onClick={(event) => event.stopPropagation()}
+              onChange={onSelect}
+              aria-label={`Seleziona il gruppo di ${studies.length} studi`}
+            />
+          </td>
+        )}
+        {visibleColumns.has("id") && (
+          <td className="strong-cell">
+            <span className="study-group-toggle-label">
+              <ChevronRight size={16} className={expanded ? "expanded" : ""} />
+              Gruppo
+            </span>
+          </td>
+        )}
+        {visibleColumns.has("company") && (
+          <td>
+            <div className="company-cell study-group-title">
+              <strong>{studies.length} studi · {companyNames.length} società</strong>
+              <span title={companyNames.join(", ")}>{companyNames.join(" · ")}</span>
+            </div>
+          </td>
+        )}
+        {visibleColumns.has("propertiesCount") && <td>{propertiesCount}</td>}
+        {visibleColumns.has("status") && (
+          <td>
+            {commonStatus
+              ? <StatusBadge status={commonStatus} />
+              : <span className="study-group-mixed">Stati misti</span>}
+          </td>
+        )}
+        {visibleColumns.has("importedAt") && (
+          <td>{latestImportedAt > 0 ? formatDate(new Date(latestImportedAt).toISOString()) : "—"}</td>
+        )}
+        {visibleColumns.has("deadline") && (
+          <td>
+            <div className="date-stack">
+              <strong>{Number.isFinite(earliestDeadline) ? formatDate(new Date(earliestDeadline).toISOString()) : "—"}</strong>
+              {nextAppointment !== null && <span>{formatDateTime(new Date(nextAppointment).toISOString())}</span>}
+            </div>
+          </td>
+        )}
+        {visibleColumns.has("diffRendita") && (
+          <td>
+            <MoneyPercentStack
+              amount={diffRendita}
+              percent={originalRendita === 0 ? null : (diffRendita / originalRendita) * 100}
+              favorableDirection="down"
+            />
+          </td>
+        )}
+        {visibleColumns.has("diffImu") && (
+          <td>
+            <MoneyPercentStack
+              amount={diffImu}
+              percent={currentImu === 0 ? null : (diffImu / currentImu) * 100}
+            />
+          </td>
+        )}
+        {visibleColumns.has("totalRendita") && (
+          <td className="table-cell-ellipsis" title={formatEuro(totalRendita)}>{formatEuro(totalRendita)}</td>
+        )}
+        {visibleColumns.has("commercialOwner") && (
+          <td>
+            {commonCommercialOwner
+              ? <Owner owner={commonCommercialOwner} />
+              : <span className="study-group-mixed">Più commerciali</span>}
+          </td>
+        )}
+      </tr>
+      {expanded && studies.map((study) => (
+        <StudyRows
+          key={`${groupId}-${study.id}`}
+          study={study}
+          selected={selectedStudyIds.includes(study.id)}
+          visibleColumns={visibleColumns}
+          onSelect={() => onSelectStudy(study.id)}
+          onOpenDetail={() => onOpenStudy(study.id)}
+          onUpdate={(input) => onUpdateStudy(study.id, input)}
+          groupChild
+        />
+      ))}
+    </>
+  );
+}
+
 function StudyRows({
   study,
   selected,
@@ -4912,6 +5235,7 @@ function StudyRows({
   onSelect,
   onOpenDetail,
   onUpdate,
+  groupChild = false,
 }: {
   study: FeasibilityStudy;
   selected: boolean;
@@ -4919,6 +5243,7 @@ function StudyRows({
   onSelect: () => void;
   onOpenDetail: () => void;
   onUpdate: (input: StudyUpdate) => Promise<boolean>;
+  groupChild?: boolean;
 }) {
   const expanded = false;
   const propertyDetailsOpen = false;
@@ -4957,7 +5282,7 @@ function StudyRows({
   return (
     <>
       <tr
-        className="study-row data-row-clickable"
+        className={`study-row data-row-clickable${groupChild ? " study-group-child" : ""}`}
         tabIndex={0}
         aria-label={`Apri lo studio di fattibilità ${study.id}`}
         onClick={onOpenDetail}

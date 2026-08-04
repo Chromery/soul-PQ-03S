@@ -36,6 +36,7 @@ enum VisuraExtractionStatus {
 
 model FeasibilityStudy {
   id              String                   @id
+  studyGroupId    String?
   companyErpId    String?
   company         String
   vat             String
@@ -61,10 +62,20 @@ model FeasibilityStudy {
   sourceSyncId    String?
   importedAt      DateTime                 @default(now())
   updatedAt       DateTime                 @updatedAt
+  studyGroup      StudyGroup?              @relation(fields: [studyGroupId], references: [id], onDelete: SetNull)
   properties      Property[]
   valuationGroups PropertyValuationGroup[]
   versions        StudyVersion[]
   presentations   PresentationDeck[]
+
+  @@index([studyGroupId])
+}
+
+model StudyGroup {
+  id        String             @id @default(cuid())
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  studies   FeasibilityStudy[]
 }
 
 model PropertyValuationGroup {

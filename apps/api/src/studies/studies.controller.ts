@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put } from "@nestjs/common";
 import { CreatePropertyValuationGroupDto } from "./dto/create-property-valuation-group.dto.js";
+import { CreateStudyGroupDto } from "./dto/create-study-group.dto.js";
 import { ReorderStudyPropertiesDto } from "./dto/reorder-study-properties.dto.js";
 import { UpdateStudyDto } from "./dto/update-study.dto.js";
 import { StudiesService } from "./studies.service.js";
@@ -16,6 +17,18 @@ export class StudiesController {
   @Post()
   create(@Body() input: unknown) {
     return this.studies.create(input);
+  }
+
+  @Post("groups")
+  groupStudies(@Body() input: CreateStudyGroupDto) {
+    return this.studies.groupStudies(input.studyIds);
+  }
+
+  @Delete("groups/:groupId")
+  async ungroupStudies(@Param("groupId") groupId: string) {
+    const studies = await this.studies.ungroupStudies(groupId);
+    if (!studies) throw new NotFoundException("Gruppo studi non trovato");
+    return studies;
   }
 
   @Post(":id/properties")

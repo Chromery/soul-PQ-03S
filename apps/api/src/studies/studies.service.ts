@@ -158,6 +158,46 @@ export class StudiesService {
     return this.find(studyId);
   }
 
+  async groupStudies(studyIds: string[]) {
+    const uniqueStudyIds = validateStudyGroupSelection(studyIds);
+    const studies = await this.prisma.feasibilityStudy.findMany({
+      where: { id: { in: uniqueStudyIds } },
+      select: { id: true, studyGroupId: true },
+    });
+    if (studies.length !== uniqueStudyIds.length) {
+      throw new BadRequestException("Uno o piu studi non esistono");
+    }
+    if (studies.some((study) => study.studyGroupId !== null)) {
+      throw new BadRequestException("Sciogli prima il gruppo degli studi gia raggruppati");
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const group = await tx.studyGroup.create({ data: {} });
+      await tx.feasibilityStudy.updateMany({
+        where: { id: { in: uniqueStudyIds } },
+        data: { studyGroupId: group.id },
+      });
+    });
+    return this.list();
+  }
+
+  async ungroupStudies(groupId: string) {
+    const group = await this.prisma.studyGroup.findUnique({
+      where: { id: groupId },
+      select: { id: true },
+    });
+    if (!group) return null;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.feasibilityStudy.updateMany({
+        where: { studyGroupId: groupId },
+        data: { studyGroupId: null },
+      });
+      await tx.studyGroup.delete({ where: { id: groupId } });
+    });
+    return this.list();
+  }
+
   async createProperty(studyId: string, body: unknown) {
     const study = await this.prisma.feasibilityStudy.findUnique({
       where: { id: studyId },
@@ -639,6 +679,21 @@ export function validatePropertyValuationGroupSelection(propertyIds: string[]) {
     throw new BadRequestException("Seleziona almeno due immobili");
   }
   return uniquePropertyIds;
+}
+
+export function validateStudyGroupSelection(studyIds: string[]) {
+  if (!Array.isArray(studyIds)) {
+    throw new BadRequestException("studyIds obbligatorio");
+  }
+  const uniqueStudyIds = Array.from(new Set(
+    studyIds
+      .map((studyId) => optionalString(studyId, 120))
+      .filter((studyId): studyId is string => Boolean(studyId)),
+  ));
+  if (uniqueStudyIds.length < 2) {
+    throw new BadRequestException("Seleziona almeno due studi");
+  }
+  return uniqueStudyIds;
 }
 
 function requiredString(value: unknown, field: string, maxLength: number) {
