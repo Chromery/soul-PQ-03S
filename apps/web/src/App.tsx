@@ -6235,6 +6235,147 @@ async function copyText(value: string) {
   if (!copied) throw new Error("Clipboard non disponibile");
 }
 
+function StudyNotesPanel({
+  notes,
+  onSave,
+}: {
+  notes: string;
+  onSave: (notes: string) => Promise<boolean>;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [draft, setDraft] = useState(notes);
+  const noteValue = notes.trim();
+  const hasLongNote = noteValue.length > 280 || noteValue.split(/\r?\n/).length > 4;
+  const hasChanges = draft.trim() !== noteValue;
+
+  useEffect(() => {
+    if (!editing) setDraft(notes);
+  }, [editing, notes]);
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [notes]);
+
+  useEffect(() => {
+    if (!editing) return;
+    textareaRef.current?.focus();
+    textareaRef.current?.setSelectionRange(draft.length, draft.length);
+  }, [editing]);
+
+  function beginEditing() {
+    setDraft(notes);
+    setExpanded(true);
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    if (saving) return;
+    setDraft(notes);
+    setEditing(false);
+  }
+
+  async function saveNotes() {
+    if (saving) return;
+    const nextNotes = draft.trim();
+    if (nextNotes === noteValue) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    const saved = await onSave(nextNotes);
+    setSaving(false);
+    if (saved) setEditing(false);
+  }
+
+  return (
+    <section className={`study-notes-panel${editing ? " editing" : ""}`} aria-labelledby="study-notes-title">
+      <div className="study-notes-header">
+        <div className="study-notes-heading">
+          <span className="study-notes-icon" aria-hidden="true"><FileText size={17} /></span>
+          <div>
+            <div className="study-notes-title-row">
+              <h2 id="study-notes-title">Note studio</h2>
+              <span>Studio</span>
+            </div>
+            <p>Promemoria operativo associato all’intero studio.</p>
+          </div>
+        </div>
+        {!editing && noteValue && (
+          <button className="study-notes-edit-button" type="button" onClick={beginEditing}>
+            <Pencil size={14} />
+            Modifica
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="study-notes-editor" aria-busy={saving}>
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            maxLength={4000}
+            rows={4}
+            aria-label="Note dello studio"
+            placeholder="Inserisci informazioni utili per chi proseguirà l’analisi…"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancelEditing();
+              }
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                void saveNotes();
+              }
+            }}
+          />
+          <div className="study-notes-editor-footer">
+            <div className="study-notes-editor-meta">
+              <span>{draft.length.toLocaleString("it-IT")}/4.000 caratteri</span>
+              <span>Ctrl/⌘ + Invio per salvare · Esc per annullare</span>
+            </div>
+            <div className="study-notes-editor-actions">
+              <button className="button secondary compact-button" type="button" onClick={cancelEditing} disabled={saving}>
+                Annulla
+              </button>
+              <button
+                className="button primary compact-button"
+                type="button"
+                onClick={() => void saveNotes()}
+                disabled={saving || !hasChanges}
+              >
+                <Save size={14} />
+                {saving ? "Salvataggio…" : "Salva note"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : noteValue ? (
+        <div className="study-notes-content">
+          <p className={!expanded && hasLongNote ? "collapsed" : ""}>{noteValue}</p>
+          {hasLongNote && (
+            <button className="study-notes-disclosure" type="button" onClick={() => setExpanded((current) => !current)}>
+              {expanded ? "Riduci" : "Mostra tutto"}
+              {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="study-notes-empty">
+          <span>Nessuna nota inserita.</span>
+          <button className="study-notes-add-button" type="button" onClick={beginEditing}>
+            <Plus size={14} />
+            Aggiungi nota
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function StudyDetail({
   study,
   onBack,
@@ -6718,6 +6859,11 @@ function StudyDetail({
           </a>
         </div>
       </section>
+
+      <StudyNotesPanel
+        notes={study.notes}
+        onSave={(notes) => onUpdate({ notes })}
+      />
 
       <section className="detail-card property-detail-card operational-properties">
         <div className="section-title property-list-title">
