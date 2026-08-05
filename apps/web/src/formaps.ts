@@ -90,7 +90,7 @@ function toBase64Url(value: unknown): string {
 
 function qwenCaptchaEndpoint() {
   if (typeof window === "undefined") {
-    return "https://soul-pq-alpha.rainailab.com/api/qwen-captcha";
+    return "https://pq-soul.rainailab.com/api/qwen-captcha";
   }
 
   return `${window.location.origin}/api/qwen-captcha`;
