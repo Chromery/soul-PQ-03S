@@ -75,6 +75,20 @@ test("la generazione precedente con soli propertyIds resta compatibile e arroton
   assert.match(fixture.fileName(), /^proposta-ottimizzazione-/);
 });
 
+test("la presentazione v2 usa uno snapshot e un nome file distinti in formato studio di fattibilità", async () => {
+  const fixture = serviceFixture();
+  const summary = await fixture.service.createV2("studio-1", ["immobile-1"]);
+
+  const snapshot = fixture.snapshot();
+  assert.ok(snapshot);
+  assert.equal(snapshot.version, 2);
+  assert.equal(summary.version, 2);
+  assert.equal(
+    fixture.fileName(),
+    "Studio di fattibilità _ Ottimizzazione rendita catastale _ Cliente S.p.A.pdf",
+  );
+});
+
 test("i campi modificati nell'anteprima vengono congelati nello snapshot della presentazione", async () => {
   const fixture = serviceFixture();
   await fixture.service.create(

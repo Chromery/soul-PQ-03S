@@ -70,7 +70,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.56.2";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.56.5";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -191,6 +191,7 @@ type StudyTableRow =
 
 type PresentationDeck = {
   id: string;
+  version?: 1 | 2;
   studyId: string;
   propertyIds: string[];
   propertyCount: number;
@@ -5774,11 +5775,14 @@ function PresentationAction({
   study,
   draft,
   onNotice,
+  version = 1,
 }: {
   study: FeasibilityStudy;
   draft: PresentationDraft;
   onNotice: (message: string) => void;
+  version?: 1 | 2;
 }) {
+  const isV2 = version === 2;
   const [menuOpen, setMenuOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedPropertyIds, setSelectedPropertyIds] = useState<string[]>(() => defaultPresentationPropertyIds(study));
@@ -5806,14 +5810,16 @@ function PresentationAction({
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json() as Promise<PresentationDeck[]>;
       })
-      .then((decks) => setLatestDeck(Array.isArray(decks) ? decks[0] ?? null : null))
+      .then((decks) => setLatestDeck(Array.isArray(decks)
+        ? decks.find((deck) => (deck.version ?? 1) === version) ?? null
+        : null))
       .catch((error) => {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
           console.error("Impossibile caricare le presentazioni dello studio", error);
         }
       });
     return () => abortController.abort();
-  }, [study.id]);
+  }, [study.id, version]);
 
   useEffect(() => {
     if (!modalOpen) return;
@@ -5845,7 +5851,8 @@ function PresentationAction({
     }
     setBusy(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/studies/${encodeURIComponent(study.id)}/presentations`, {
+      const endpoint = `${API_BASE_URL}/studies/${encodeURIComponent(study.id)}/presentations${isV2 ? "/v2" : ""}`;
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -5862,7 +5869,7 @@ function PresentationAction({
       const deck = (await response.json()) as PresentationDeck;
       setGeneratedDeck(deck);
       setLatestDeck(deck);
-      onNotice("Presentazione generata e salvata.");
+      onNotice(isV2 ? "Presentazione v2 generata e salvata." : "Presentazione generata e salvata.");
     } catch (error) {
       console.error(error);
       onNotice(error instanceof Error ? error.message : "Impossibile generare la presentazione.");
@@ -5899,7 +5906,7 @@ function PresentationAction({
           onClick={openGenerator}
         >
           <Presentation size={16} />
-          Genera presentazione
+          {isV2 ? "Creazione presentazione v2" : "Genera presentazione"}
         </button>
         <button
           className="button secondary split-toggle"
@@ -5946,7 +5953,9 @@ function PresentationAction({
           >
             <div className="modal-head">
               <div>
-                <h2 id={`presentation-title-${study.id}`}>Genera presentazione cliente</h2>
+                <h2 id={`presentation-title-${study.id}`}>
+                  {isV2 ? "Creazione presentazione v2" : "Genera presentazione cliente"}
+                </h2>
                 <p>{study.company} · {study.id}</p>
               </div>
               <button className="icon-button" type="button" disabled={busy} onClick={() => setModalOpen(false)} aria-label="Chiudi">
@@ -6032,7 +6041,7 @@ function PresentationAction({
               </button>
               <button className="button primary" type="button" disabled={busy || selectedPropertyIds.length === 0 || selectionHasInvalidData} onClick={() => void generatePresentation()}>
                 <Presentation size={15} />
-                {busy ? "Generazione..." : generatedDeck ? "Genera nuova versione" : "Genera presentazione"}
+                {busy ? "Generazione..." : generatedDeck ? "Genera nuova versione" : isV2 ? "Genera presentazione v2" : "Genera presentazione"}
               </button>
             </div>
           </section>
@@ -6692,6 +6701,12 @@ function StudyDetail({
             study={study}
             draft={presentationDraft}
             onNotice={onNotice}
+          />
+          <PresentationAction
+            study={study}
+            draft={presentationDraft}
+            onNotice={onNotice}
+            version={2}
           />
           <button className="button secondary" onClick={onExport}>
             <FileSpreadsheet size={17} />

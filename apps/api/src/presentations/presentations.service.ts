@@ -16,14 +16,24 @@ import type {
   PresentationSummary,
 } from "./presentations.types.js";
 
-const TEMPLATE_URL = new URL("./templates/soul-deck.html", import.meta.url);
-const HYBRID_SLIDES = [
+const TEMPLATE_URLS = {
+  1: new URL("./templates/soul-deck.html", import.meta.url),
+  2: new URL("./templates/soul-deck-v2.html", import.meta.url),
+} as const;
+const HYBRID_SLIDES_V1 = [
   { number: 3, format: "jpeg", quality: 93 },
   { number: 4, format: "jpeg", quality: 93 },
   { number: 5, format: "png" },
 ] as const;
+const HYBRID_SLIDES_V2 = [
+  { number: 2, format: "jpeg", quality: 94 },
+  { number: 3, format: "jpeg", quality: 94 },
+  { number: 4, format: "jpeg", quality: 94 },
+  { number: 5, format: "png" },
+] as const;
 const ASSET_URLS = {
   __ASSET_INTER__: { url: new URL("../../../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2", import.meta.url), contentType: "font/woff2" },
+  __ASSET_RALEWAY__: { url: new URL("../../../../node_modules/@fontsource-variable/raleway/files/raleway-latin-wght-normal.woff2", import.meta.url), contentType: "font/woff2" },
   __ASSET_LOGO__: { url: new URL("./templates/assets/soul-logo.svg", import.meta.url), contentType: "image/svg+xml" },
   __ASSET_COVER__: { url: new URL("./templates/assets/soul-exterior-mountain-facade.jpg", import.meta.url), contentType: "image/jpeg" },
   __ASSET_RECEPTION__: { url: new URL("./templates/assets/soul-reception.png", import.meta.url), contentType: "image/png" },
@@ -34,7 +44,7 @@ const ASSET_URLS = {
 
 @Injectable()
 export class PresentationsService implements OnModuleDestroy {
-  private templatePromise?: Promise<string>;
+  private readonly templatePromises = new Map<1 | 2, Promise<string>>();
   private browserPromise?: Promise<Browser>;
   private readonly pdfCache = new Map<string, Buffer>();
   private readonly chromiumExecutablePath: string;
@@ -48,6 +58,25 @@ export class PresentationsService implements OnModuleDestroy {
   }
 
   async create(
+    studyId: string,
+    propertyIds: string[],
+    propertyInputs: PresentationPropertyInput[] = [],
+    clientName?: string,
+  ) {
+    return this.createVersion(1, studyId, propertyIds, propertyInputs, clientName);
+  }
+
+  async createV2(
+    studyId: string,
+    propertyIds: string[],
+    propertyInputs: PresentationPropertyInput[] = [],
+    clientName?: string,
+  ) {
+    return this.createVersion(2, studyId, propertyIds, propertyInputs, clientName);
+  }
+
+  private async createVersion(
+    version: 1 | 2,
     studyId: string,
     propertyIds: string[],
     propertyInputs: PresentationPropertyInput[] = [],
@@ -81,7 +110,7 @@ export class PresentationsService implements OnModuleDestroy {
 
     const generatedAt = new Date();
     const snapshot: PresentationSnapshot = {
-      version: 1,
+      version,
       generatedAt: generatedAt.toISOString(),
       studio: {
         id: study.id,
@@ -120,7 +149,7 @@ export class PresentationsService implements OnModuleDestroy {
         };
       }),
     };
-    const fileName = presentationFileName(study.company, generatedAt);
+    const fileName = presentationFileName(snapshot.studio.company, generatedAt, version);
     const deck = await this.prisma.presentationDeck.create({
       data: {
         studyId: study.id,
@@ -129,7 +158,7 @@ export class PresentationsService implements OnModuleDestroy {
         fileName,
       },
     });
-    return toSummary(deck);
+    return toSummary({ ...deck, snapshot });
   }
 
   async list(studyId: string) {
@@ -162,9 +191,10 @@ export class PresentationsService implements OnModuleDestroy {
     try {
       await writeFile(htmlPath, html, "utf8");
       const browser = await this.browser();
-      await createNativePdf(browser, htmlPath, nativePdfPath);
-      const captures = await captureHybridSlides(browser, htmlPath, temporaryDirectory);
-      const pdf = await composeHybridPdf(nativePdfPath, captures, snapshot);
+      const exportConfig = exportConfigFor(snapshot.version);
+      await createNativePdf(browser, htmlPath, nativePdfPath, exportConfig);
+      const captures = await captureHybridSlides(browser, htmlPath, temporaryDirectory, exportConfig);
+      const pdf = await composeHybridPdf(nativePdfPath, captures, snapshot, exportConfig.hybridSlides);
       this.cachePdf(id, pdf);
       return { pdf, fileName: deck.fileName };
     } finally {
@@ -183,15 +213,18 @@ export class PresentationsService implements OnModuleDestroy {
   }
 
   private renderSnapshot(snapshot: PresentationSnapshot) {
-    return this.template().then((template) => template.replace(
+    return this.template(snapshot.version).then((template) => template.replace(
       "__SOUL_DECK_DATA__",
       serializeForInlineScript(snapshot),
     ));
   }
 
-  private template() {
-    this.templatePromise ??= inlineTemplateAssets();
-    return this.templatePromise;
+  private template(version: 1 | 2) {
+    const existing = this.templatePromises.get(version);
+    if (existing) return existing;
+    const template = inlineTemplateAssets(TEMPLATE_URLS[version]);
+    this.templatePromises.set(version, template);
+    return template;
   }
 
   private browser() {
@@ -219,6 +252,35 @@ type HybridCapture = {
   path: string;
 };
 
+type HybridSlide = {
+  number: number;
+  format: "jpeg" | "png";
+  quality?: number;
+};
+
+type ExportConfig = {
+  viewport: { width: number; height: number };
+  pageWidth: string;
+  pageHeight: string;
+  hybridSlides: readonly HybridSlide[];
+};
+
+function exportConfigFor(version: 1 | 2): ExportConfig {
+  return version === 2
+    ? {
+        viewport: { width: 1400, height: 990 },
+        pageWidth: "297mm",
+        pageHeight: "210mm",
+        hybridSlides: HYBRID_SLIDES_V2,
+      }
+    : {
+        viewport: { width: 1600, height: 900 },
+        pageWidth: "16in",
+        pageHeight: "9in",
+        hybridSlides: HYBRID_SLIDES_V1,
+      };
+}
+
 async function waitForDeck(page: Page) {
   await page.waitForLoadState("load");
   await page.waitForSelector("#assets-ready", { state: "attached", timeout: 30_000 });
@@ -230,16 +292,21 @@ async function waitForDeck(page: Page) {
   });
 }
 
-function exportUrl(input: string, slide = 1) {
+function exportUrl(input: string, slide?: number) {
   const url = pathToFileURL(input);
   url.searchParams.set("export", "1");
-  url.hash = `slide-${slide}`;
+  if (slide) url.hash = `slide-${slide}`;
   return url.href;
 }
 
-async function createNativePdf(browser: Browser, input: string, destination: string) {
+async function createNativePdf(
+  browser: Browser,
+  input: string,
+  destination: string,
+  config: ExportConfig,
+) {
   const page = await browser.newPage({
-    viewport: { width: 1600, height: 900 },
+    viewport: config.viewport,
     deviceScaleFactor: 1,
   });
   try {
@@ -247,8 +314,8 @@ async function createNativePdf(browser: Browser, input: string, destination: str
     await waitForDeck(page);
     await page.pdf({
       path: destination,
-      width: "16in",
-      height: "9in",
+      width: config.pageWidth,
+      height: config.pageHeight,
       printBackground: true,
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
       preferCSSPageSize: true,
@@ -258,44 +325,37 @@ async function createNativePdf(browser: Browser, input: string, destination: str
   }
 }
 
-async function captureHybridSlides(browser: Browser, input: string, directory: string) {
+async function captureHybridSlides(
+  browser: Browser,
+  input: string,
+  directory: string,
+  config: ExportConfig,
+) {
   const captures = new Map<number, HybridCapture>();
-  for (const slide of HYBRID_SLIDES) {
+  for (const slide of config.hybridSlides) {
     const page = await browser.newPage({
-      viewport: { width: 1600, height: 900 },
+      viewport: config.viewport,
       deviceScaleFactor: 2,
     });
     try {
       await page.goto(exportUrl(input, slide.number), { waitUntil: "load", timeout: 30_000 });
       await waitForDeck(page);
-      await page.evaluate(() => {
-        const browserGlobal = globalThis as unknown as {
-          scrollTo: (x: number, y: number) => void;
-          document: {
-            documentElement: { scrollTop: number };
-            body: { scrollTop: number };
-          };
-        };
-        browserGlobal.scrollTo(0, 0);
-        browserGlobal.document.documentElement.scrollTop = 0;
-        browserGlobal.document.body.scrollTop = 0;
-      });
+      const target = page.locator(`#slide-${slide.number}`);
+      await target.scrollIntoViewIfNeeded();
       const extension = slide.format === "jpeg" ? "jpg" : "png";
       const destination = path.join(directory, `slide-${slide.number}.${extension}`);
       if (slide.format === "jpeg") {
-        await page.screenshot({
+        await target.screenshot({
           path: destination,
           type: "jpeg",
           quality: slide.quality,
           animations: "disabled",
-          fullPage: false,
         });
       } else {
-        await page.screenshot({
+        await target.screenshot({
           path: destination,
           type: "png",
           animations: "disabled",
-          fullPage: false,
         });
       }
       captures.set(slide.number, { format: slide.format, path: destination });
@@ -310,10 +370,11 @@ async function composeHybridPdf(
   nativePdfPath: string,
   captures: Map<number, HybridCapture>,
   snapshot: PresentationSnapshot,
+  hybridSlides: readonly HybridSlide[],
 ) {
   const nativePdf = await PDFDocument.load(await readFile(nativePdfPath));
   const pageCount = nativePdf.getPageCount();
-  const invalidSlide = HYBRID_SLIDES.find((slide) => slide.number > pageCount);
+  const invalidSlide = hybridSlides.find((slide) => slide.number > pageCount);
   if (invalidSlide) {
     throw new Error(`La presentazione contiene ${pageCount} pagine: impossibile acquisire la pagina ${invalidSlide.number}`);
   }
@@ -346,8 +407,8 @@ async function composeHybridPdf(
   return Buffer.from(await outputPdf.save({ useObjectStreams: true }));
 }
 
-async function inlineTemplateAssets() {
-  let template = await readFile(fileURLToPath(TEMPLATE_URL), "utf8");
+async function inlineTemplateAssets(templateUrl: URL) {
+  let template = await readFile(fileURLToPath(templateUrl), "utf8");
   await Promise.all(Object.entries(ASSET_URLS).map(async ([placeholder, asset]) => {
     const body = await readFile(fileURLToPath(asset.url));
     const dataUrl = `data:${asset.contentType};base64,${body.toString("base64")}`;
@@ -374,7 +435,11 @@ function cadastralReference(foglio: string | null, particella: string | null, su
   return parts.length > 0 ? parts.join(" - ") : "Dati catastali non disponibili";
 }
 
-function presentationFileName(company: string, createdAt: Date) {
+function presentationFileName(company: string, createdAt: Date, version: 1 | 2) {
+  if (version === 2) {
+    const normalizedCompany = company.replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "") || "Cliente";
+    return `Studio di fattibilità _ Ottimizzazione rendita catastale _ ${normalizedCompany}.pdf`;
+  }
   const slug = company
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -402,6 +467,7 @@ function toSummary(deck: {
   id: string;
   studyId: string;
   propertyIds: Prisma.JsonValue;
+  snapshot: Prisma.JsonValue | PresentationSnapshot;
   fileName: string;
   createdAt: Date;
 }): PresentationSummary {
@@ -410,6 +476,7 @@ function toSummary(deck: {
     : [];
   return {
     id: deck.id,
+    version: presentationVersion(deck.snapshot),
     studyId: deck.studyId,
     propertyIds,
     propertyCount: propertyIds.length,
@@ -418,4 +485,11 @@ function toSummary(deck: {
     htmlUrl: `/api/presentations/${encodeURIComponent(deck.id)}`,
     pdfUrl: `/api/presentations/${encodeURIComponent(deck.id)}/pdf`,
   };
+}
+
+function presentationVersion(snapshot: Prisma.JsonValue | PresentationSnapshot): 1 | 2 {
+  if (snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) && "version" in snapshot) {
+    return snapshot.version === 2 ? 2 : 1;
+  }
+  return 1;
 }
