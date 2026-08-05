@@ -3,6 +3,7 @@ import { ConfigModule } from "@nestjs/config";
 import dotenv from "dotenv";
 import { fileURLToPath } from "node:url";
 import { HealthController } from "./health.controller.js";
+import { ActivitiesModule } from "./activities/activities.module.js";
 import { ErpSyncModule } from "./erp-sync/erp-sync.module.js";
 import { FormapsCaptchaModule } from "./formaps-captcha/formaps-captcha.module.js";
 import { ImuModule } from "./imu/imu.module.js";
@@ -23,6 +24,7 @@ process.env.DATABASE_URL ??= localDatabaseUrl();
   imports: [
     ConfigModule.forRoot({ envFilePath: rootEnvFile, isGlobal: true }),
     PrismaModule,
+    ActivitiesModule,
     ImuModule,
     StudiesModule,
     PropertiesModule,

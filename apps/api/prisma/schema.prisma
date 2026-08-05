@@ -78,6 +78,19 @@ model StudyGroup {
   studies   FeasibilityStudy[]
 }
 
+model ActivityEvent {
+  id          String   @id @default(cuid())
+  type        String
+  title       String
+  description String
+  source      String
+  studyIds    Json
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 model PropertyValuationGroup {
   id         String           @id @default(cuid())
   studyId    String

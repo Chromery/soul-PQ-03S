@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Injectable, Optional, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
+import { ActivitiesService } from "../activities/activities.service.js";
 import { erpDocumentType, parseDocumentType } from "../document-types.js";
 import {
   formapsTerritoryByMunicipalityId,
@@ -83,6 +84,7 @@ export class ErpSyncService {
     private readonly priceLists: PriceListsService,
     private readonly imu: ImuService,
     config: ConfigService,
+    @Optional() private readonly activities?: ActivitiesService,
   ) {
     this.defaultTechnicalOwner = config.get<string>("DEFAULT_TECHNICAL_OWNER", "Responsabile tecnico Soul");
   }
@@ -112,6 +114,16 @@ export class ErpSyncService {
       if (result.azione === "created") createdCount++;
       else updatedCount++;
       results.push(result);
+    }
+
+    try {
+      await this.activities?.recordErpSync({
+        studyIds: results.map((result) => result.studio_erp_id),
+        createdCount,
+        updatedCount,
+      });
+    } catch (error) {
+      console.error("Activity recording failed for ERP sync", error);
     }
 
     return {
@@ -371,6 +383,18 @@ export class ErpSyncService {
     }
 
     await this.priceLists.assignForStudy(studioErpId);
+
+    if (status === "Concluso" && existing?.status !== "Concluso") {
+      try {
+        await this.activities?.recordStudyConcluded({
+          studyId: studioErpId,
+          company: createData.company,
+          source: "ERP",
+        });
+      } catch (error) {
+        console.error("Activity recording failed for ERP-concluded study", error);
+      }
+    }
 
     return {
       studio_erp_id: studioErpId,

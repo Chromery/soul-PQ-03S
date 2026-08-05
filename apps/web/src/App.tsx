@@ -70,7 +70,35 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.56.5";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.57.0";
+
+type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
+
+type ActivityEvent = {
+  id: string;
+  type: ActivityType;
+  title: string;
+  description: string;
+  source: "ERP" | "PQ";
+  studyIds: string[];
+  metadata: Record<string, string | number | boolean | null> | null;
+  createdAt: string;
+};
+
+type ActivityListResponse = {
+  items: ActivityEvent[];
+};
+
+type ActivityFeedState = {
+  items: ActivityEvent[];
+  loading: boolean;
+  error: string;
+  unreadCount: number;
+  refresh: () => Promise<void>;
+  markRead: () => void;
+};
+
+const ACTIVITY_SEEN_STORAGE_KEY = "soul-activity-seen-at";
 
 type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
 
@@ -2479,6 +2507,29 @@ function compareStudies(
   return sortDirection === "asc" ? comparison : -comparison;
 }
 
+function isActivityEvent(value: unknown): value is ActivityEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const activity = value as Partial<ActivityEvent>;
+  return (
+    typeof activity.id === "string" &&
+    (activity.type === "ERP_SYNC" || activity.type === "STUDY_CONCLUDED") &&
+    typeof activity.title === "string" &&
+    typeof activity.description === "string" &&
+    (activity.source === "ERP" || activity.source === "PQ") &&
+    Array.isArray(activity.studyIds) &&
+    activity.studyIds.every((studyId) => typeof studyId === "string") &&
+    typeof activity.createdAt === "string"
+  );
+}
+
+function mergeActivityEvents(current: ActivityEvent[], incoming: ActivityEvent[]) {
+  const byId = new Map(current.map((activity) => [activity.id, activity]));
+  incoming.forEach((activity) => byId.set(activity.id, activity));
+  return Array.from(byId.values())
+    .sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt))
+    .slice(0, 100);
+}
+
 function App() {
   const [studies, setStudies] = useState<FeasibilityStudy[]>(demoStudies);
   const [route, setRoute] = useState<AppRoute>(routeFromLocation);
@@ -2496,6 +2547,12 @@ function App() {
   const [newStudyModalOpen, setNewStudyModalOpen] = useState(false);
   const [newStudyBusy, setNewStudyBusy] = useState(false);
   const [toast, setToast] = useState("");
+  const [activities, setActivities] = useState<ActivityEvent[]>([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(true);
+  const [activitiesError, setActivitiesError] = useState("");
+  const [activitySeenAt, setActivitySeenAt] = useState(() => (
+    window.localStorage.getItem(ACTIVITY_SEEN_STORAGE_KEY) ?? new Date(0).toISOString()
+  ));
   const studyTableColumns = useTableColumns("soul-table-studies-v1", STUDY_TABLE_COLUMNS);
   const visibleStudyColumnIds = useMemo(
     () => new Set<StudyTableColumnId>(studyTableColumns.visibleColumns.map((column) => column.id)),
@@ -2522,6 +2579,29 @@ function App() {
 
     void loadStudies();
     return () => abortController.abort();
+  }, []);
+
+  useEffect(() => {
+    void refreshActivities();
+    const eventSource = new EventSource(`${API_BASE_URL}/activities/stream`);
+    const handleActivity = (event: MessageEvent<string>) => {
+      try {
+        const activity = JSON.parse(event.data) as unknown;
+        if (!isActivityEvent(activity)) return;
+        setActivities((current) => mergeActivityEvents(current, [activity]));
+        setActivitiesError("");
+        if (activity.type === "ERP_SYNC") void refreshStudiesFromApi();
+      } catch (error) {
+        console.error("Evento attività non valido", error);
+      }
+    };
+    eventSource.addEventListener("activity", handleActivity as EventListener);
+    const pollId = window.setInterval(() => void refreshActivities(), 60_000);
+    return () => {
+      window.clearInterval(pollId);
+      eventSource.removeEventListener("activity", handleActivity as EventListener);
+      eventSource.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -2569,6 +2649,41 @@ function App() {
     setEditorDirty(false);
     setRoute(nextRoute);
     return true;
+  }
+
+  async function refreshStudiesFromApi() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/studies`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const importedStudies = (await response.json()) as FeasibilityStudy[];
+      if (!Array.isArray(importedStudies)) throw new Error("Risposta studi non valida");
+      setStudies(importedStudies);
+    } catch (error) {
+      console.error("Aggiornamento studi dopo sync non riuscito", error);
+    }
+  }
+
+  async function refreshActivities() {
+    setActivitiesLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/activities?limit=100`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = (await response.json()) as ActivityListResponse;
+      if (!payload || !Array.isArray(payload.items)) throw new Error("Risposta attività non valida");
+      setActivities((current) => mergeActivityEvents(current, payload.items.filter(isActivityEvent)));
+      setActivitiesError("");
+    } catch (error) {
+      console.error("Caricamento registro attività non riuscito", error);
+      setActivitiesError("Registro attività temporaneamente non disponibile");
+    } finally {
+      setActivitiesLoading(false);
+    }
+  }
+
+  function markActivitiesRead() {
+    const seenAt = new Date().toISOString();
+    window.localStorage.setItem(ACTIVITY_SEEN_STORAGE_KEY, seenAt);
+    setActivitySeenAt(seenAt);
   }
 
   function handleGlobalQuery(nextQuery: string) {
@@ -3174,6 +3289,16 @@ function App() {
     });
   }
 
+  const activitySeenTimestamp = Number.isFinite(Date.parse(activitySeenAt)) ? Date.parse(activitySeenAt) : 0;
+  const activityFeed: ActivityFeedState = {
+    items: activities,
+    loading: activitiesLoading,
+    error: activitiesError,
+    unreadCount: activities.filter((activity) => Date.parse(activity.createdAt) > activitySeenTimestamp).length,
+    refresh: refreshActivities,
+    markRead: markActivitiesRead,
+  };
+
   if (route.view === "editor" && editorStudy && editorProperty) {
     return (
       <Shell
@@ -3182,6 +3307,7 @@ function App() {
         toast={toast}
         activeSection={navSectionForRoute(route)}
         onNavigate={navigate}
+        activityFeed={activityFeed}
         editorMode
       >
         <Suspense fallback={<div className="editor-loading">Caricamento editor planimetrie...</div>}>
@@ -3207,6 +3333,7 @@ function App() {
         toast={toast}
         activeSection={navSectionForRoute(route)}
         onNavigate={navigate}
+        activityFeed={activityFeed}
       >
         <StudyDetail
           study={activeStudy}
@@ -3238,6 +3365,7 @@ function App() {
         toast={toast}
         activeSection={navSectionForRoute(route)}
         onNavigate={navigate}
+        activityFeed={activityFeed}
       >
         <PropertiesPage
           studies={studies}
@@ -3261,13 +3389,33 @@ function App() {
         toast={toast}
         activeSection={navSectionForRoute(route)}
         onNavigate={navigate}
+        activityFeed={activityFeed}
       >
         <SettingsPage appVersion={APP_DEPLOY_VERSION} onNotice={flash} />
       </Shell>
     );
   }
 
-  if (route.view === "analysis" || route.view === "report" || route.view === "activity") {
+  if (route.view === "activity") {
+    return (
+      <Shell
+        query={query}
+        setQuery={handleGlobalQuery}
+        toast={toast}
+        activeSection={navSectionForRoute(route)}
+        onNavigate={navigate}
+        activityFeed={activityFeed}
+      >
+        <ActivityLogPage
+          feed={activityFeed}
+          onOpenStudy={(studyId) => navigate({ view: "study", studyId })}
+          onOpenStudies={() => navigate({ view: "studies" })}
+        />
+      </Shell>
+    );
+  }
+
+  if (route.view === "analysis" || route.view === "report") {
     const sections = {
       analysis: {
         title: "Analisi",
@@ -3277,10 +3425,6 @@ function App() {
         title: "Report",
         description: "La generazione di report e presentazioni richiede il servizio documentale.",
       },
-      activity: {
-        title: "Registro attività",
-        description: "Gli eventi operativi saranno popolati dall'integrazione ERP e dalle versioni salvate.",
-      },
     } as const;
     return (
       <Shell
@@ -3289,6 +3433,7 @@ function App() {
         toast={toast}
         activeSection={navSectionForRoute(route)}
         onNavigate={navigate}
+        activityFeed={activityFeed}
       >
         <PendingPage {...sections[route.view]} onOpenStudies={() => navigate({ view: "studies" })} />
       </Shell>
@@ -3303,6 +3448,7 @@ function App() {
         toast={toast}
         activeSection="Studi di fattibilità"
         onNavigate={navigate}
+        activityFeed={activityFeed}
       >
         <PendingPage
           title="Elemento non trovato"
@@ -3320,6 +3466,7 @@ function App() {
       toast={toast}
       activeSection={navSectionForRoute(route)}
       onNavigate={navigate}
+      activityFeed={activityFeed}
     >
       <main className="dashboard-grid">
         <section className="workspace">
@@ -4186,6 +4333,7 @@ function Shell({
   toast,
   activeSection,
   onNavigate,
+  activityFeed,
   editorMode = false,
 }: {
   children: React.ReactNode;
@@ -4194,6 +4342,7 @@ function Shell({
   toast: string;
   activeSection: string;
   onNavigate: (route: AppRoute) => void;
+  activityFeed: ActivityFeedState;
   editorMode?: boolean;
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -4221,6 +4370,10 @@ function Shell({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [activityHistoryOpen]);
+
+  useEffect(() => {
+    if (activityHistoryOpen) activityFeed.markRead();
+  }, [activityHistoryOpen, activityFeed.items[0]?.id]);
 
   return (
     <div
@@ -4318,10 +4471,19 @@ function Shell({
                   aria-label="Apri cronologia attività"
                   aria-haspopup="dialog"
                   aria-expanded={activityHistoryOpen}
-                  onClick={() => setActivityHistoryOpen((open) => !open)}
+                  onClick={() => setActivityHistoryOpen((open) => {
+                    const nextOpen = !open;
+                    if (nextOpen) {
+                      activityFeed.markRead();
+                      void activityFeed.refresh();
+                    }
+                    return nextOpen;
+                  })}
                 >
                   <History size={19} />
-                  <span>8</span>
+                  {activityFeed.unreadCount > 0 && (
+                    <span>{activityFeed.unreadCount > 9 ? "9+" : activityFeed.unreadCount}</span>
+                  )}
                 </button>
                 {activityHistoryOpen && (
                   <section className="activity-history-popover" role="dialog" aria-label="Attività recenti">
@@ -4340,10 +4502,27 @@ function Shell({
                         Vedi tutto
                       </button>
                     </div>
-                    <ActivityItem tone="green" title="Studio S-2026-0187 completato" subtitle="Immobiliare Aurora Srl" time="10:24" />
-                    <ActivityItem tone="blue" title="Importazione ERP completata" subtitle="32 nuovi studi importati" time="09:15" />
-                    <ActivityItem tone="purple" title="Nuovo studio creato" subtitle="Green Stone Srl" time="Ieri 16:48" />
-                    <ActivityItem tone="orange" title="Documenti caricati" subtitle="Via Manzoni 12, Milano" time="Ieri 14:02" />
+                    {activityFeed.loading && activityFeed.items.length === 0 && (
+                      <div className="activity-history-state">Caricamento attività…</div>
+                    )}
+                    {!activityFeed.loading && activityFeed.items.length === 0 && (
+                      <div className="activity-history-state">
+                        <History size={18} />
+                        <span>{activityFeed.error || "Nessuna attività registrata"}</span>
+                      </div>
+                    )}
+                    {activityFeed.items.slice(0, 5).map((activity) => (
+                      <ActivityItem
+                        key={activity.id}
+                        activity={activity}
+                        onOpen={activity.studyIds.length === 1
+                          ? () => {
+                              setActivityHistoryOpen(false);
+                              onNavigate({ view: "study", studyId: activity.studyIds[0] });
+                            }
+                          : undefined}
+                      />
+                    ))}
                     <button
                       className="activity-history-all"
                       type="button"
@@ -8792,29 +8971,146 @@ function DetailMetric({
   );
 }
 
-function ActivityItem({
-  tone,
-  title,
-  subtitle,
-  time,
+function ActivityLogPage({
+  feed,
+  onOpenStudy,
+  onOpenStudies,
 }: {
-  tone: "blue" | "green" | "purple" | "orange";
-  title: string;
-  subtitle: string;
-  time: string;
+  feed: ActivityFeedState;
+  onOpenStudy: (studyId: string) => void;
+  onOpenStudies: () => void;
 }) {
+  const [filter, setFilter] = useState<ActivityType | "ALL">("ALL");
+  const visibleActivities = filter === "ALL"
+    ? feed.items
+    : feed.items.filter((activity) => activity.type === filter);
+
+  useEffect(() => {
+    feed.markRead();
+    void feed.refresh();
+  }, []);
+
   return (
-    <div className="activity-item">
-      <div className={`activity-icon ${tone}`}>
-        {tone === "green" ? <CheckCircle2 size={17} /> : <FileText size={17} />}
+    <main className="activity-log-page">
+      <section className="section-hero activity-log-hero">
+        <div>
+          <span className="section-kicker">Cronologia operativa</span>
+          <h1>Registro attività</h1>
+          <p>Sincronizzazioni ERP e passaggi degli studi allo stato concluso.</p>
+        </div>
+        <button className="button secondary" type="button" onClick={() => void feed.refresh()} disabled={feed.loading}>
+          <RefreshCw size={16} className={feed.loading ? "is-spinning" : ""} />
+          {feed.loading ? "Aggiornamento…" : "Aggiorna"}
+        </button>
+      </section>
+
+      <section className="detail-card activity-log-card">
+        <div className="activity-log-toolbar">
+          <div>
+            <strong>{visibleActivities.length}</strong>
+            <span>{visibleActivities.length === 1 ? "attività visualizzata" : "attività visualizzate"}</span>
+          </div>
+          <label>
+            <span>Tipo di attività</span>
+            <select value={filter} onChange={(event) => setFilter(event.target.value as ActivityType | "ALL")}>
+              <option value="ALL">Tutte</option>
+              <option value="ERP_SYNC">Sincronizzazioni ERP</option>
+              <option value="STUDY_CONCLUDED">Studi conclusi</option>
+            </select>
+          </label>
+        </div>
+
+        {feed.error && feed.items.length > 0 && <p className="activity-log-warning">{feed.error}</p>}
+        {feed.loading && feed.items.length === 0 ? (
+          <div className="activity-log-empty"><RefreshCw size={22} className="is-spinning" /> Caricamento attività…</div>
+        ) : visibleActivities.length === 0 ? (
+          <div className="activity-log-empty">
+            <History size={24} />
+            <strong>Nessuna attività registrata</strong>
+            <span>Le nuove sincronizzazioni ERP e le chiusure degli studi compariranno qui automaticamente.</span>
+            <button className="button secondary compact-button" type="button" onClick={onOpenStudies}>Torna agli studi</button>
+          </div>
+        ) : (
+          <div className="activity-log-list">
+            {visibleActivities.map((activity) => {
+              const canOpenStudy = activity.studyIds.length === 1;
+              return (
+                <article
+                  key={activity.id}
+                  className={`activity-log-entry${canOpenStudy ? " clickable" : ""}`}
+                  tabIndex={canOpenStudy ? 0 : undefined}
+                  role={canOpenStudy ? "button" : undefined}
+                  onClick={canOpenStudy ? () => onOpenStudy(activity.studyIds[0]) : undefined}
+                  onKeyDown={canOpenStudy ? (event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    onOpenStudy(activity.studyIds[0]);
+                  } : undefined}
+                >
+                  <div className={`activity-log-icon ${activityTone(activity)}`}>
+                    {activity.type === "STUDY_CONCLUDED" ? <CheckCircle2 size={18} /> : <RefreshCw size={18} />}
+                  </div>
+                  <div className="activity-log-copy">
+                    <div>
+                      <strong>{activity.title}</strong>
+                      <span className="activity-source-badge">{activity.source}</span>
+                    </div>
+                    <p>{activity.description}</p>
+                    {activity.studyIds.length > 1 && (
+                      <small>{activity.studyIds.length} studi coinvolti</small>
+                    )}
+                  </div>
+                  <time dateTime={activity.createdAt}>{formatDateTime(activity.createdAt)}</time>
+                  {canOpenStudy && <ChevronRight size={17} aria-hidden="true" />}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function ActivityItem({ activity, onOpen }: { activity: ActivityEvent; onOpen?: () => void }) {
+  const content = (
+    <>
+      <div className={`activity-icon ${activityTone(activity)}`}>
+        {activity.type === "STUDY_CONCLUDED" ? <CheckCircle2 size={17} /> : <RefreshCw size={17} />}
       </div>
       <div>
-        <strong>{title}</strong>
-        <span>{subtitle}</span>
+        <strong>{activity.title}</strong>
+        <span>{activity.description}</span>
       </div>
-      <time>{time}</time>
-    </div>
+      <time dateTime={activity.createdAt}>{formatActivityRelativeTime(activity.createdAt)}</time>
+    </>
   );
+  return onOpen ? (
+    <button className="activity-item clickable" type="button" onClick={onOpen}>{content}</button>
+  ) : (
+    <div className="activity-item">{content}</div>
+  );
+}
+
+function activityTone(activity: ActivityEvent): "blue" | "green" {
+  return activity.type === "STUDY_CONCLUDED" ? "green" : "blue";
+}
+
+function formatActivityRelativeTime(value: string) {
+  const date = new Date(value);
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60_000));
+  if (elapsedMinutes < 1) return "Adesso";
+  if (elapsedMinutes < 60) return `${elapsedMinutes} min fa`;
+  const today = new Date();
+  if (date.toDateString() === today.toDateString()) {
+    return new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit" }).format(date);
+  }
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) {
+    return `Ieri ${new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit" }).format(date)}`;
+  }
+  return formatDateTime(value);
 }
 
 function statusClass(status: StudyStatus) {
