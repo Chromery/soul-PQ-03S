@@ -6860,11 +6860,6 @@ function StudyDetail({
         </div>
       </section>
 
-      <StudyNotesPanel
-        notes={study.notes}
-        onSave={(notes) => onUpdate({ notes })}
-      />
-
       <section className="detail-card property-detail-card operational-properties">
         <div className="section-title property-list-title">
           <div>
@@ -7194,6 +7189,10 @@ function StudyDetail({
           )}
         </div>
       </section>
+      <StudyNotesPanel
+        notes={study.notes}
+        onSave={(notes) => onUpdate({ notes })}
+      />
       <PresentationDataPreview
         draft={presentationDraft}
         manualChanges={presentationTouchedFields.size}
