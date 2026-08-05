@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Studio di fattibilità — Ottimizzazione rendita catastale</title>
+  <style>
+    @font-face {
+      font-family: "Raleway";
+      src: url("__ASSET_RALEWAY__") format("woff2");
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: swap;
+    }
+    :root {
+      --blue: #072e59;
+      --blue-2: #0d416f;
+      --cyan: #16bcd2;
+      --aqua: #71d7df;
+      --ink: #102a43;
+      --muted: #64788a;
+      --line: #d9e4ec;
+      --paper: #f7fafc;
+      --good: #008b73;
+      --bad: #c73b4d;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: #dbe3e9; color: var(--ink); }
+    body { font-family: "Raleway", Arial, sans-serif; }
+    button { font: inherit; }
+    .deck { display: grid; gap: 30px; padding: 30px 0 72px; justify-items: center; }
+    .slide {
+      position: relative;
+      width: min(94vw, calc(90vh * 1.4142857));
+      aspect-ratio: 297 / 210;
+      overflow: hidden;
+      background: white;
+      box-shadow: 0 22px 60px rgba(7, 46, 89, .16);
+      break-after: page;
+      page-break-after: always;
+    }
+    .slide:last-child { break-after: auto; page-break-after: auto; }
+    .page-index {
+      position: absolute; right: 4.3%; bottom: 3.5%; z-index: 8;
+      font-size: 10px; font-weight: 700; letter-spacing: .15em; color: #6d8090;
+    }
+    .eyebrow { font-size: 12px; letter-spacing: .17em; text-transform: uppercase; font-weight: 800; color: var(--cyan); }
+    .logo { display: block; width: 122px; height: auto; }
+
+    /* 1 — copertina */
+    .cover { background: var(--blue); color: white; }
+    .cover-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: saturate(.72) contrast(.9); }
+    .cover-wash { position: absolute; inset: 0; background: linear-gradient(96deg, rgba(4,32,63,.94) 0%, rgba(6,39,73,.78) 49%, rgba(5,35,66,.18) 100%); }
+    .cover-copy { position: absolute; z-index: 4; left: 6.3%; top: 7.5%; width: 53%; }
+    .cover .eyebrow { margin-bottom: 24px; color: #82edf5; }
+    .cover h1 { margin: 0; font-size: clamp(35px, 4.4vw, 66px); line-height: .98; letter-spacing: -.045em; font-weight: 770; }
+    .cover h1 span { display: block; color: #9eeef2; }
+    .cover-client { margin-top: 28px; padding-top: 16px; width: 82%; border-top: 1px solid rgba(255,255,255,.42); }
+    .cover-client small { display: block; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: #a8e6eb; }
+    .cover-client strong { display: block; margin-top: 7px; font-size: 21px; font-weight: 650; line-height: 1.2; }
+    .cover-logo { position: absolute; left: 6.3%; bottom: 6.4%; z-index: 8; }
+    .cover-logo .logo { width: 126px; }
+    .ribbon { position: absolute; z-index: 6; height: 10%; right: -7%; transform: skewX(-31deg); transform-origin: right bottom; }
+    .ribbon.one { width: 55%; bottom: 0; background: rgba(8,52,88,.96); }
+    .ribbon.two { width: 43%; bottom: 7.2%; background: rgba(15,188,210,.93); }
+    .ribbon.three { width: 31%; bottom: 14.4%; background: rgba(242,250,250,.96); }
+    .ribbon.four { width: 20%; bottom: 21.6%; background: rgba(105,215,223,.91); }
+
+    /* 2 — citazione */
+    .quote-page { display: grid; grid-template-columns: 52% 48%; background: #fff; }
+    .quote-image { position: relative; overflow: hidden; }
+    .quote-image img { width: 100%; height: 100%; object-fit: cover; filter: contrast(.87) saturate(.7) brightness(.82); }
+    .quote-image::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(7,46,89,.05), rgba(7,46,89,.16)); }
+    .quote-copy { display: flex; flex-direction: column; justify-content: center; padding: 8% 10% 8% 9%; }
+    .quote-copy blockquote { margin: 22px 0 0; font-size: clamp(20px, 2.1vw, 31px); line-height: 1.37; letter-spacing: -.025em; font-weight: 570; color: var(--blue); text-align: justify; }
+    .quote-copy p { margin: 22px 0 0; font-size: 13px; line-height: 1.68; color: #536a7b; text-align: justify; }
+    .quote-rule { margin-top: 28px; width: 74px; height: 4px; background: var(--cyan); }
+
+    /* 3 — determinazione */
+    .determination { display: grid; grid-template-columns: 43% 57%; }
+    .determination-image { position: relative; overflow: hidden; }
+    .determination-image img { width: 100%; height: 100%; object-fit: cover; filter: saturate(.78) contrast(.92); }
+    .determination-image::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(7,46,89,.06), rgba(7,46,89,.25)); }
+    .determination-copy { padding: 7% 8% 6%; display: flex; flex-direction: column; justify-content: center; }
+    .determination h2 { margin: 14px 0 24px; font-size: clamp(32px, 3.4vw, 50px); line-height: 1.02; letter-spacing: -.042em; color: var(--blue); }
+    .determination h2 span { display: block; color: var(--cyan); }
+    .determination p { margin: 0 0 16px; font-size: 15px; line-height: 1.62; color: #435d70; text-align: justify; }
+    .determination-note { margin-top: 10px; padding: 16px 18px; border-left: 4px solid var(--cyan); background: #f0f8fa; color: var(--blue); font-size: 14px; line-height: 1.5; font-weight: 600; text-align: justify; }
+
+    /* 4 — processo */
+    .process { background: #f8fbfc; }
+    .process-photo { position: absolute; left: 0; top: 0; bottom: 0; width: 32%; object-fit: cover; filter: saturate(.7) contrast(.9); }
+    .process-fade { position: absolute; left: 0; top: 0; bottom: 0; width: 42%; background: linear-gradient(90deg, rgba(7,46,89,.3), rgba(248,251,252,1) 88%); }
+    .process-content { position: absolute; inset: 7% 5.5% 5.5% 27%; }
+    .process h2 { margin: 10px 0 0 8%; font-size: clamp(31px, 3.2vw, 48px); color: var(--blue); letter-spacing: -.04em; }
+    .steps { position: relative; margin-top: 4.5%; height: 59%; }
+    .steps::before { content: ""; position: absolute; left: 8%; right: 2%; top: 52%; height: 3px; background: linear-gradient(90deg, #9adfe5, var(--cyan)); transform: rotate(-5deg); transform-origin: left; }
+    .step { position: absolute; width: 29%; min-height: 68%; padding: 23px 21px 18px; background: white; border: 1px solid #d9e6ec; box-shadow: 0 14px 32px rgba(7,46,89,.09); }
+    .step:nth-child(1) { left: 5%; top: 24%; }
+    .step:nth-child(2) { left: 36.5%; top: 12%; }
+    .step:nth-child(3) { right: 1%; top: 0; }
+    .step-number { display: grid; place-items: center; width: 37px; height: 37px; margin-bottom: 16px; border-radius: 50%; background: var(--blue); color: white; font-size: 15px; font-weight: 800; }
+    .step:nth-child(2) .step-number { background: #0a7893; }
+    .step:nth-child(3) .step-number { background: var(--cyan); color: var(--blue); }
+    .step h3 { margin: 0 0 10px; color: var(--blue); font-size: 17px; line-height: 1.16; }
+    .step p { margin: 0; color: #536a7b; font-size: 14px; line-height: 1.48; text-align: justify; }
+
+    /* 5 — simulazione */
+    .economics { padding: 4.2% 4.6% 3.5%; background: #f5f8fa; }
+    .economics-header { display: flex; align-items: end; justify-content: space-between; margin-bottom: 2.2%; }
+    .economics h2 { margin: 6px 0 0; color: var(--blue); font-size: 30px; letter-spacing: -.035em; }
+    .economics-date { font-size: 10px; color: #708394; letter-spacing: .1em; text-transform: uppercase; }
+    .properties-card, .summary-card, .saving-card { background: white; border: 1px solid #dce6ec; box-shadow: 0 7px 20px rgba(7,46,89,.055); }
+    .card-title { padding: 10px 14px 9px; border-bottom: 1px solid #dce6ec; font-size: 10px; font-weight: 800; letter-spacing: .12em; color: var(--blue); text-transform: uppercase; }
+    .properties-card { width: 100%; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th { padding: 7px 7px 6px; background: #eef5f7; color: #4f6778; font-size: 8px; line-height: 1.12; text-align: right; text-transform: uppercase; letter-spacing: .035em; }
+    th:first-child, th:nth-child(2), td:first-child, td:nth-child(2) { text-align: left; }
+    td { padding: 7px; border-top: 1px solid #e6edf1; color: #243f52; font-size: 9.5px; line-height: 1.2; text-align: right; vertical-align: middle; }
+    td strong { display: block; color: var(--blue); font-size: 9.8px; }
+    td small { display: block; margin-top: 2px; color: #748797; font-size: 7.8px; }
+    .properties-card.compact th { padding-top: 5px; padding-bottom: 5px; }
+    .properties-card.compact td { padding-top: 4px; padding-bottom: 4px; font-size: 8.5px; }
+    .properties-card.ultra .card-title { padding-top: 7px; padding-bottom: 6px; }
+    .properties-card.ultra th { padding-top: 3px; padding-bottom: 3px; font-size: 6.8px; }
+    .properties-card.ultra td { padding-top: 3px; padding-bottom: 3px; font-size: 7.3px; }
+    .properties-card.ultra td small { display: none; }
+    .bottom-grid { display: grid; grid-template-columns: 39% 61%; gap: 13px; margin-top: 13px; min-height: 275px; }
+    .bottom-grid > section { height: 100%; }
+    .summary-body { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 0; height: calc(100% - 30px); }
+    .metric { padding: 11px 13px; border-right: 1px solid #e4ebef; border-bottom: 1px solid #e4ebef; }
+    .metric:nth-child(even) { border-right: 0; }
+    .metric:nth-last-child(-n+2) { border-bottom: 0; }
+    .metric small { display: block; min-height: 21px; color: #6a7e8d; font-size: 8px; line-height: 1.25; text-transform: uppercase; letter-spacing: .04em; }
+    .metric strong { display: block; margin-top: 4px; color: var(--blue); font-size: 16px; line-height: 1; white-space: nowrap; }
+    .metric strong.good { color: var(--good); }
+    .metric strong.bad { color: var(--bad); }
+    .saving-body { display: grid; grid-template-columns: 38% 62%; height: calc(100% - 30px); min-height: 238px; }
+    .annual-saving { padding: 18px 18px 14px; border-right: 1px solid #e4ebef; display: flex; flex-direction: column; justify-content: center; }
+    .annual-saving small { color: #647989; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+    .annual-saving strong { margin-top: 8px; color: var(--good); font-size: 27px; line-height: 1; }
+    .annual-bar { margin-top: 18px; height: 13px; background: #e7eff2; overflow: hidden; }
+    .annual-bar span { display: block; width: 72%; height: 100%; background: linear-gradient(90deg, #0b7992, var(--cyan)); }
+    .annual-saving em { margin-top: 8px; color: #798b99; font-size: 8px; font-style: normal; }
+    .ten-year { padding: 12px 13px 9px; }
+    .ten-year-head { display: flex; align-items: baseline; justify-content: space-between; }
+    .ten-year-head span { color: #647989; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+    .ten-year-head strong { color: var(--blue); font-size: 18px; }
+    .chart { position: relative; height: 176px; margin-top: 8px; padding-left: 53px; padding-bottom: 18px; }
+    .chart-grid { position: absolute; left: 52px; right: 1px; top: 2px; bottom: 18px; background: repeating-linear-gradient(to bottom, #dfe8ed 0 1px, transparent 1px 32px); }
+    .chart-y { position: absolute; left: 0; top: -3px; bottom: 13px; width: 48px; display: flex; flex-direction: column; justify-content: space-between; text-align: right; color: #718493; font-size: 7.5px; }
+    .chart-x { position: absolute; left: 52px; right: 1px; bottom: 0; display: flex; justify-content: space-between; color: #718493; font-size: 7px; }
+    .chart svg { position: absolute; left: 52px; right: 1px; top: 2px; width: calc(100% - 53px); height: calc(100% - 20px); overflow: visible; }
+    .chart-area { fill: rgba(22,188,210,.17); }
+    .chart-line { fill: none; stroke: #0a839b; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+    .economics.many .bottom-grid { min-height: 220px; }
+    .economics.many .saving-body { min-height: 183px; }
+    .economics.many .chart { height: 124px; }
+    .economics.ultra .bottom-grid { min-height: 175px; }
+    .economics.ultra .saving-body { min-height: 138px; }
+    .economics.ultra .chart { height: 84px; }
+
+    /* 6 — chiusura */
+    .closing { background: var(--blue); color: white; }
+    .closing-image { position: absolute; inset: 0 0 0 52%; width: 48%; height: 100%; object-fit: cover; filter: saturate(.65) contrast(.9); }
+    .closing-overlay { position: absolute; inset: 0; background: linear-gradient(90deg, #072e59 0%, #072e59 48%, rgba(7,46,89,.82) 61%, rgba(7,46,89,.12) 100%); }
+    .closing-copy { position: absolute; left: 6.2%; top: 15%; width: 36%; z-index: 3; }
+    .closing-copy .lead { margin: 19px 0 21px; font-size: clamp(27px, 3vw, 43px); line-height: 1.08; letter-spacing: -.04em; font-weight: 700; }
+    .closing-copy p:not(.lead) { margin: 0 0 14px; font-size: 13.5px; line-height: 1.62; color: #d6e3ea; text-align: justify; }
+    .closing-logo { position: absolute; left: 6.2%; bottom: 8%; z-index: 4; }
+
+    .viewer-nav { position: fixed; z-index: 50; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; gap: 8px; padding: 8px; background: rgba(7,46,89,.9); border-radius: 999px; box-shadow: 0 8px 28px rgba(0,0,0,.2); }
+    .viewer-nav button { border: 0; border-radius: 999px; padding: 7px 13px; cursor: pointer; background: white; color: var(--blue); font-size: 12px; font-weight: 700; }
+    .viewer-nav output { min-width: 54px; align-self: center; text-align: center; color: white; font-size: 11px; }
+
+    @page { size: A4 landscape; margin: 0; }
+    @media print {
+      html, body { width: 297mm; background: white; }
+      .deck { display: block; padding: 0; }
+      .slide { width: 297mm; height: 210mm; aspect-ratio: auto; box-shadow: none; }
+      .viewer-nav { display: none; }
+    }
+    html.export-mode, html.export-mode body { width: 1400px; height: auto; background: white; overflow: visible; }
+    html.export-mode .deck { display: block; padding: 0; }
+    html.export-mode .slide { width: 1400px; height: 990px; aspect-ratio: auto; box-shadow: none; }
+    html.export-mode .viewer-nav { display: none; }
+  </style>
+</head>
+<body>
+  <main class="deck">
+    <section class="slide cover" id="slide-1">
+      <img class="cover-photo" src="__ASSET_COVER__" alt="" />
+      <div class="cover-wash"></div>
+      <div class="cover-copy">
+        <div class="eyebrow">Studio di fattibilità</div>
+        <h1>Ottimizzazione <span>rendita catastale</span></h1>
+        <div class="cover-client"><small>Preparato per</small><strong data-client></strong></div>
+      </div>
+      <div class="cover-logo"><img class="logo" src="__ASSET_LOGO__" alt="Soul — Divisione Real Estate" /></div>
+      <div class="ribbon one"></div><div class="ribbon two"></div><div class="ribbon three"></div><div class="ribbon four"></div>
+      <span class="page-index">01</span>
+    </section>
+
+    <section class="slide quote-page" id="slide-2">
+      <div class="quote-image"><img src="__ASSET_RECEPTION__" alt="" /></div>
+      <div class="quote-copy">
+        <div class="eyebrow">L’approccio Soul</div>
+        <blockquote>“Ottimizzare la rendita catastale significa ricostruire con precisione il valore dell’immobile, verificando ogni superficie e rendendo il risultato misurabile nel tempo.”</blockquote>
+        <p>L’analisi integra documentazione catastale, dati tecnici e parametri economici in un processo verificabile, con l’obiettivo di individuare l’effettivo margine di ottimizzazione.</p>
+        <div class="quote-rule"></div>
+      </div>
+      <span class="page-index">02</span>
+    </section>
+
+    <section class="slide determination" id="slide-3">
+      <div class="determination-image"><img src="__ASSET_ATRIUM__" alt="" /></div>
+      <div class="determination-copy">
+        <div class="eyebrow">Ottimizzazione catastale</div>
+        <h2>Determinazione della <span>rendita attribuibile</span></h2>
+        <p>La rendita degli immobili a destinazione speciale viene ricostruita attraverso la valutazione delle componenti edilizie e impiantistiche rilevanti. Le superfici sono classificate per destinazione d’uso e valorizzate mediante parametri coerenti con il contesto territoriale.</p>
+        <p>Il confronto tra rendita attuale e rendita attribuibile consente di stimare l’effetto economico atteso e di definire le successive attività tecniche.</p>
+        <div class="determination-note">Ogni valore riportato nella simulazione è collegato agli immobili selezionati e ai dati disponibili al momento dell’analisi.</div>
+      </div>
+      <span class="page-index">03</span>
+    </section>
+
+    <section class="slide process" id="slide-4">
+      <img class="process-photo" src="__ASSET_PROCESS__" alt="" /><div class="process-fade"></div>
+      <div class="process-content">
+        <div class="eyebrow" style="margin-left:8%">Metodo di lavoro</div>
+        <h2>La nostra attività in 3 fasi</h2>
+        <div class="steps">
+          <article class="step"><div class="step-number">1</div><h3>Analisi documentale</h3><p>Acquisizione dei dati catastali, verifica degli elaborati planimetrici e selezione degli immobili inclusi nello studio.</p></article>
+          <article class="step"><div class="step-number">2</div><h3>Attività tecnica</h3><p>Misurazione e classificazione delle superfici, applicazione dei valori unitari e determinazione della rendita attribuibile.</p></article>
+          <article class="step"><div class="step-number">3</div><h3>Risultato economico</h3><p>Confronto con la situazione attuale, simulazione dell’effetto IMU e predisposizione dell’esito dell’analisi.</p></article>
+        </div>
+      </div>
+      <span class="page-index">04</span>
+    </section>
+
+    <section class="slide economics" id="slide-5">
+      <header class="economics-header"><div><div class="eyebrow">Simulazione economica</div><h2>Risultati dello studio di fattibilità</h2></div><div class="economics-date" data-date></div></header>
+      <section class="properties-card" id="properties-card"><div class="card-title">Immobili oggetto di analisi</div><table><colgroup><col style="width:25%"><col style="width:18%"><col style="width:7%"><col style="width:12.5%"><col style="width:12.5%"><col style="width:12.5%"><col style="width:12.5%"></colgroup><thead><tr><th>Immobile</th><th>Riferimenti catastali</th><th>Cat.</th><th>Rendita attuale</th><th>Rendita attribuibile</th><th>Differenza rendita</th><th>Differenza IMU</th></tr></thead><tbody id="property-rows"></tbody></table></section>
+      <div class="bottom-grid">
+        <section class="summary-card"><div class="card-title">Sintesi</div><div class="summary-body">
+          <div class="metric"><small>Rendita attuale</small><strong id="total-current-rent"></strong></div>
+          <div class="metric"><small>Rendita attribuibile</small><strong id="total-estimated-rent"></strong></div>
+          <div class="metric"><small>Differenza rendita</small><strong id="rent-difference"></strong></div>
+          <div class="metric"><small>Variazione IMU prevista</small><strong id="imu-variation"></strong></div>
+        </div></section>
+        <section class="saving-card"><div class="card-title">Saving generato</div><div class="saving-body">
+          <div class="annual-saving"><small>Saving in 1 anno</small><strong id="saving-one-year"></strong><div class="annual-bar"><span></span></div><em>Effetto annuo stimato</em></div>
+          <div class="ten-year"><div class="ten-year-head"><span>Saving in 10 anni</span><strong id="saving-ten-year"></strong></div><div class="chart"><div class="chart-grid"></div><div class="chart-y" id="chart-y"></div><div class="chart-x"><span>0</span><span>2</span><span>4</span><span>6</span><span>8</span><span>10 anni</span></div><svg viewBox="0 0 500 100" preserveAspectRatio="none" aria-label="Saving cumulato in dieci anni"><path class="chart-area" id="chart-area"></path><polyline class="chart-line" id="chart-line"></polyline></svg></div></div>
+        </div></section>
+      </div>
+      <span class="page-index">05</span>
+    </section>
+
+    <section class="slide closing" id="slide-6">
+      <img class="closing-image" src="__ASSET_HANDSHAKE__" alt="" /><div class="closing-overlay"></div>
+      <div class="closing-copy"><div class="eyebrow">Conclusioni</div><p class="lead">L’obiettivo di Soul è massimizzare il risparmio per il cliente.</p><p>Lo studio di fattibilità fornisce una prima quantificazione del potenziale risultato. Le successive verifiche tecniche consentiranno di consolidare i dati e definire l’attività più adatta agli immobili analizzati.</p><p>Il team Soul resta a disposizione per condividere il dettaglio della valutazione e i passaggi operativi successivi.</p></div>
+      <div class="closing-logo"><img class="logo" src="__ASSET_LOGO__" alt="Soul — Divisione Real Estate" /></div>
+      <span class="page-index">06</span>
+    </section>
+  </main>
+
+  <nav class="viewer-nav" aria-label="Navigazione presentazione"><button type="button" id="previous">←</button><output id="counter">1 / 6</output><button type="button" id="next">→</button></nav>
+  <script>
+    const data = __SOUL_DECK_DATA__;
+    const euro = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const compactEuro = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+    const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[character]);
+    const sum = (field) => data.immobili.reduce((total, item) => total + (Number(item[field]) || 0), 0);
+    const difference = (current, estimated) => current - estimated;
+    const currentRent = sum("renditaAttuale");
+    const estimatedRent = sum("renditaAttribuibile");
+    const currentImu = sum("imuAttuale");
+    const estimatedImu = sum("imuOttenibile");
+    const annualSaving = currentImu - estimatedImu;
+    const tenYearSaving = annualSaving * 10;
+    document.querySelectorAll("[data-client]").forEach((element) => element.textContent = data.studio.company);
+    document.querySelector("[data-date]").textContent = new Intl.DateTimeFormat("it-IT", { month: "long", year: "numeric" }).format(new Date(data.generatedAt));
+    const rows = document.getElementById("property-rows");
+    rows.innerHTML = data.immobili.map((item) => {
+      const rentDiff = difference(item.renditaAttuale, item.renditaAttribuibile);
+      const imuDiff = difference(item.imuAttuale || 0, item.imuOttenibile || 0);
+      return `<tr><td><strong>${escapeHtml(item.societa)}</strong><small>${escapeHtml(item.comune)} · ${escapeHtml(item.indirizzo)}</small></td><td>${escapeHtml(item.foglioParticellaSub)}</td><td>${escapeHtml(item.categoria || "—")}</td><td>${euro.format(item.renditaAttuale)}</td><td>${euro.format(item.renditaAttribuibile)}</td><td>${euro.format(rentDiff)}</td><td>${euro.format(imuDiff)}</td></tr>`;
+    }).join("");
+    const propertiesCard = document.getElementById("properties-card");
+    if (data.immobili.length > 5) propertiesCard.classList.add("compact");
+    if (data.immobili.length > 9) propertiesCard.classList.add("ultra");
+    if (data.immobili.length > 5) document.querySelector(".economics").classList.add("many");
+    if (data.immobili.length > 9) document.querySelector(".economics").classList.add("ultra");
+    document.getElementById("total-current-rent").textContent = euro.format(currentRent);
+    document.getElementById("total-estimated-rent").textContent = euro.format(estimatedRent);
+    document.getElementById("rent-difference").textContent = euro.format(currentRent - estimatedRent);
+    const variation = document.getElementById("imu-variation");
+    variation.textContent = `${annualSaving >= 0 ? "−" : "+"}${euro.format(Math.abs(annualSaving))}`;
+    variation.classList.add(annualSaving >= 0 ? "good" : "bad");
+    document.getElementById("saving-one-year").textContent = euro.format(annualSaving);
+    document.getElementById("saving-ten-year").textContent = euro.format(tenYearSaving);
+    const chartMaximum = Math.max(Math.abs(tenYearSaving), 1);
+    document.getElementById("chart-y").innerHTML = [1, .6667, .3333, 0].map((ratio) => `<span>${compactEuro.format(chartMaximum * ratio)}</span>`).join("");
+    const points = Array.from({ length: 11 }, (_, year) => `${year * 50},${100 - year * 10}`).join(" ");
+    document.getElementById("chart-line").setAttribute("points", points);
+    document.getElementById("chart-area").setAttribute("d", `M0,100 L${points.replaceAll(" ", " L")} L500,100 Z`);
+
+    const exportMode = new URLSearchParams(location.search).get("export") === "1";
+    if (exportMode) document.documentElement.classList.add("export-mode");
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    let active = Math.max(0, slides.findIndex((slide) => `#${slide.id}` === location.hash));
+    if (active < 0) active = 0;
+    const show = (index) => { active = Math.max(0, Math.min(slides.length - 1, index)); slides[active].scrollIntoView({ behavior: exportMode ? "auto" : "smooth", block: "start" }); document.getElementById("counter").textContent = `${active + 1} / ${slides.length}`; history.replaceState(null, "", `#${slides[active].id}`); };
+    document.getElementById("previous").addEventListener("click", () => show(active - 1));
+    document.getElementById("next").addEventListener("click", () => show(active + 1));
+    document.addEventListener("keydown", (event) => { if (event.key === "ArrowLeft") show(active - 1); if (event.key === "ArrowRight") show(active + 1); });
+    const assets = [...document.images].map((image) => image.complete ? Promise.resolve() : new Promise((resolve) => { image.onload = image.onerror = resolve; }));
+    Promise.all([document.fonts.ready, ...assets]).then(() => { const marker = document.createElement("span"); marker.id = "assets-ready"; marker.hidden = true; document.body.append(marker); });
+  </script>
+</body>
+</html>
