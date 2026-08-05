@@ -1,5 +1,6 @@
-const defaultQwenCaptchaEndpoint = "https://soul-pq-alpha.rainailab.com/api/qwen-captcha";
+const defaultQwenCaptchaEndpoint = "https://pq-soul.rainailab.com/api/qwen-captcha";
 const hostedQwenCaptchaEndpoints = [
+  "https://pq-soul.rainailab.com/api/qwen-captcha",
   "https://soul-pq-alpha.rainailab.com/api/qwen-captcha",
   "https://soul-pq-alpha-2.iggau.com/api/qwen-captcha"
 ];
@@ -33,7 +34,11 @@ function allowedQwenEndpoint(value) {
     const url = new URL(value);
     const host = url.hostname.toLowerCase();
     const localHosts = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
-    const pqHosts = new Set(["soul-pq-alpha.rainailab.com", "soul-pq-alpha-2.iggau.com"]);
+    const pqHosts = new Set([
+      "pq-soul.rainailab.com",
+      "soul-pq-alpha.rainailab.com",
+      "soul-pq-alpha-2.iggau.com"
+    ]);
     const isLocalOrTailscale = localHosts.has(host) || isTailscaleIp(host) || host.endsWith(".ts.net");
     const isPqHosted = url.protocol === "https:" && pqHosts.has(host);
     const protocolAllowed = (url.protocol === "http:" && isLocalOrTailscale)
