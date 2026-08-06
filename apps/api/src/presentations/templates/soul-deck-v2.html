@@ -40,10 +40,6 @@
       page-break-after: always;
     }
     .slide:last-child { break-after: auto; page-break-after: auto; }
-    .page-index {
-      position: absolute; right: 4.3%; bottom: 3.5%; z-index: 8;
-      font-size: 13px; font-weight: 750; letter-spacing: .15em; color: #6d8090;
-    }
     .eyebrow { font-size: 16px; letter-spacing: .16em; text-transform: uppercase; font-weight: 800; color: var(--cyan); }
     .logo { display: block; width: 150px; height: auto; }
     .brand-lockup { display: flex; align-items: center; gap: 18px; }
@@ -73,9 +69,12 @@
     .quote-image { position: relative; overflow: hidden; }
     .quote-image img { width: 100%; height: 100%; object-fit: cover; filter: contrast(.87) saturate(.7) brightness(.82); }
     .quote-image::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(7,46,89,.05), rgba(7,46,89,.16)); }
-    .quote-copy { display: flex; flex-direction: column; justify-content: center; padding: 8% 9% 8% 8%; }
-    .quote-copy blockquote { margin: 27px 0 0; font-size: clamp(27px, 2.5vw, 37px); line-height: 1.34; letter-spacing: -.027em; font-weight: 590; color: var(--blue); text-align: left; }
-    .quote-copy p { margin: 30px 0 0; font-size: 19px; line-height: 1.58; color: #455f72; text-align: left; }
+    .quote-copy { display: flex; flex-direction: column; justify-content: center; padding: 7% 9% 7% 8%; }
+    .quote-copy blockquote { margin: 0; color: var(--blue); }
+    .quote-copy blockquote p { margin: 0; font-size: clamp(25px, 2.15vw, 32px); line-height: 1.34; letter-spacing: -.022em; font-weight: 620; text-align: justify; }
+    .quote-copy blockquote p + p { margin-top: 24px; color: #455f72; font-size: 19px; line-height: 1.58; font-weight: 520; }
+    .quote-credit { margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 16px; line-height: 1.4; }
+    .quote-credit strong { display: block; color: var(--blue); font-size: 18px; }
     .quote-rule { margin-top: 34px; width: 92px; height: 5px; background: var(--cyan); }
 
     /* 3 — determinazione */
@@ -87,7 +86,7 @@
     .determination h2 { margin: 18px 0 30px; font-size: clamp(42px, 4vw, 58px); line-height: 1.02; letter-spacing: -.042em; color: var(--blue); }
     .determination h2 span { display: block; color: var(--cyan); }
     .determination p { margin: 0 0 20px; font-size: 19px; line-height: 1.55; color: #435d70; text-align: justify; }
-    .determination-note { margin-top: 10px; padding: 20px 22px; border-left: 5px solid var(--cyan); background: #edf7f9; color: var(--blue); font-size: 17px; line-height: 1.5; font-weight: 620; text-align: left; }
+    .determination .determination-lead { color: #0b7e9a; font-size: 21px; line-height: 1.48; font-weight: 650; }
 
     /* 4 — processo */
     .process { background: #f8fbfc; }
@@ -118,11 +117,14 @@
     .card-title { padding: 14px 18px 13px; border-bottom: 1px solid #dce6ec; font-size: 14px; font-weight: 800; letter-spacing: .11em; color: var(--blue); text-transform: uppercase; }
     .properties-card { width: 100%; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th { padding: 11px 10px 10px; background: #eaf3f6; color: #456173; font-size: 13px; line-height: 1.18; text-align: right; text-transform: uppercase; letter-spacing: .025em; }
-    th:first-child, th:nth-child(2), td:first-child, td:nth-child(2) { text-align: left; }
-    td { padding: 11px 10px; border-top: 1px solid #e3ebef; color: #243f52; font-size: 14px; line-height: 1.25; text-align: right; vertical-align: middle; }
-    td strong { display: block; color: var(--blue); font-size: 14.5px; }
-    td small { display: block; margin-top: 3px; color: #657d8e; font-size: 12px; }
+    th { padding: 11px 7px 10px; background: #eaf3f6; color: #456173; font-size: 11px; line-height: 1.18; text-align: right; text-transform: uppercase; letter-spacing: .015em; }
+    th:first-child, th:nth-child(2), th:nth-child(3), th:nth-child(4), th:nth-child(5), td:first-child, td:nth-child(2), td:nth-child(3), td:nth-child(4), td:nth-child(5) { text-align: left; }
+    td { padding: 11px 7px; border-top: 1px solid #e3ebef; color: #243f52; font-size: 12px; line-height: 1.25; text-align: right; vertical-align: middle; overflow-wrap: anywhere; }
+    td strong { display: block; color: var(--blue); font-size: 12.5px; }
+    td small { display: block; margin-top: 3px; color: #657d8e; font-size: 10px; }
+    .properties-card td.good { color: var(--good); font-weight: 750; }
+    .properties-card td.bad { color: var(--bad); font-weight: 750; }
+    .properties-card tfoot td { background: #eef4f6; color: var(--blue); font-weight: 800; }
     .properties-card.compact th { padding-top: 7px; padding-bottom: 7px; font-size: 10.5px; }
     .properties-card.compact td { padding-top: 6px; padding-bottom: 6px; font-size: 11px; }
     .properties-card.compact td strong { font-size: 11.5px; }
@@ -134,12 +136,12 @@
     .properties-card.ultra td small { display: none; }
     .bottom-grid { display: grid; grid-template-columns: 39% 61%; gap: 16px; margin-top: 16px; min-height: 460px; }
     .bottom-grid > section { height: 100%; }
-    .summary-body { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 0; height: calc(100% - 46px); }
-    .metric { padding: 24px 20px; border-right: 1px solid #e4ebef; border-bottom: 1px solid #e4ebef; display: flex; flex-direction: column; justify-content: center; }
-    .metric:nth-child(even) { border-right: 0; }
-    .metric:nth-last-child(-n+2) { border-bottom: 0; }
-    .metric small { display: block; min-height: 34px; color: #5f7586; font-size: 13px; line-height: 1.3; text-transform: uppercase; letter-spacing: .035em; }
-    .metric strong { display: block; margin-top: 9px; color: var(--blue); font-size: 25px; line-height: 1; white-space: nowrap; }
+    .summary-body { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; gap: 0; height: calc(100% - 46px); }
+    .metric { padding: 20px 14px; border-right: 1px solid #e4ebef; border-bottom: 1px solid #e4ebef; display: flex; flex-direction: column; justify-content: center; }
+    .metric:nth-child(3n) { border-right: 0; }
+    .metric:nth-last-child(-n+3) { border-bottom: 0; }
+    .metric small { display: block; min-height: 44px; color: #5f7586; font-size: 11px; line-height: 1.3; text-transform: uppercase; letter-spacing: .025em; }
+    .metric strong { display: block; margin-top: 9px; color: var(--blue); font-size: 20px; line-height: 1; white-space: nowrap; }
     .metric strong.good { color: var(--good); }
     .metric strong.bad { color: var(--bad); }
     .saving-body { display: grid; grid-template-columns: 38% 62%; height: calc(100% - 46px); min-height: 414px; }
@@ -160,6 +162,11 @@
     .chart svg { position: absolute; left: 73px; right: 1px; top: 4px; width: calc(100% - 74px); height: calc(100% - 29px); overflow: visible; }
     .chart-area { fill: rgba(22,188,210,.17); }
     .chart-line { fill: none; stroke: #0a839b; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+    .saving-card.bad .annual-saving strong,
+    .saving-card.bad .ten-year-head strong { color: var(--bad); }
+    .saving-card.bad .annual-bar span { background: linear-gradient(90deg, #d96b78, var(--bad)); }
+    .saving-card.bad .chart-area { fill: rgba(199,59,77,.14); }
+    .saving-card.bad .chart-line { stroke: var(--bad); }
     .economics.many .bottom-grid { min-height: 320px; }
     .economics.many .saving-body { min-height: 274px; }
     .economics.many .chart { height: 185px; }
@@ -206,75 +213,72 @@
       <img class="cover-photo" src="__ASSET_COVER__" alt="" />
       <div class="cover-wash"></div>
       <div class="cover-copy">
-        <div class="eyebrow">Studio di fattibilità</div>
         <h1>Ottimizzazione <span>rendita catastale</span></h1>
-        <div class="cover-client"><small>Preparato per</small><strong data-client></strong></div>
+        <div class="cover-client"><small>Studio di fattibilità</small><strong data-client></strong></div>
       </div>
       <div class="cover-logo brand-lockup"><img class="logo" src="__ASSET_LOGO__" alt="Soul" /><span>Divisione<br />Real Estate</span></div>
       <div class="ribbon one"></div><div class="ribbon two"></div><div class="ribbon three"></div><div class="ribbon four"></div>
-      <span class="page-index">01</span>
     </section>
 
     <section class="slide quote-page" id="slide-2">
       <div class="quote-image"><img src="__ASSET_RECEPTION__" alt="" /></div>
       <div class="quote-copy">
-        <div class="eyebrow">L’approccio Soul</div>
-        <blockquote>“Ottimizzare la rendita catastale significa ricostruire con precisione il valore dell’immobile, verificando ogni superficie e rendendo il risultato misurabile nel tempo.”</blockquote>
-        <p>L’analisi integra documentazione catastale, dati tecnici e parametri economici in un processo verificabile, con l’obiettivo di individuare l’effettivo margine di ottimizzazione.</p>
+        <blockquote>
+          <p>“Le più grandi imprese sono formate dalle migliori persone. Tutti lo dicono ma io lo credo fermamente.</p>
+          <p>Le persone che fanno parte del team, con motivazione, professionalità e impegno hanno permesso a Soul di raggiungere e superare gli obiettivi prefissati di anno in anno, mantenendo un trend di costante crescita.”</p>
+        </blockquote>
+        <div class="quote-credit"><strong>Dott. Ruggero Lopriore</strong>Amministratore di Soul</div>
         <div class="quote-rule"></div>
       </div>
-      <span class="page-index">02</span>
     </section>
 
     <section class="slide determination" id="slide-3">
       <div class="determination-image"><img src="__ASSET_ATRIUM__" alt="" /></div>
       <div class="determination-copy">
-        <div class="eyebrow">Ottimizzazione catastale</div>
-        <h2>Determinazione della <span>rendita attribuibile</span></h2>
-        <p>La rendita degli immobili a destinazione speciale viene ricostruita attraverso la valutazione delle componenti edilizie e impiantistiche rilevanti. Le superfici sono classificate per destinazione d’uso e valorizzate mediante parametri coerenti con il contesto territoriale.</p>
-        <p>Il confronto tra rendita attuale e rendita attribuibile consente di stimare l’effetto economico atteso e di definire le successive attività tecniche.</p>
-        <div class="determination-note">Ogni valore riportato nella simulazione è collegato agli immobili selezionati e ai dati disponibili al momento dell’analisi.</div>
+        <div class="eyebrow">Ottimizzazione</div>
+        <h2>Rendita <span>catastale</span></h2>
+        <p class="determination-lead">Una corretta determinazione del valore catastale per un corretto pagamento delle imposte municipali.</p>
+        <p>Soul fornisce assistenza per la determinazione o rideterminazione del corretto valore catastale degli immobili, al fine di un corretto e ragionevole pagamento delle imposte municipali gravanti sugli stessi.</p>
+        <p>Spesso la pubblica amministrazione attribuisce agli immobili una rendita catastale molto elevata: Soul è in grado di dimostrare che il reale valore catastale sia effettivamente inferiore, <strong>riducendo tra il 15% e il 40% le relative imposte.</strong></p>
       </div>
-      <span class="page-index">03</span>
     </section>
 
     <section class="slide process" id="slide-4">
       <img class="process-photo" src="__ASSET_PROCESS__" alt="" /><div class="process-fade"></div>
       <div class="process-content">
-        <div class="eyebrow" style="margin-left:8%">Metodo di lavoro</div>
+        <div class="eyebrow" style="margin-left:8%">Metodo</div>
         <h2>La nostra attività in 3 fasi</h2>
         <div class="steps">
-          <article class="step"><div class="step-number">1</div><h3>Analisi documentale</h3><p>Acquisizione dei dati catastali, verifica degli elaborati planimetrici e selezione degli immobili inclusi nello studio.</p></article>
-          <article class="step"><div class="step-number">2</div><h3>Attività tecnica</h3><p>Misurazione e classificazione delle superfici, applicazione dei valori unitari e determinazione della rendita attribuibile.</p></article>
-          <article class="step"><div class="step-number">3</div><h3>Risultato economico</h3><p>Confronto con la situazione attuale, simulazione dell’effetto IMU e predisposizione dell’esito dell’analisi.</p></article>
+          <article class="step"><div class="step-number">1</div><h3>Studio preliminare</h3><p>Analizzando visura catastale e planimetria, daremo evidenza degli immobili interessati a possibile intervento con indicazione del potenziale abbattimento.</p></article>
+          <article class="step"><div class="step-number">2</div><h3>Esecuzione attività</h3><p>Svolgiamo le attività tecniche, peritali e tributarie necessarie a ottimizzare le rendite catastali.</p></article>
+          <article class="step"><div class="step-number">3</div><h3>Risultato</h3><p>Al termine delle attività e una volta raggiunta la ridefinizione definitiva della rendita, attraverso accertamento, mediazione o sentenza passata in giudicato, maturerà il beneficio per la proprietà e la nostra consulenza.</p></article>
         </div>
       </div>
-      <span class="page-index">04</span>
     </section>
 
     <section class="slide economics" id="slide-5">
-      <header class="economics-header"><div><div class="eyebrow">Simulazione economica</div><h2>Risultati dello studio di fattibilità</h2></div><div class="economics-date" data-date></div></header>
-      <section class="properties-card" id="properties-card"><div class="card-title">Immobili oggetto di analisi</div><table><colgroup><col style="width:25%"><col style="width:18%"><col style="width:7%"><col style="width:12.5%"><col style="width:12.5%"><col style="width:12.5%"><col style="width:12.5%"></colgroup><thead><tr><th>Immobile</th><th>Riferimenti catastali</th><th>Cat.</th><th>Rendita attuale</th><th>Rendita attribuibile</th><th>Differenza rendita</th><th>Differenza IMU</th></tr></thead><tbody id="property-rows"></tbody></table></section>
+      <header class="economics-header"><div><div class="eyebrow">Simulazione economica</div><h2>Ottimizzazione rendita catastale</h2></div></header>
+      <section class="properties-card" id="properties-card"><div class="card-title">Immobili oggetto di analisi</div><table><colgroup><col style="width:11%"><col style="width:8%"><col style="width:12%"><col style="width:12%"><col style="width:5%"><col style="width:10%"><col style="width:11%"><col style="width:11%"><col style="width:11%"><col style="width:9%"></colgroup><thead><tr><th>Società</th><th>Comune</th><th>Indirizzo</th><th>Foglio - Particella - Sub</th><th>Cat.</th><th>R.C. attuale</th><th>R.C. attribuibile</th><th>Differenza rendita</th><th>Differenza IMU</th><th>% rid.</th></tr></thead><tbody id="property-rows"></tbody><tfoot><tr id="property-totals"></tr></tfoot></table></section>
       <div class="bottom-grid">
         <section class="summary-card"><div class="card-title">Sintesi</div><div class="summary-body">
-          <div class="metric"><small>Rendita attuale</small><strong id="total-current-rent"></strong></div>
-          <div class="metric"><small>Rendita attribuibile</small><strong id="total-estimated-rent"></strong></div>
-          <div class="metric"><small>Differenza rendita</small><strong id="rent-difference"></strong></div>
-          <div class="metric"><small>Variazione IMU prevista</small><strong id="imu-variation"></strong></div>
+          <div class="metric"><small>Rendita catastale attuale</small><strong id="total-current-rent"></strong></div>
+          <div class="metric"><small>Rendita catastale attribuibile</small><strong id="total-estimated-rent"></strong></div>
+          <div class="metric"><small>Differenza rendita catastale</small><strong id="rent-difference"></strong></div>
+          <div class="metric"><small>IMU attuale</small><strong id="total-current-imu"></strong></div>
+          <div class="metric"><small>IMU ottenibile</small><strong id="total-estimated-imu"></strong></div>
+          <div class="metric"><small>Differenza IMU</small><strong id="imu-variation"></strong></div>
         </div></section>
         <section class="saving-card"><div class="card-title">Saving generato</div><div class="saving-body">
-          <div class="annual-saving"><small>Saving in 1 anno</small><strong id="saving-one-year"></strong><div class="annual-bar"><span></span></div><em>Effetto annuo stimato</em></div>
+          <div class="annual-saving"><small>Saving in 1 anno</small><strong id="saving-one-year"></strong><div class="annual-bar"><span></span></div></div>
           <div class="ten-year"><div class="ten-year-head"><span>Saving in 10 anni</span><strong id="saving-ten-year"></strong></div><div class="chart"><div class="chart-grid"></div><div class="chart-y" id="chart-y"></div><div class="chart-x"><span>0</span><span>2</span><span>4</span><span>6</span><span>8</span><span>10 anni</span></div><svg viewBox="0 0 500 100" preserveAspectRatio="none" aria-label="Saving cumulato in dieci anni"><path class="chart-area" id="chart-area"></path><polyline class="chart-line" id="chart-line"></polyline></svg></div></div>
         </div></section>
       </div>
-      <span class="page-index">05</span>
     </section>
 
     <section class="slide closing" id="slide-6">
       <img class="closing-image" src="__ASSET_HANDSHAKE__" alt="" /><div class="closing-overlay"></div>
-      <div class="closing-copy"><div class="eyebrow">Conclusioni</div><p class="lead">L’obiettivo di Soul è massimizzare il risparmio per il cliente.</p><p>Lo studio di fattibilità fornisce una prima quantificazione del potenziale risultato. Le successive verifiche tecniche consentiranno di consolidare i dati e definire l’attività più adatta agli immobili analizzati.</p><p>Il team Soul resta a disposizione per condividere il dettaglio della valutazione e i passaggi operativi successivi.</p></div>
+      <div class="closing-copy"><p class="lead">L'obiettivo di Soul è volto a massimizzare il risparmio per il cliente.</p><p>Le attività di consulenza per le quali sia prevista riserva di legge verranno espletate da professionisti abilitati.</p></div>
       <div class="closing-logo brand-lockup"><img class="logo" src="__ASSET_LOGO__" alt="Soul" /><span>Divisione<br />Real Estate</span></div>
-      <span class="page-index">06</span>
     </section>
   </main>
 
@@ -286,6 +290,9 @@
     const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[character]);
     const sum = (field) => data.immobili.reduce((total, item) => total + (Number(item[field]) || 0), 0);
     const difference = (current, estimated) => current - estimated;
+    const percent = (value) => Number.isFinite(value)
+      ? new Intl.NumberFormat("it-IT", { style: "percent", maximumFractionDigits: 1 }).format(value)
+      : "n.d.";
     const currentRent = sum("renditaAttuale");
     const estimatedRent = sum("renditaAttribuibile");
     const currentImu = sum("imuAttuale");
@@ -293,13 +300,23 @@
     const annualSaving = currentImu - estimatedImu;
     const tenYearSaving = annualSaving * 10;
     document.querySelectorAll("[data-client]").forEach((element) => element.textContent = data.studio.company);
-    document.querySelector("[data-date]").textContent = new Intl.DateTimeFormat("it-IT", { month: "long", year: "numeric" }).format(new Date(data.generatedAt));
     const rows = document.getElementById("property-rows");
     rows.innerHTML = data.immobili.map((item) => {
       const rentDiff = difference(item.renditaAttuale, item.renditaAttribuibile);
-      const imuDiff = difference(item.imuAttuale || 0, item.imuOttenibile || 0);
-      return `<tr><td><strong>${escapeHtml(item.societa)}</strong><small>${escapeHtml(item.comune)} · ${escapeHtml(item.indirizzo)}</small></td><td>${escapeHtml(item.foglioParticellaSub)}</td><td>${escapeHtml(item.categoria || "—")}</td><td>${euro.format(item.renditaAttuale)}</td><td>${euro.format(item.renditaAttribuibile)}</td><td>${euro.format(rentDiff)}</td><td>${euro.format(imuDiff)}</td></tr>`;
+      const hasImu = Number.isFinite(item.imuAttuale) && Number.isFinite(item.imuOttenibile);
+      const imuVariation = hasImu ? item.imuOttenibile - item.imuAttuale : null;
+      const reduction = item.renditaAttuale ? rentDiff / item.renditaAttuale : null;
+      const imuClass = Number.isFinite(imuVariation) ? (imuVariation > 0 ? "bad" : imuVariation < 0 ? "good" : "") : "";
+      const imuLabel = Number.isFinite(imuVariation)
+        ? `${imuVariation > 0 ? "+" : imuVariation < 0 ? "−" : ""}${euro.format(Math.abs(imuVariation))}`
+        : "n.d.";
+      return `<tr><td>${escapeHtml(item.societa)}</td><td>${escapeHtml(item.comune)}</td><td>${escapeHtml(item.indirizzo)}</td><td>${escapeHtml(item.foglioParticellaSub)}</td><td>${escapeHtml(item.categoria || "—")}</td><td>${euro.format(item.renditaAttuale)}</td><td>${euro.format(item.renditaAttribuibile)}</td><td>${euro.format(rentDiff)}</td><td class="${imuClass}">${imuLabel}</td><td>${percent(reduction)}</td></tr>`;
     }).join("");
+    const totalRentDifference = currentRent - estimatedRent;
+    const totalReduction = currentRent ? totalRentDifference / currentRent : null;
+    const totalImuVariation = estimatedImu - currentImu;
+    const totalImuClass = totalImuVariation > 0 ? "bad" : totalImuVariation < 0 ? "good" : "";
+    document.getElementById("property-totals").innerHTML = `<td colspan="5">Totale portafoglio</td><td>${euro.format(currentRent)}</td><td>${euro.format(estimatedRent)}</td><td>${euro.format(totalRentDifference)}</td><td class="${totalImuClass}">${totalImuVariation > 0 ? "+" : totalImuVariation < 0 ? "−" : ""}${euro.format(Math.abs(totalImuVariation))}</td><td>${percent(totalReduction)}</td>`;
     const propertiesCard = document.getElementById("properties-card");
     if (data.immobili.length > 5) propertiesCard.classList.add("compact");
     if (data.immobili.length > 9) propertiesCard.classList.add("ultra");
@@ -307,17 +324,23 @@
     if (data.immobili.length > 9) document.querySelector(".economics").classList.add("ultra");
     document.getElementById("total-current-rent").textContent = euro.format(currentRent);
     document.getElementById("total-estimated-rent").textContent = euro.format(estimatedRent);
-    document.getElementById("rent-difference").textContent = euro.format(currentRent - estimatedRent);
+    document.getElementById("rent-difference").textContent = euro.format(totalRentDifference);
+    document.getElementById("total-current-imu").textContent = euro.format(currentImu);
+    document.getElementById("total-estimated-imu").textContent = euro.format(estimatedImu);
     const variation = document.getElementById("imu-variation");
-    variation.textContent = `${annualSaving >= 0 ? "−" : "+"}${euro.format(Math.abs(annualSaving))}`;
-    variation.classList.add(annualSaving >= 0 ? "good" : "bad");
+    variation.textContent = `${totalImuVariation > 0 ? "+" : totalImuVariation < 0 ? "−" : ""}${euro.format(Math.abs(totalImuVariation))}`;
+    if (totalImuVariation !== 0) variation.classList.add(totalImuVariation < 0 ? "good" : "bad");
     document.getElementById("saving-one-year").textContent = euro.format(annualSaving);
     document.getElementById("saving-ten-year").textContent = euro.format(tenYearSaving);
+    document.querySelector(".saving-card").classList.toggle("bad", annualSaving < 0);
     const chartMaximum = Math.max(Math.abs(tenYearSaving), 1);
-    document.getElementById("chart-y").innerHTML = [1, .6667, .3333, 0].map((ratio) => `<span>${compactEuro.format(chartMaximum * ratio)}</span>`).join("");
-    const points = Array.from({ length: 11 }, (_, year) => `${year * 50},${100 - year * 10}`).join(" ");
-    document.getElementById("chart-line").setAttribute("points", points);
-    document.getElementById("chart-area").setAttribute("d", `M0,100 L${points.replaceAll(" ", " L")} L500,100 Z`);
+    const chartStep = Math.max(1000, Math.ceil(chartMaximum / 3000) * 1000);
+    const chartAxisMaximum = chartStep * 3;
+    document.getElementById("chart-y").innerHTML = [3, 2, 1, 0].map((step) => `<span>${compactEuro.format(chartStep * step)}</span>`).join("");
+    const chartRatio = Math.min(1, chartMaximum / chartAxisMaximum);
+    const scaledPoints = Array.from({ length: 11 }, (_, year) => `${year * 50},${100 - year * 10 * chartRatio}`).join(" ");
+    document.getElementById("chart-line").setAttribute("points", scaledPoints);
+    document.getElementById("chart-area").setAttribute("d", `M0,100 L${scaledPoints.replaceAll(" ", " L")} L500,100 Z`);
 
     const exportMode = new URLSearchParams(location.search).get("export") === "1";
     if (exportMode) document.documentElement.classList.add("export-mode");

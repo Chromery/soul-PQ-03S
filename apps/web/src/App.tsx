@@ -22,6 +22,7 @@ import {
   ExternalLink,
   Factory,
   File,
+  FileDown,
   FileSpreadsheet,
   FileText,
   Globe,
@@ -226,6 +227,7 @@ type PresentationDeck = {
   fileName: string;
   createdAt: string;
   htmlUrl: string;
+  htmlDownloadUrl: string;
   pdfUrl: string;
 };
 
@@ -6064,6 +6066,13 @@ function PresentationAction({
     onNotice("Generazione PDF avviata: il primo download può richiedere qualche secondo.");
   }
 
+  function downloadHtml(deck: PresentationDeck) {
+    const link = document.createElement("a");
+    link.href = deck.htmlDownloadUrl;
+    link.click();
+    onNotice("Download della presentazione HTML autocontenuta avviato.");
+  }
+
   async function copyDeckLink(deck: PresentationDeck) {
     const url = new URL(deck.htmlUrl, window.location.origin).toString();
     try {
@@ -6106,6 +6115,10 @@ function PresentationAction({
             <button type="button" onClick={() => downloadPdf(latestDeck)}>
               <Download size={15} />
               Scarica ultima versione PDF
+            </button>
+            <button type="button" onClick={() => downloadHtml(latestDeck)}>
+              <FileDown size={15} />
+              Scarica HTML autocontenuto
             </button>
             <button type="button" onClick={() => void copyDeckLink(latestDeck)}>
               <Copy size={15} />
@@ -6205,6 +6218,10 @@ function PresentationAction({
                   <button className="button secondary" type="button" onClick={() => downloadPdf(generatedDeck)}>
                     <Download size={15} />
                     Scarica PDF
+                  </button>
+                  <button className="button secondary" type="button" onClick={() => downloadHtml(generatedDeck)}>
+                    <FileDown size={15} />
+                    Scarica HTML
                   </button>
                   <button className="button secondary" type="button" onClick={() => void copyDeckLink(generatedDeck)}>
                     <Copy size={15} />
