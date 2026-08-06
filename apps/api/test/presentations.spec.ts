@@ -113,6 +113,8 @@ test("la presentazione v2 conserva i testi precedenti con le sole revisioni dei 
   assert.doesNotMatch(template, /Effetto annuo stimato/);
   assert.doesNotMatch(template, /class="page-index"/);
   assert.doesNotMatch(template, /data-date/);
+  assert.match(template, /grid-template-columns: minmax\(0, 39fr\) minmax\(0, 61fr\)/);
+  assert.match(template, /tfoot td:not\(:first-child\) \{ text-align: right; \}/);
 });
 
 test("i campi modificati nell'anteprima vengono congelati nello snapshot della presentazione", async () => {

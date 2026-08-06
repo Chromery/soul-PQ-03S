@@ -71,7 +71,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.57.1";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.57.2";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 

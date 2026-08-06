@@ -125,6 +125,7 @@
     .properties-card td.good { color: var(--good); font-weight: 750; }
     .properties-card td.bad { color: var(--bad); font-weight: 750; }
     .properties-card tfoot td { background: #eef4f6; color: var(--blue); font-weight: 800; }
+    .properties-card tfoot td:not(:first-child) { text-align: right; }
     .properties-card.compact th { padding-top: 7px; padding-bottom: 7px; font-size: 10.5px; }
     .properties-card.compact td { padding-top: 6px; padding-bottom: 6px; font-size: 11px; }
     .properties-card.compact td strong { font-size: 11.5px; }
@@ -134,7 +135,7 @@
     .properties-card.ultra td { padding-top: 4px; padding-bottom: 4px; font-size: 8.5px; }
     .properties-card.ultra td strong { font-size: 9px; }
     .properties-card.ultra td small { display: none; }
-    .bottom-grid { display: grid; grid-template-columns: 39% 61%; gap: 16px; margin-top: 16px; min-height: 460px; }
+    .bottom-grid { display: grid; grid-template-columns: minmax(0, 39fr) minmax(0, 61fr); gap: 16px; margin-top: 16px; min-height: 460px; }
     .bottom-grid > section { height: 100%; }
     .summary-body { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; gap: 0; height: calc(100% - 46px); }
     .metric { padding: 20px 14px; border-right: 1px solid #e4ebef; border-bottom: 1px solid #e4ebef; display: flex; flex-direction: column; justify-content: center; }
