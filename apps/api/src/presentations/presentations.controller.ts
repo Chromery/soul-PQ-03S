@@ -27,6 +27,22 @@ export class StudyPresentationsController {
 export class PresentationsController {
   constructor(private readonly presentations: PresentationsService) {}
 
+  @Get(":id/html")
+  async downloadHtml(
+    @Param("id") id: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const document = await this.presentations.renderHtml(id);
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.setHeader("Content-Disposition", contentDisposition(document.fileName, "attachment"));
+    response.setHeader("Cache-Control", "private, max-age=300");
+    response.setHeader(
+      "Content-Security-Policy",
+      "default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+    );
+    return document.html;
+  }
+
   @Get(":id")
   async html(
     @Param("id") id: string,

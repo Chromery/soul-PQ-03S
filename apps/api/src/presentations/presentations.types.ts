@@ -37,5 +37,6 @@ export type PresentationSummary = {
   fileName: string;
   createdAt: string;
   htmlUrl: string;
+  htmlDownloadUrl: string;
   pdfUrl: string;
 };

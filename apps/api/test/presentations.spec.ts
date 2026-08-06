@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
 import { PresentationsService } from "../src/presentations/presentations.service.js";
@@ -83,10 +84,35 @@ test("la presentazione v2 usa uno snapshot e un nome file distinti in formato st
   assert.ok(snapshot);
   assert.equal(snapshot.version, 2);
   assert.equal(summary.version, 2);
-  assert.equal(
+  assert.match(
     fixture.fileName(),
-    "Studio di fattibilità _ Ottimizzazione rendita catastale _ Cliente S.p.A.pdf",
+    /^Studio di fattibilità _ Ottimizzazione rendita catastale _ Cliente S\.p\.A _ \d{2}-\d{2}-\d{4}\.pdf$/,
   );
+  assert.equal(summary.htmlDownloadUrl, "/api/presentations/deck-1/html");
+});
+
+test("la presentazione v2 conserva i testi precedenti con le sole revisioni dei feedback", async () => {
+  const template = await readFile(
+    new URL("../src/presentations/templates/soul-deck-v2.html", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(template, /Le più grandi imprese sono formate dalle migliori persone/);
+  assert.match(template, /Soul fornisce assistenza per la determinazione o rideterminazione/);
+  assert.match(template, /Studio preliminare/);
+  assert.match(template, /Le attività di consulenza per le quali sia prevista riserva di legge/);
+  assert.match(template, /Rendita catastale attuale/);
+  assert.match(template, /Rendita catastale attribuibile/);
+  assert.match(template, /Differenza rendita catastale/);
+  assert.match(template, /IMU attuale/);
+  assert.match(template, /IMU ottenibile/);
+  assert.match(template, /Differenza IMU/);
+  assert.doesNotMatch(template, /Ottimizzare la rendita catastale significa ricostruire/);
+  assert.doesNotMatch(template, /Analisi documentale/);
+  assert.doesNotMatch(template, /Risultati dello studio di fattibilità/);
+  assert.doesNotMatch(template, /Effetto annuo stimato/);
+  assert.doesNotMatch(template, /class="page-index"/);
+  assert.doesNotMatch(template, /data-date/);
 });
 
 test("i campi modificati nell'anteprima vengono congelati nello snapshot della presentazione", async () => {

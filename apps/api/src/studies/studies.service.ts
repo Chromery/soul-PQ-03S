@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, Optional } from "@nestjs/common";
+import { ActivitiesService } from "../activities/activities.service.js";
 import { DocumentType } from "../generated/prisma/enums.js";
 import type {
   FeasibilityStudy,
@@ -69,6 +70,7 @@ export class StudiesService {
     private readonly prisma: PrismaService,
     private readonly priceLists: PriceListsService,
     private readonly imu: ImuService,
+    @Optional() private readonly activities?: ActivitiesService,
   ) {}
 
   async list() {
@@ -94,7 +96,10 @@ export class StudiesService {
   }
 
   async update(id: string, input: UpdateStudyDto) {
-    const exists = await this.prisma.feasibilityStudy.findUnique({ where: { id }, select: { id: true } });
+    const exists = await this.prisma.feasibilityStudy.findUnique({
+      where: { id },
+      select: { id: true, status: true, company: true },
+    });
     if (!exists) return null;
 
     const study = await this.prisma.feasibilityStudy.update({
@@ -105,6 +110,13 @@ export class StudiesService {
         versions: { orderBy: { versionNumber: "desc" } },
       },
     });
+    if (input.status === "Concluso" && exists.status !== "Concluso") {
+      try {
+        await this.activities?.recordStudyConcluded({ studyId: id, company: study.company, source: "PQ" });
+      } catch (error) {
+        console.error("Activity recording failed for concluded study", error);
+      }
+    }
     return this.toApiStudy(study);
   }
 

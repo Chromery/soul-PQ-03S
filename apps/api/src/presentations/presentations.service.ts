@@ -437,8 +437,18 @@ function cadastralReference(foglio: string | null, particella: string | null, su
 
 function presentationFileName(company: string, createdAt: Date, version: 1 | 2) {
   if (version === 2) {
-    const normalizedCompany = company.replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "") || "Cliente";
-    return `Studio di fattibilità _ Ottimizzazione rendita catastale _ ${normalizedCompany}.pdf`;
+    const normalizedCompany = company
+      .replace(/[\\/:*?"<>|]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/[.\s]+$/, "") || "Cliente";
+    const date = new Intl.DateTimeFormat("it-IT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      timeZone: "Europe/Rome",
+    }).format(createdAt).replaceAll("/", "-");
+    return `Studio di fattibilità _ Ottimizzazione rendita catastale _ ${normalizedCompany} _ ${date}.pdf`;
   }
   const slug = company
     .normalize("NFD")
@@ -483,6 +493,7 @@ function toSummary(deck: {
     fileName: deck.fileName,
     createdAt: deck.createdAt.toISOString(),
     htmlUrl: `/api/presentations/${encodeURIComponent(deck.id)}`,
+    htmlDownloadUrl: `/api/presentations/${encodeURIComponent(deck.id)}/html`,
     pdfUrl: `/api/presentations/${encodeURIComponent(deck.id)}/pdf`,
   };
 }
