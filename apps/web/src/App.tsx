@@ -71,7 +71,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.57.2";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.58.1";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -186,6 +186,13 @@ type PropertyImuOverrideUpdate = {
   imuCalculation: PropertyImuCalculation | null;
   currentImuSource: ImuValueSource;
   estimatedImuSource: ImuValueSource;
+};
+
+type ValuationGroupPropertyUpdate = {
+  id: string;
+  estimatedRendita: number;
+  estimatedImu: number | null;
+  imuCalculation?: PropertyImuCalculation | null;
 };
 
 type FeasibilityStudy = {
@@ -669,7 +676,10 @@ type AppRoute =
   | { view: "settings" }
   | { view: "activity" }
   | { view: "study"; studyId: string }
-  | { view: "editor"; studyId: string; propertyId: string };
+  | { view: "editor"; studyId: string; propertyId: string }
+  | { view: "groupEditor"; studyId: string; groupId: string }
+  | { view: "studyGroup"; groupId: string }
+  | { view: "studyGroupEditor"; groupId: string };
 
 function routeFromLocation(): AppRoute {
   const params = new URLSearchParams(window.location.search);
@@ -687,6 +697,15 @@ function routeFromLocation(): AppRoute {
   }
   if (parts[0] === "studi" && parts[1] && parts[2] === "immobili" && parts[3] && parts[4] === "planimetria") {
     return { view: "editor", studyId: parts[1], propertyId: parts[3] };
+  }
+  if (parts[0] === "studi" && parts[1] && parts[2] === "valutazioni" && parts[3] && parts[4] === "planimetria") {
+    return { view: "groupEditor", studyId: parts[1], groupId: parts[3] };
+  }
+  if (parts[0] === "gruppi-studio" && parts[1] && parts[2] === "planimetria") {
+    return { view: "studyGroupEditor", groupId: parts[1] };
+  }
+  if (parts[0] === "gruppi-studio" && parts[1]) {
+    return { view: "studyGroup", groupId: parts[1] };
   }
   if (parts[0] === "immobili") return { view: "properties" };
   if (parts[0] === "analisi") return { view: "analysis" };
@@ -716,6 +735,12 @@ function pathForRoute(route: AppRoute) {
       return `/studi/${encodeURIComponent(route.studyId)}`;
     case "editor":
       return `/studi/${encodeURIComponent(route.studyId)}/immobili/${encodeURIComponent(route.propertyId)}/planimetria`;
+    case "groupEditor":
+      return `/studi/${encodeURIComponent(route.studyId)}/valutazioni/${encodeURIComponent(route.groupId)}/planimetria`;
+    case "studyGroup":
+      return `/gruppi-studio/${encodeURIComponent(route.groupId)}`;
+    case "studyGroupEditor":
+      return `/gruppi-studio/${encodeURIComponent(route.groupId)}/planimetria`;
   }
 }
 
@@ -726,8 +751,12 @@ function navSectionForRoute(route: AppRoute) {
     case "studies":
       return "Studi di fattibilità";
     case "editor":
+    case "groupEditor":
+    case "studyGroupEditor":
     case "properties":
       return "Immobili";
+    case "studyGroup":
+      return "Studi di fattibilità";
     case "analysis":
       return "Analisi";
     case "report":
@@ -2462,6 +2491,55 @@ function recalculateStudyRenditaTotals(study: FeasibilityStudy): FeasibilityStud
   };
 }
 
+function propertyForValuationGroupEditor(
+  groupId: string,
+  properties: PropertyItem[],
+  combinedPlanUrl = `/api/property-valuation-groups/${encodeURIComponent(groupId)}/documents/planimetria/download`,
+): PropertyItem | null {
+  if (properties.length < 2) return null;
+  const first = properties[0];
+  const currentImu = nullableSum(properties.map((property) => property.currentImu));
+  const estimatedImu = nullableSum(properties.map((property) => property.estimatedImu));
+  const planCount = properties.filter((property) => property.documentUrls?.planimetria).length;
+  const visuraCount = properties.filter((property) => property.documentUrls?.visura).length;
+  const subalterniCount = properties.filter((property) => property.documentUrls?.elencoSubalterni).length;
+  return {
+    ...first,
+    id: groupId,
+    valuationGroupId: groupId,
+    address: `Valutazione complessiva · ${properties.length} unità`,
+    ubicazione: compactGroupValues(properties.map(propertyLocation)),
+    comune: compactGroupValues(properties.map((property) => property.comune)),
+    provincia: compactGroupValues(properties.map((property) => property.provincia ?? "")),
+    foglio: compactGroupValues(properties.map((property) => property.foglio)),
+    particella: compactGroupValues(properties.map((property) => property.particella)),
+    subalterno: compactGroupValues(properties.map((property) => property.subalterno)),
+    categoria: compactGroupValues(properties.map((property) => property.categoria)),
+    currentRendita: sumNumbers(properties.map((property) => property.currentRendita)),
+    estimatedRendita: sumNumbers(properties.map((property) => property.estimatedRendita)),
+    currentImu,
+    estimatedImu,
+    imuDiff: currentImu === null || estimatedImu === null ? 0 : estimatedImu - currentImu,
+    currentImuCalculation: null,
+    imuCalculation: null,
+    documents: {
+      planimetria: planCount > 0 ? `${planCount} elaborati combinati` : "",
+      visura: visuraCount > 0 ? `${visuraCount} visure` : "",
+      elencoSubalterni: subalterniCount > 0 ? `${subalterniCount} elenchi subalterni` : "",
+    },
+    documentUrls: {
+      planimetria: planCount > 0
+        ? combinedPlanUrl
+        : null,
+      visura: null,
+      elencoSubalterni: null,
+    },
+    priceLists: properties.flatMap((property) => property.priceLists ?? []).filter(
+      (priceList, index, all) => all.findIndex((candidate) => candidate.id === priceList.id) === index,
+    ),
+  };
+}
+
 function getSortValue(study: FeasibilityStudy, sortKey: SortKey) {
   switch (sortKey) {
     case "id":
@@ -2624,7 +2702,7 @@ function App() {
     function handlePopState() {
       const nextRoute = routeFromLocation();
       if (
-        route.view === "editor" &&
+        (route.view === "editor" || route.view === "groupEditor" || route.view === "studyGroupEditor") &&
         editorDirty &&
         !window.confirm("Sono presenti modifiche alla planimetria non salvate. Uscire comunque?")
       ) {
@@ -2641,7 +2719,7 @@ function App() {
 
   function navigate(nextRoute: AppRoute) {
     if (
-      route.view === "editor" &&
+      (route.view === "editor" || route.view === "groupEditor" || route.view === "studyGroupEditor") &&
       editorDirty &&
       !window.confirm("Sono presenti modifiche alla planimetria non salvate. Uscire comunque?")
     ) {
@@ -2716,12 +2794,29 @@ function App() {
   const activeStudy = route.view === "study"
     ? studies.find((study) => study.id === route.studyId)
     : undefined;
-  const editorStudy = route.view === "editor"
+  const editorStudy = route.view === "editor" || route.view === "groupEditor"
     ? studies.find((study) => study.id === route.studyId)
     : undefined;
   const editorProperty = editorStudy?.properties.find(
     (property) => property.id === (route.view === "editor" ? route.propertyId : ""),
   );
+  const editorGroupProperties = route.view === "groupEditor"
+    ? editorStudy?.properties.filter((property) => property.valuationGroupId === route.groupId) ?? []
+    : [];
+  const editorGroupProperty = route.view === "groupEditor"
+    ? propertyForValuationGroupEditor(route.groupId, editorGroupProperties)
+    : null;
+  const activeStudyGroupStudies = route.view === "studyGroup" || route.view === "studyGroupEditor"
+    ? studies.filter((study) => study.studyGroupId === route.groupId)
+    : [];
+  const activeStudyGroupProperties = activeStudyGroupStudies.flatMap((study) => study.properties);
+  const activeStudyGroupEditorProperty = route.view === "studyGroupEditor"
+    ? propertyForValuationGroupEditor(
+      route.groupId,
+      activeStudyGroupProperties,
+      `/api/study-groups/${encodeURIComponent(route.groupId)}/documents/planimetria/download`,
+    )
+    : null;
 
   const totals = useMemo(() => {
     const visible = filteredStudies;
@@ -2904,6 +2999,26 @@ function App() {
       (property) => propertyWithEstimatedValue(property, estimatedRendita, estimatedImu, imuCalculation),
       true,
     );
+  }
+
+  function updateValuationGroupEstimatedValues(updates: ValuationGroupPropertyUpdate[]) {
+    const byId = new Map(updates.map((update) => [update.id, update]));
+    setStudies((current) => current.map((study) => {
+      let changed = false;
+      const properties = study.properties.map((property) => {
+        const update = byId.get(property.id);
+        if (!update) return property;
+        changed = true;
+        return propertyWithEstimatedValue(
+          property,
+          update.estimatedRendita,
+          update.estimatedImu,
+          update.imuCalculation,
+        );
+      });
+      return changed ? recalculateStudyRenditaTotals({ ...study, properties }) : study;
+    }));
+    flash("Valutazione complessiva salvata e ripartita tra le unità.");
   }
 
   async function savePropertyImuOverrides(
@@ -3327,6 +3442,89 @@ function App() {
     );
   }
 
+  if (route.view === "groupEditor" && editorStudy && editorGroupProperty && editorGroupProperties.length >= 2) {
+    return (
+      <Shell
+        query={query}
+        setQuery={handleGlobalQuery}
+        toast={toast}
+        activeSection={navSectionForRoute(route)}
+        onNavigate={navigate}
+        activityFeed={activityFeed}
+        editorMode
+      >
+        <Suspense fallback={<div className="editor-loading">Caricamento valutazione complessiva...</div>}>
+          <PlanimetriaEditor
+            study={editorStudy}
+            property={editorGroupProperty}
+            valuationGroup={{ id: route.groupId, properties: editorGroupProperties }}
+            onBack={() => navigate({ view: "study", studyId: editorStudy.id })}
+            onDirtyChange={setEditorDirty}
+            onGroupDraftSaved={updateValuationGroupEstimatedValues}
+          />
+        </Suspense>
+      </Shell>
+    );
+  }
+
+  if (
+    route.view === "studyGroupEditor"
+    && activeStudyGroupStudies.length >= 2
+    && activeStudyGroupEditorProperty
+  ) {
+    return (
+      <Shell
+        query={query}
+        setQuery={handleGlobalQuery}
+        toast={toast}
+        activeSection={navSectionForRoute(route)}
+        onNavigate={navigate}
+        activityFeed={activityFeed}
+        editorMode
+      >
+        <Suspense fallback={<div className="editor-loading">Caricamento intero gruppo...</div>}>
+          <PlanimetriaEditor
+            study={{
+              id: route.groupId,
+              company: `Gruppo · ${activeStudyGroupStudies.length} studi`,
+              provincia: null,
+            }}
+            property={activeStudyGroupEditorProperty}
+            valuationGroup={{
+              id: route.groupId,
+              kind: "study",
+              properties: activeStudyGroupProperties,
+            }}
+            onBack={() => navigate({ view: "studyGroup", groupId: route.groupId })}
+            onDirtyChange={setEditorDirty}
+            onGroupDraftSaved={updateValuationGroupEstimatedValues}
+          />
+        </Suspense>
+      </Shell>
+    );
+  }
+
+  if (route.view === "studyGroup" && activeStudyGroupStudies.length >= 2) {
+    return (
+      <Shell
+        query={query}
+        setQuery={handleGlobalQuery}
+        toast={toast}
+        activeSection={navSectionForRoute(route)}
+        onNavigate={navigate}
+        activityFeed={activityFeed}
+      >
+        <StudyGroupDetail
+          groupId={route.groupId}
+          studies={activeStudyGroupStudies}
+          onBack={() => navigate({ view: "studies" })}
+          onOpenStudy={(studyId) => navigate({ view: "study", studyId })}
+          onOpenEditor={() => navigate({ view: "studyGroupEditor", groupId: route.groupId })}
+        />
+      </Shell>
+    );
+  }
+
   if (route.view === "study" && activeStudy) {
     return (
       <Shell
@@ -3353,6 +3551,9 @@ function App() {
           onOutcomeChange={updatePropertyOutcome}
           onOpenEditor={(property) =>
             navigate({ view: "editor", studyId: activeStudy.id, propertyId: property.id })
+          }
+          onOpenGroupEditor={(groupId) =>
+            navigate({ view: "groupEditor", studyId: activeStudy.id, groupId })
           }
         />
       </Shell>
@@ -3442,7 +3643,12 @@ function App() {
     );
   }
 
-  if ((route.view === "study" && !activeStudy) || (route.view === "editor" && (!editorStudy || !editorProperty))) {
+  if (
+    (route.view === "study" && !activeStudy)
+    || (route.view === "editor" && (!editorStudy || !editorProperty))
+    || (route.view === "groupEditor" && (!editorStudy || !editorGroupProperty))
+    || ((route.view === "studyGroup" || route.view === "studyGroupEditor") && activeStudyGroupStudies.length < 2)
+  ) {
     return (
       <Shell
         query={query}
@@ -3865,6 +4071,7 @@ function App() {
                       onToggle={() => toggleStudyGroupExpansion(row.groupId)}
                       onSelect={() => toggleStudyGroupSelection(row.studies)}
                       onSelectStudy={toggleStudySelection}
+                      onOpenGroup={() => navigate({ view: "studyGroup", groupId: row.groupId })}
                       onOpenStudy={(studyId) => navigate({ view: "study", studyId })}
                       onUpdateStudy={updateStudy}
                     />
@@ -5248,6 +5455,139 @@ function PendingPage({
   );
 }
 
+function StudyGroupDetail({
+  groupId,
+  studies,
+  onBack,
+  onOpenStudy,
+  onOpenEditor,
+}: {
+  groupId: string;
+  studies: FeasibilityStudy[];
+  onBack: () => void;
+  onOpenStudy: (studyId: string) => void;
+  onOpenEditor: () => void;
+}) {
+  const properties = studies.flatMap((study) => (
+    study.properties.map((property) => ({ study, property }))
+  ));
+  const companies = Array.from(new Set(studies.map((study) => study.company)));
+  const currentRendita = sumNumbers(properties.map(({ property }) => property.currentRendita));
+  const estimatedRendita = sumNumbers(properties.map(({ property }) => property.estimatedRendita));
+  const currentImu = nullableSum(properties.map(({ property }) => property.currentImu));
+  const estimatedImu = nullableSum(properties.map(({ property }) => property.estimatedImu));
+  const planCount = properties.filter(({ property }) => Boolean(property.documentUrls?.planimetria)).length;
+
+  return (
+    <main className="detail-page study-group-detail-page">
+      <button className="back-link" type="button" onClick={onBack}>
+        <ChevronLeft size={17} />
+        Tutti gli studi
+      </button>
+
+      <section className="detail-hero study-group-detail-hero">
+        <div>
+          <p className="eyebrow">Gruppo di studi</p>
+          <h1>{companies.length} {companies.length === 1 ? "società" : "società"} · {studies.length} studi</h1>
+          <p>{companies.join(" · ")}</p>
+          <span className="study-group-detail-id">ID gruppo {groupId}</span>
+        </div>
+        <button className="button primary" type="button" disabled={properties.length === 0} onClick={onOpenEditor}>
+          <Layers3 size={17} />
+          Editor complessivo del gruppo
+        </button>
+      </section>
+
+      <section className="study-group-summary-grid" aria-label="Riepilogo gruppo">
+        <article><span>Studi</span><strong>{studies.length}</strong></article>
+        <article><span>Immobili</span><strong>{properties.length}</strong></article>
+        <article><span>Elaborati disponibili</span><strong>{planCount}/{properties.length}</strong></article>
+        <article><span>Rendita attuale</span><strong>{formatEuro(currentRendita)}</strong></article>
+        <article><span>Rendita prevista</span><strong>{formatEuro(estimatedRendita)}</strong></article>
+        <article><span>Variazione IMU</span><strong>{
+          currentImu === null || estimatedImu === null
+            ? "Non calcolabile"
+            : formatEuro(estimatedImu - currentImu)
+        }</strong></article>
+      </section>
+
+      <section className="detail-card study-group-members-section">
+        <div className="section-title">
+          <div>
+            <h2>Studi del gruppo</h2>
+            <span>Apri un singolo studio oppure lavora sull’intero gruppo dal pulsante in alto.</span>
+          </div>
+        </div>
+        <div className="study-group-member-grid">
+          {studies.map((study) => (
+            <button key={study.id} type="button" onClick={() => onOpenStudy(study.id)}>
+              <span className="study-group-member-icon"><Building2 size={18} /></span>
+              <span>
+                <strong>{study.company}</strong>
+                <small>{study.id} · {study.properties.length} immobili · {study.comune} ({study.provincia})</small>
+              </span>
+              <ChevronRight size={17} />
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="detail-card study-group-properties-section">
+        <div className="section-title">
+          <div>
+            <h2>Immobili dell’intero gruppo</h2>
+            <span>{properties.length} unità provenienti da {studies.length} studi</span>
+          </div>
+        </div>
+        <div className="table-scroll study-group-properties-table-wrap">
+          <table className="smart-table study-group-properties-table">
+            <thead>
+              <tr>
+                <th>Studio / società</th>
+                <th>Ubicazione</th>
+                <th>Foglio</th>
+                <th>Part.</th>
+                <th>Sub</th>
+                <th>Cat.</th>
+                <th>Rendita attuale</th>
+                <th>Rendita prevista</th>
+                <th>Elab.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {properties.map(({ study, property }) => (
+                <tr
+                  key={`${study.id}-${property.id}`}
+                  className="data-row-clickable"
+                  tabIndex={0}
+                  onClick={() => onOpenStudy(study.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") onOpenStudy(study.id);
+                  }}
+                >
+                  <td><strong>{study.company}</strong><small>{study.id}</small></td>
+                  <td title={propertyLocation(property)}>{propertyLocation(property)}</td>
+                  <td>{property.foglio || "—"}</td>
+                  <td>{property.particella || "—"}</td>
+                  <td>{property.subalterno || "—"}</td>
+                  <td>{property.categoria || "—"}</td>
+                  <td>{formatEuro(property.currentRendita)}</td>
+                  <td>{formatEuro(property.estimatedRendita)}</td>
+                  <td>
+                    <span className={`document-presence-dot${property.documentUrls?.planimetria ? " available" : ""}`}>
+                      {property.documentUrls?.planimetria ? "Sì" : "No"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function StudyGroupRows({
   groupId,
   studies,
@@ -5257,6 +5597,7 @@ function StudyGroupRows({
   onToggle,
   onSelect,
   onSelectStudy,
+  onOpenGroup,
   onOpenStudy,
   onUpdateStudy,
 }: {
@@ -5268,6 +5609,7 @@ function StudyGroupRows({
   onToggle: () => void;
   onSelect: () => void;
   onSelectStudy: (studyId: string) => void;
+  onOpenGroup: () => void;
   onOpenStudy: (studyId: string) => void;
   onUpdateStudy: (studyId: string, input: StudyUpdate) => Promise<boolean>;
 }) {
@@ -5344,6 +5686,17 @@ function StudyGroupRows({
             <div className="company-cell study-group-title">
               <strong>{studies.length} studi · {companyNames.length} società</strong>
               <span title={companyNames.join(", ")}>{companyNames.join(" · ")}</span>
+              <button
+                className="study-group-open-button"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenGroup();
+                }}
+              >
+                <Layers3 size={13} />
+                Apri intero gruppo
+              </button>
             </div>
           </td>
         )}
@@ -5865,6 +6218,19 @@ function presentationDraftFromStudy(study: FeasibilityStudy): PresentationDraft 
   };
 }
 
+function presentationImuFromRendita(
+  value: string,
+  calculation: PropertyImuCalculation | null | undefined,
+) {
+  const rendita = presentationMoneyToCents(value, true);
+  if (rendita === undefined) return "";
+  if (!calculation || calculation.status !== "calculated") return null;
+  const taxableBase = rendita * 1.05 * calculation.cadastralMultiplier;
+  return formatPresentationMoneyInput(
+    Math.round((taxableBase * (calculation.ratePercent / 100) + Number.EPSILON) * 100) / 100,
+  );
+}
+
 function formatPresentationMoneyInput(value: number | null | undefined) {
   return value === null || value === undefined || !Number.isFinite(value) ? "" : value.toFixed(2);
 }
@@ -6270,12 +6636,17 @@ function presentationMoneyInputInvalid(value: string, required: boolean) {
 
 function PresentationDataPreview({
   draft,
+  baseline,
+  manualFields,
   manualChanges,
   onClientNameChange,
   onPropertyFieldChange,
+  onPropertyFieldReset,
   onReset,
 }: {
   draft: PresentationDraft;
+  baseline: PresentationDraft;
+  manualFields: ReadonlySet<string>;
   manualChanges: number;
   onClientNameChange: (value: string) => void;
   onPropertyFieldChange: (
@@ -6283,6 +6654,7 @@ function PresentationDataPreview({
     field: PresentationPropertyField,
     value: string,
   ) => void;
+  onPropertyFieldReset: (propertyId: string, field: PresentationPropertyField) => void;
   onReset: () => void;
 }) {
   const totals = presentationDraftTotals(draft);
@@ -6296,23 +6668,34 @@ function PresentationDataPreview({
     label: string,
   ) {
     const invalid = presentationMoneyInputInvalid(property[field], required);
+    const overrideKey = `${property.id}:${field}`;
+    const baselineProperty = baseline.properties.find((item) => item.id === property.id);
     return (
-      <input
-        className={invalid ? "invalid" : ""}
-        type="text"
-        inputMode="decimal"
-        value={property[field]}
-        placeholder={required ? "0,00" : "n.d."}
-        aria-label={`${label} per ${property.indirizzo}`}
-        aria-invalid={invalid}
-        onChange={(event) => onPropertyFieldChange(property.id, field, event.target.value)}
-        onBlur={() => {
-          const parsed = presentationMoneyToCents(property[field], required as false);
-          if (parsed !== undefined && parsed !== null) {
-            onPropertyFieldChange(property.id, field, formatPresentationMoneyInput(parsed));
-          }
-        }}
-      />
+      <div className="presentation-input-with-override">
+        <input
+          className={invalid ? "invalid" : ""}
+          type="text"
+          inputMode="decimal"
+          value={property[field]}
+          placeholder={required ? "0,00" : "n.d."}
+          aria-label={`${label} per ${property.indirizzo}`}
+          aria-invalid={invalid}
+          onChange={(event) => onPropertyFieldChange(property.id, field, event.target.value)}
+          onBlur={() => {
+            const parsed = presentationMoneyToCents(property[field], required as false);
+            if (parsed !== undefined && parsed !== null) {
+              onPropertyFieldChange(property.id, field, formatPresentationMoneyInput(parsed));
+            }
+          }}
+        />
+        {manualFields.has(overrideKey) && baselineProperty && (
+          <ManualOverrideIndicator
+            calculatedValue={formatPresentationDraftAmount(baselineProperty[field], "n.d.")}
+            onReset={() => onPropertyFieldReset(property.id, field)}
+            resetLabel="Ripristina"
+          />
+        )}
+      </div>
     );
   }
 
@@ -6350,6 +6733,11 @@ function PresentationDataPreview({
           onChange={(event) => onClientNameChange(event.target.value)}
         />
       </label>
+
+      <p className="presentation-preview-info">
+        Se modifichi una rendita, la relativa IMU viene ricalcolata soltanto per la presentazione con
+        aliquota e moltiplicatore della stima. Le aree e i valori salvati nell’editor non vengono modificati.
+      </p>
 
       <div className="presentation-preview-table-wrap">
         <table className="presentation-preview-table">
@@ -6577,6 +6965,7 @@ function StudyDetail({
   onBack,
   onExport,
   onOpenEditor,
+  onOpenGroupEditor,
   onNotice,
   onUpdate,
   onReorder,
@@ -6592,6 +6981,7 @@ function StudyDetail({
   onBack: () => void;
   onExport: () => void;
   onOpenEditor: (property: PropertyItem) => void;
+  onOpenGroupEditor: (groupId: string) => void;
   onNotice: (message: string) => void;
   onUpdate: (input: StudyUpdate) => Promise<boolean>;
   onReorder: (propertyIds: string[]) => Promise<boolean>;
@@ -6824,15 +7214,55 @@ function StudyDetail({
     value: string,
   ) {
     const baselineProperty = presentationBaseline.properties.find((property) => property.id === propertyId);
-    updatePresentationTouchedField(
-      `${propertyId}:${field}`,
-      !baselineProperty || value !== baselineProperty[field],
-    );
+    const sourceProperty = study.properties.find((property) => property.id === propertyId);
+    const linkedImuField = field === "renditaAttuale"
+      ? "imuAttuale"
+      : field === "renditaAttribuibile"
+        ? "imuOttenibile"
+        : null;
+    const linkedCalculation = field === "renditaAttuale"
+      ? sourceProperty?.currentImuCalculation
+      : field === "renditaAttribuibile"
+        ? sourceProperty?.imuCalculation
+        : null;
+    const recalculatedImu = linkedImuField
+      ? presentationImuFromRendita(value, linkedCalculation)
+      : null;
+    const updates: Partial<PresentationPropertyDraft> = { [field]: value };
+    if (linkedImuField && recalculatedImu !== null) updates[linkedImuField] = recalculatedImu;
+    Object.entries(updates).forEach(([updatedField, updatedValue]) => {
+      const typedField = updatedField as PresentationPropertyField;
+      updatePresentationTouchedField(
+        `${propertyId}:${typedField}`,
+        !baselineProperty || updatedValue !== baselineProperty[typedField],
+      );
+    });
     setPresentationDraft((current) => ({
       ...current,
       properties: current.properties.map((property) =>
-        property.id === propertyId ? { ...property, [field]: value } : property
+        property.id === propertyId ? { ...property, ...updates } : property
       ),
+    }));
+  }
+
+  function resetPresentationPropertyField(propertyId: string, field: PresentationPropertyField) {
+    const baselineProperty = presentationBaseline.properties.find((property) => property.id === propertyId);
+    if (!baselineProperty) return;
+    const linkedImuField = field === "renditaAttuale"
+      ? "imuAttuale"
+      : field === "renditaAttribuibile"
+        ? "imuOttenibile"
+        : null;
+    const fields: PresentationPropertyField[] = linkedImuField ? [field, linkedImuField] : [field];
+    fields.forEach((resetField) => updatePresentationTouchedField(`${propertyId}:${resetField}`, false));
+    setPresentationDraft((current) => ({
+      ...current,
+      properties: current.properties.map((property) => property.id === propertyId
+        ? fields.reduce(
+          (next, resetField) => ({ ...next, [resetField]: baselineProperty[resetField] }),
+          property,
+        )
+        : property),
     }));
   }
 
@@ -7251,6 +7681,17 @@ function StudyDetail({
                         <td className="location-cell valuation-group-title">
                           <span><Layers3 size={15} /> Valutazione complessiva</span>
                           <small>{properties.length} unità · Sub {compactGroupValues(properties.map((property) => property.subalterno))}</small>
+                          <button
+                            className="valuation-group-editor-link"
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOpenGroupEditor(row.groupId);
+                            }}
+                          >
+                            <File size={13} />
+                            Editor complessivo
+                          </button>
                         </td>
                       )}
                       {visiblePropertyColumnIds.has("sheet") && <td title={compactGroupValues(properties.map((property) => property.foglio))}>{compactGroupValues(properties.map((property) => property.foglio))}</td>}
@@ -7391,9 +7832,12 @@ function StudyDetail({
       />
       <PresentationDataPreview
         draft={presentationDraft}
+        baseline={presentationBaseline}
+        manualFields={presentationTouchedFields}
         manualChanges={presentationTouchedFields.size}
         onClientNameChange={updatePresentationClientName}
         onPropertyFieldChange={updatePresentationPropertyField}
+        onPropertyFieldReset={resetPresentationPropertyField}
         onReset={resetPresentationDraft}
       />
       {newPropertyModalOpen && (

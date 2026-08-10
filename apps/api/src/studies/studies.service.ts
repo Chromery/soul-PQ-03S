@@ -8,6 +8,8 @@ import type {
   Property,
   PropertyDocument,
   PropertyPriceList,
+  PropertyValuationGroupAnalysisDraft,
+  StudyGroupAnalysisDraft,
   StudyVersion,
 } from "../generated/prisma/client.js";
 import {
@@ -25,11 +27,13 @@ import type { UpdateStudyDto } from "./dto/update-study.dto.js";
 type PropertyWithDocuments = Property & {
   documents: PropertyDocument[];
   analysisDraft: PlanAnalysisDraft | null;
+  valuationGroup: { analysisDraft: PropertyValuationGroupAnalysisDraft | null } | null;
   priceLists: Array<PropertyPriceList & { priceList: PriceList }>;
 };
 type StudyWithRelations = FeasibilityStudy & {
   properties: PropertyWithDocuments[];
   versions: StudyVersion[];
+  studyGroup: { analysisDraft: StudyGroupAnalysisDraft | null } | null;
 };
 
 type CreateStudyInput = {
@@ -78,6 +82,7 @@ export class StudiesService {
       include: {
         properties: { include: propertyInclude(), orderBy: propertyOrderBy() },
         versions: { orderBy: { versionNumber: "desc" } },
+        studyGroup: { include: { analysisDraft: true } },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -90,6 +95,7 @@ export class StudiesService {
       include: {
         properties: { include: propertyInclude(), orderBy: propertyOrderBy() },
         versions: { orderBy: { versionNumber: "desc" } },
+        studyGroup: { include: { analysisDraft: true } },
       },
     });
     return study ? this.toApiStudy(study) : null;
@@ -108,6 +114,7 @@ export class StudiesService {
       include: {
         properties: { include: propertyInclude(), orderBy: propertyOrderBy() },
         versions: { orderBy: { versionNumber: "desc" } },
+        studyGroup: { include: { analysisDraft: true } },
       },
     });
     if (input.status === "Concluso" && exists.status !== "Concluso") {
@@ -196,17 +203,36 @@ export class StudiesService {
   async ungroupStudies(groupId: string) {
     const group = await this.prisma.studyGroup.findUnique({
       where: { id: groupId },
-      select: { id: true },
+      select: {
+        id: true,
+        studies: { select: { id: true } },
+        analysisDraft: { select: { payload: true } },
+      },
     });
     if (!group) return null;
+    const studyIds = group.studies.map((study) => study.id);
+    const previousValues = previousValuationGroupPropertyValues(group.analysisDraft?.payload);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.feasibilityStudy.updateMany({
         where: { studyGroupId: groupId },
         data: { studyGroupId: null },
       });
+      for (const previous of previousValues) {
+        await tx.property.updateMany({
+          where: { id: previous.id, studyId: { in: studyIds } },
+          data: {
+            estimatedRendita: previous.estimatedRendita,
+            diffPercent: previous.diffPercent,
+            estimatedImu: previous.estimatedImu,
+            imuDiff: previous.imuDiff,
+            hasStudy: previous.hasStudy,
+          },
+        });
+      }
       await tx.studyGroup.delete({ where: { id: groupId } });
     });
+    for (const studyId of studyIds) await this.refreshStudyTotals(studyId);
     return this.list();
   }
 
@@ -318,17 +344,34 @@ export class StudiesService {
   async ungroupProperties(studyId: string, groupId: string) {
     const group = await this.prisma.propertyValuationGroup.findFirst({
       where: { id: groupId, studyId },
-      select: { id: true },
+      select: {
+        id: true,
+        analysisDraft: { select: { payload: true } },
+      },
     });
     if (!group) return null;
+    const previousValues = previousValuationGroupPropertyValues(group.analysisDraft?.payload);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.property.updateMany({
         where: { studyId, valuationGroupId: groupId },
         data: { valuationGroupId: null },
       });
+      for (const previous of previousValues) {
+        await tx.property.updateMany({
+          where: { id: previous.id, studyId },
+          data: {
+            estimatedRendita: previous.estimatedRendita,
+            diffPercent: previous.diffPercent,
+            estimatedImu: previous.estimatedImu,
+            imuDiff: previous.imuDiff,
+            hasStudy: previous.hasStudy,
+          },
+        });
+      }
       await tx.propertyValuationGroup.delete({ where: { id: groupId } });
     });
+    await this.refreshStudyTotals(studyId);
     return this.find(studyId);
   }
 
@@ -398,14 +441,16 @@ export class StudiesService {
   private async refreshStudyTotals(studyId: string) {
     const properties = await this.prisma.property.findMany({
       where: { studyId },
-      include: { analysisDraft: true },
+      include: {
+        analysisDraft: true,
+        valuationGroup: { include: { analysisDraft: true } },
+        study: { select: { studyGroup: { select: { analysisDraft: { select: { id: true } } } } } },
+      },
     });
+    const usesStudyGroupDraft = properties.some((property) => Boolean(property.study?.studyGroup?.analysisDraft));
     const originalRendita = sum(properties.map((property) => Number(property.currentRendita)));
     const totalRendita = sum(
-      properties.map((property) =>
-        estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
-        ?? Number(property.estimatedRendita),
-      ),
+      properties.map((property) => effectiveEstimatedRendita(property, usesStudyGroupDraft)),
     );
     const catDRendita = sum(
       properties
@@ -420,8 +465,7 @@ export class StudiesService {
     );
     const estimatedImu = sum(
       properties.map((property) => {
-        const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
-          ?? Number(property.estimatedRendita);
+        const estimatedRendita = effectiveEstimatedRendita(property, usesStudyGroupDraft);
         const calculation = estimatedRendita > 0 ? this.calculateImu(estimatedRendita, property) : null;
         return calculatedAmount(calculation) ?? (property.estimatedImu === null ? 0 : Number(property.estimatedImu));
       }),
@@ -439,11 +483,13 @@ export class StudiesService {
   }
 
   private toApiStudy(study: StudyWithRelations) {
-    const properties = study.properties.map((property) => this.toApiProperty(property));
+    const usesStudyGroupDraft = Boolean(study.studyGroup?.analysisDraft);
+    const { studyGroup: _studyGroup, ...studyFields } = study;
+    const properties = study.properties.map((property) => this.toApiProperty(property, usesStudyGroupDraft));
     const currentImu = sum(properties.map((property) => property.currentImu ?? 0));
     const estimatedImu = sum(properties.map((property) => property.estimatedImu ?? 0));
     return {
-      ...study,
+      ...studyFields,
       diffRendita: Number(study.diffRendita),
       diffImu: estimatedImu - currentImu,
       originalRendita: Number(study.originalRendita),
@@ -453,7 +499,7 @@ export class StudiesService {
     };
   }
 
-  private toApiProperty(property: PropertyWithDocuments) {
+  private toApiProperty(property: PropertyWithDocuments, usesStudyGroupDraft = false) {
     const formapsTerritory = formapsTerritoryByMunicipalityId(property.formapsMunicipalityId)
       ?? resolveFormapsTerritory(
         property.provincia,
@@ -465,9 +511,7 @@ export class StudiesService {
     const visura = property.documents.find((document) => document.type === DocumentType.VISURA);
     const elencoSubalterni = property.documents.find((document) => document.type === DocumentType.ELENCO_SUBALTERNI);
     const currentRendita = Number(property.currentRendita);
-    const estimatedRendita =
-      estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
-      ?? Number(property.estimatedRendita);
+    const estimatedRendita = effectiveEstimatedRendita(property, usesStudyGroupDraft);
     const currentImuCalculation = this.calculateImu(currentRendita, property);
     const estimatedImuCalculation = estimatedRendita > 0 || property.hasStudy
       ? this.calculateImu(estimatedRendita, property)
@@ -589,11 +633,50 @@ function propertyInclude() {
   return {
     documents: true,
     analysisDraft: true,
+    valuationGroup: { include: { analysisDraft: true } },
     priceLists: {
       include: { priceList: true },
       orderBy: { rank: "asc" as const },
     },
   };
+}
+
+function effectiveEstimatedRendita(property: {
+  estimatedRendita: number | { toString(): string };
+  oneri: boolean;
+  analysisDraft: PlanAnalysisDraft | null;
+  valuationGroup?: { analysisDraft: PropertyValuationGroupAnalysisDraft | null } | null;
+}, usesStudyGroupDraft = false) {
+  return usesStudyGroupDraft || property.valuationGroup?.analysisDraft
+    ? Number(property.estimatedRendita)
+    : estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
+      ?? Number(property.estimatedRendita);
+}
+
+function previousValuationGroupPropertyValues(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const entries = (value as Record<string, unknown>).previousPropertyValues;
+  if (!Array.isArray(entries)) return [];
+  return entries.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    if (
+      typeof record.id !== "string"
+      || typeof record.estimatedRendita !== "number"
+      || typeof record.diffPercent !== "number"
+      || (record.estimatedImu !== null && typeof record.estimatedImu !== "number")
+      || typeof record.imuDiff !== "number"
+      || typeof record.hasStudy !== "boolean"
+    ) return [];
+    return [{
+      id: record.id,
+      estimatedRendita: record.estimatedRendita,
+      diffPercent: record.diffPercent,
+      estimatedImu: record.estimatedImu as number | null,
+      imuDiff: record.imuDiff,
+      hasStudy: record.hasStudy,
+    }];
+  });
 }
 
 function propertyOrderBy() {
