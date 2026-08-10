@@ -8,7 +8,14 @@ import {
   resolveFormapsTerritory,
 } from "../formaps-territories/formaps-territory-resolver.js";
 import { DocumentType } from "../generated/prisma/enums.js";
-import type { FeasibilityStudy, PlanAnalysisDraft, Property, PropertyDocument, StudyVersion } from "../generated/prisma/client.js";
+import type {
+  FeasibilityStudy,
+  PlanAnalysisDraft,
+  Property,
+  PropertyDocument,
+  PropertyValuationGroupAnalysisDraft,
+  StudyVersion,
+} from "../generated/prisma/client.js";
 import { ImuService } from "../imu/imu.service.js";
 import type { ImuCalculation } from "../imu/imu.types.js";
 import { PriceListsService } from "../price-lists/price-lists.service.js";
@@ -28,6 +35,7 @@ type JsonRecord = Record<string, unknown>;
 type PropertyWithRelations = Property & {
   documents: PropertyDocument[];
   analysisDraft: PlanAnalysisDraft | null;
+  valuationGroup: { analysisDraft: PropertyValuationGroupAnalysisDraft | null } | null;
 };
 
 type StudyWithRelations = FeasibilityStudy & {
@@ -142,7 +150,11 @@ export class ErpSyncService {
     const studies = await this.prisma.feasibilityStudy.findMany({
       include: {
         properties: {
-          include: { documents: true, analysisDraft: true },
+          include: {
+            documents: true,
+            analysisDraft: true,
+            valuationGroup: { include: { analysisDraft: true } },
+          },
           orderBy: [{ displayOrder: "asc" }, { id: "asc" }],
         },
         versions: { orderBy: { versionNumber: "desc" } },
@@ -213,7 +225,7 @@ export class ErpSyncService {
       catDRendita: decimalNumber(metrics?.rendita_categoria_d, sum(normalizedProperties.filter((property) => isCategoryD(property.categoria)).map((property) => property.currentRendita))),
       commercialOwner: ownerName(input.commerciale_assegnato) ?? "Non assegnato",
       technicalOwner,
-      notes: optionalString(input.note) ?? "",
+      notes: erpStudyNotes(input) ?? "",
       erpUrl: optionalString(input.link_studio_erp),
       erpImportedAt: nullableDate(input.data_importazione_erp, "data_importazione_erp"),
       erpUpdatedAt: nullableDate(input.updated_at_erp, "updated_at_erp"),
@@ -240,7 +252,7 @@ export class ErpSyncService {
     const updateData = {
       ...createData,
       id: undefined,
-      notes: input.note === undefined ? undefined : createData.notes,
+      notes: input.note === undefined && input.note_studio === undefined ? undefined : createData.notes,
       technicalOwner: input.responsabile_tecnico === undefined ? existing?.technicalOwner ?? technicalOwner : technicalOwner,
     };
 
@@ -484,12 +496,17 @@ export class ErpSyncService {
       ...study.properties.map((property) => property.updatedAt),
       ...study.properties.flatMap((property) => property.documents.map((document) => document.updatedAt)),
       ...study.properties.flatMap((property) => (property.analysisDraft ? [property.analysisDraft.updatedAt] : [])),
+      ...study.properties.flatMap((property) => (
+        property.valuationGroup?.analysisDraft ? [property.valuationGroup.analysisDraft.updatedAt] : []
+      )),
     ]);
     const now = new Date();
     const calculatedProperties = study.properties.map((property) => {
       const currentRendita = Number(property.currentRendita);
-      const estimatedRendita = estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
-        ?? Number(property.estimatedRendita);
+      const estimatedRendita = property.valuationGroup?.analysisDraft
+        ? Number(property.estimatedRendita)
+        : estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
+          ?? Number(property.estimatedRendita);
       const currentCalculation = this.calculateImu(currentRendita, property);
       const estimatedCalculation = estimatedRendita > 0 || property.hasStudy
         ? this.calculateImu(estimatedRendita, property)
@@ -517,6 +534,7 @@ export class ErpSyncService {
       appuntamento_attivo: Boolean(study.nextAppointment && study.nextAppointment > now),
       commerciale_assegnato: study.commercialOwner,
       responsabile_tecnico: study.technicalOwner,
+      note_studio: study.notes,
       note: study.notes,
       link_studio_erp: study.erpUrl,
       modificato_il: modifiedAt.toISOString(),
@@ -614,6 +632,10 @@ function optionalString(value: unknown) {
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (typeof value !== "string") return undefined;
   return value.trim() || undefined;
+}
+
+export function erpStudyNotes(input: Record<string, unknown>) {
+  return optionalString(input.note_studio ?? input.note);
 }
 
 function requiredString(value: unknown, path: string) {

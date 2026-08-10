@@ -3038,6 +3038,78 @@ button.activity-item {
   background: #fffaf0;
 }
 
+.presentation-input-with-override {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.presentation-input-with-override input {
+  flex: 1 1 auto;
+}
+
+.presentation-input-with-override .manual-override-dot {
+  width: 16px;
+  height: 16px;
+  flex-basis: 16px;
+}
+
+.presentation-input-with-override .manual-override-dot > span {
+  width: 7px;
+  height: 7px;
+}
+
+.presentation-preview-info {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid #20b8cb;
+  color: #40566d;
+  background: #f2fbfd;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.valuation-group-editor-link {
+  width: fit-content;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 0 7px;
+  border: 1px solid #b8d7ff;
+  border-radius: 6px;
+  color: #105db8;
+  background: #eef6ff;
+  font-size: 10px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.valuation-group-editor-link:hover,
+.valuation-group-editor-link:focus-visible {
+  border-color: #6ba9ed;
+  outline: 0;
+  background: #dcecff;
+}
+
+.valuation-group-editor-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.valuation-group-editor-members span {
+  padding: 4px 6px;
+  border: 1px solid #d7e5f4;
+  border-radius: 999px;
+  color: #40566d;
+  background: #f7faff;
+  font-size: 10px;
+  font-weight: 750;
+}
+
 .presentation-preview-table-wrap {
   max-width: 100%;
   max-height: min(55dvh, 520px);

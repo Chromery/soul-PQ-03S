@@ -636,6 +636,10 @@ type CanvasBundle = {
 type PlanimetriaEditorProps = {
   study: EditorStudy;
   property: EditorProperty;
+  valuationGroup?: {
+    id: string;
+    properties: EditorProperty[];
+  };
   onBack: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   onDraftSaved?: (
@@ -654,6 +658,23 @@ type PlanimetriaEditorProps = {
     fileName: string,
     downloadUrl: string,
   ) => void;
+  onGroupDraftSaved?: (updates: Array<{
+    id: string;
+    estimatedRendita: number;
+    estimatedImu: number | null;
+    imuCalculation?: PropertyImuCalculation | null;
+  }>) => void;
+};
+
+type SavedValuationGroupDraft = SavedDraft & {
+  valuationGroupId: string;
+  estimatedImu: number | null;
+  properties: Array<{
+    id: string;
+    estimatedRendita: number;
+    estimatedImu: number | null;
+    imuCalculation?: PropertyImuCalculation | null;
+  }>;
 };
 
 const USAGES: UsageDefinition[] = [
@@ -1007,6 +1028,28 @@ function calculateImuWithRate(rendita: number, rate: CalculatedImu) {
     taxableBase,
     amount: roundCurrency(taxableBase * (rate.ratePercent / 100)),
   };
+}
+
+function calculateValuationGroupImu(rendita: number, properties: EditorProperty[]) {
+  if (properties.length === 0) return null;
+  const currentTotal = properties.reduce(
+    (sum, property) => sum + Math.max(0, property.currentRendita),
+    0,
+  );
+  let amount = 0;
+  for (const property of properties) {
+    const calculation = property.imuCalculation?.status === "calculated"
+      ? property.imuCalculation
+      : property.currentImuCalculation?.status === "calculated"
+        ? property.currentImuCalculation
+        : null;
+    if (!calculation) return null;
+    const share = currentTotal > 0
+      ? rendita * (Math.max(0, property.currentRendita) / currentTotal)
+      : rendita / properties.length;
+    amount += calculateImuWithRate(share, calculation).amount;
+  }
+  return roundCurrency(amount);
 }
 
 function imuFormula(rendita: number, taxableBase: number, amount: number, rate: CalculatedImu) {
@@ -1417,11 +1460,13 @@ function clonePageScales(source: Map<number, PageScaleState>) {
 export default function PlanimetriaEditor({
   study,
   property,
+  valuationGroup,
   onBack,
   onDirtyChange,
   onDraftSaved,
   onImuOverridesSave,
   onDocumentSaved,
+  onGroupDraftSaved,
 }: PlanimetriaEditorProps) {
   const editorRootRef = useRef<HTMLElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1544,6 +1589,11 @@ export default function PlanimetriaEditor({
   const [imuMultiplierInput, setImuMultiplierInput] = useState("");
   const [imuOverrideSaving, setImuOverrideSaving] = useState<"rate" | "multiplier" | null>(null);
   const [revision, setRevision] = useState(0);
+  const analysisTargetId = valuationGroup?.id ?? property.id;
+  const analysisDraftUrl = valuationGroup
+    ? `${API_BASE_URL}/property-valuation-groups/${encodeURIComponent(valuationGroup.id)}/analysis-draft`
+    : `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/analysis-draft`;
+  const scaleExtractionPropertyId = valuationGroup?.properties[0]?.id ?? property.id;
 
   function pageScaleFor(page: number): PageScaleState {
     if (page > 0 && page === currentPage) {
@@ -1890,6 +1940,9 @@ export default function PlanimetriaEditor({
   const editorEstimatedImu = estimatedImuRate
     ? calculateImuWithRate(totals.rendita, estimatedImuRate)
     : null;
+  const editorEstimatedImuAmount = valuationGroup
+    ? calculateValuationGroupImu(totals.rendita, valuationGroup.properties)
+    : editorEstimatedImu?.amount ?? null;
 
   const usageBreakdown = useMemo(() => {
     const byUsage = new Map<string, { usage: UsageDefinition; area: number }>();
@@ -2284,15 +2337,15 @@ export default function PlanimetriaEditor({
       let draft: SavedDraft | null = null;
       try {
         const response = await fetch(
-          `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/analysis-draft`,
+          analysisDraftUrl,
           { signal: abortController.signal },
         );
         if (response.ok) {
           const storedDraft = (await response.json()) as SavedDraft | null;
-          if (storedDraft?.version === 1 && storedDraft.propertyId === property.id) {
+          if (storedDraft?.version === 1 && storedDraft.propertyId === analysisTargetId) {
             draft = storedDraft;
             try {
-              window.localStorage.setItem(draftKey(property.id), JSON.stringify(storedDraft));
+              window.localStorage.setItem(draftKey(analysisTargetId), JSON.stringify(storedDraft));
             } catch {
               // Server persistence remains available when the browser draft quota is exceeded.
             }
@@ -2302,9 +2355,10 @@ export default function PlanimetriaEditor({
         if (error instanceof DOMException && error.name === "AbortError") return;
       }
 
-      if (!draft) draft = readSavedDraft(property.id);
+      if (!draft) draft = readSavedDraft(analysisTargetId);
       if (disposed) return;
       openInitialDocument(draft);
+      if (valuationGroup) return;
       try {
         const scaleResponse = await fetch(
           `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/scale-extraction-jobs/latest`,
@@ -2339,7 +2393,7 @@ export default function PlanimetriaEditor({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [property.id, linkedRemotePlan?.url, linkedRemotePlan?.fileName]);
+  }, [analysisTargetId, linkedRemotePlan?.url, linkedRemotePlan?.fileName]);
 
   function markDirty() {
     setDirty(true);
@@ -2434,6 +2488,10 @@ export default function PlanimetriaEditor({
 
   async function loadPdfFile(file: File | undefined) {
     if (!file) return;
+    if (valuationGroup) {
+      setStatus("Carica gli elaborati sulle singole unità prima di aprire l’editor complessivo");
+      return;
+    }
     try {
       const draft = pendingDraftRef.current;
       const restoresUpload =
@@ -2465,6 +2523,7 @@ export default function PlanimetriaEditor({
   }
 
   async function uploadPlanimetriaDocument(data: ArrayBuffer, name: string) {
+    if (valuationGroup) return null;
     setStatus("Salvataggio planimetria nello storage");
     try {
       const response = await fetch(
@@ -2495,6 +2554,7 @@ export default function PlanimetriaEditor({
 
   async function uploadElencoSubalterni(file: File | undefined) {
     if (!file) return;
+    if (valuationGroup) return;
     const name = file.name || "elenco-subalterni.pdf";
     if (file.type && file.type !== "application/pdf" && !name.toLowerCase().endsWith(".pdf")) {
       setStatus("Seleziona un PDF per l'elenco subalterni");
@@ -2590,7 +2650,7 @@ export default function PlanimetriaEditor({
     setScaleExtractionBusy(true);
     setScaleExtractionJob({
       id: "pending",
-      propertyId: property.id,
+      propertyId: scaleExtractionPropertyId,
       documentId: null,
       status: "PENDING",
       model: "",
@@ -2610,7 +2670,7 @@ export default function PlanimetriaEditor({
 
     try {
       const response = await fetch(
-        `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/scale-extraction-jobs`,
+        `${API_BASE_URL}/properties/${encodeURIComponent(scaleExtractionPropertyId)}/scale-extraction-jobs`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2618,7 +2678,7 @@ export default function PlanimetriaEditor({
             file_name: name,
             mime_type: "application/pdf",
             file_base64: arrayBufferToBase64(data),
-            apply_active_scale: true,
+            apply_active_scale: !valuationGroup,
           }),
         },
       );
@@ -2656,7 +2716,7 @@ export default function PlanimetriaEditor({
     for (let attempt = 0; attempt < 40; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, attempt < 4 ? 1200 : 2500));
       const response = await fetch(
-        `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/scale-extraction-jobs/${encodeURIComponent(jobId)}`,
+        `${API_BASE_URL}/properties/${encodeURIComponent(scaleExtractionPropertyId)}/scale-extraction-jobs/${encodeURIComponent(jobId)}`,
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const job = (await response.json()) as ScaleExtractionJob;
@@ -3016,7 +3076,7 @@ export default function PlanimetriaEditor({
     const savedTime = new Date().toISOString();
     const draft: SavedDraft = {
       version: 1,
-      propertyId: property.id,
+      propertyId: analysisTargetId,
       document: documentSource,
       savedAt: savedTime,
       sheetSize,
@@ -3061,7 +3121,7 @@ export default function PlanimetriaEditor({
 
     let localSaved = false;
     try {
-      window.localStorage.setItem(draftKey(property.id), JSON.stringify(draft));
+      window.localStorage.setItem(draftKey(analysisTargetId), JSON.stringify(draft));
       pendingDraftRef.current = draft;
       localSaved = true;
     } catch (error) {
@@ -3071,7 +3131,7 @@ export default function PlanimetriaEditor({
     setStatus("Salvataggio bozza");
     try {
       const response = await fetch(
-        `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/analysis-draft`,
+        analysisDraftUrl,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -3079,17 +3139,26 @@ export default function PlanimetriaEditor({
         },
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const savedDraft = (await response.json()) as SavedDraft;
+      const savedDraft = (await response.json()) as SavedDraft | SavedValuationGroupDraft;
       setSavedAt(savedTime);
       setDirty(false);
-      onDraftSaved?.(property.id, totals.rendita, savedDraft.estimatedImu, savedDraft.imuCalculation);
+      if (valuationGroup && "properties" in savedDraft) {
+        onGroupDraftSaved?.(savedDraft.properties);
+      } else if (!valuationGroup) {
+        onDraftSaved?.(
+          property.id,
+          totals.rendita,
+          savedDraft.estimatedImu,
+          savedDraft.imuCalculation,
+        );
+      }
       setStatus("Bozza salvata nel database");
     } catch (error) {
       console.error(error);
       if (localSaved) {
         setSavedAt(savedTime);
         setDirty(false);
-        onDraftSaved?.(property.id, totals.rendita);
+        if (!valuationGroup) onDraftSaved?.(property.id, totals.rendita);
         setStatus("Bozza salvata localmente; database non disponibile");
       } else {
         setStatus("Salvataggio non riuscito");
@@ -8355,10 +8424,14 @@ export default function PlanimetriaEditor({
         </button>
         <div className="plan-editor-title">
           <div>
-            <p className="eyebrow">Editor planimetrie</p>
+            <p className="eyebrow">{valuationGroup ? "Editor valutazione complessiva" : "Editor planimetrie"}</p>
             <h1>{property.address}</h1>
             <div className="plan-editor-meta-row">
-              <span>{study.company} · {property.comune} · categoria {property.categoria}</span>
+              <span>
+                {study.company} · {property.comune} · {valuationGroup
+                  ? `${valuationGroup.properties.length} unità combinate`
+                  : `categoria ${property.categoria}`}
+              </span>
               <span className="plan-editor-cadastral-data" aria-label="Dati catastali">
                 <span>Sez. <strong>{property.sezioneCatastale || "—"}</strong></span>
                 <span>Foglio <strong>{property.foglio || "—"}</strong></span>
@@ -8388,11 +8461,13 @@ export default function PlanimetriaEditor({
                 {scaleExtractionLabel}
               </span>
             )}
-            <button className="button secondary" onClick={() => fileInputRef.current?.click()}>
-              <Upload size={17} />
-              Carica planimetria
-            </button>
-            <div className="editor-map-actions editor-document-actions" aria-label="Documento elenco subalterni">
+            {!valuationGroup && (
+              <button className="button secondary" onClick={() => fileInputRef.current?.click()}>
+                <Upload size={17} />
+                Carica planimetria
+              </button>
+            )}
+            {!valuationGroup && <div className="editor-map-actions editor-document-actions" aria-label="Documento elenco subalterni">
               <span>Subalterni</span>
               <button
                 className="button secondary compact-button"
@@ -8421,8 +8496,8 @@ export default function PlanimetriaEditor({
                 <ClipboardList size={15} />
                 Apri PDF
               </button>
-            </div>
-            <div className="editor-map-actions" aria-label={`Apri indirizzo ${propertyLocation(property)} in mappe`}>
+            </div>}
+            {!valuationGroup && <div className="editor-map-actions" aria-label={`Apri indirizzo ${propertyLocation(property)} in mappe`}>
               <span>Apri in</span>
               <button
                 className="button secondary compact-button"
@@ -8448,7 +8523,7 @@ export default function PlanimetriaEditor({
                 <MapPin size={15} />
                 GMaps
               </a>
-            </div>
+            </div>}
             <button className="button primary" onClick={() => void saveDraft()} disabled={!canSaveDraft}>
               <FileText size={17} />
               Salva bozza
@@ -8604,8 +8679,17 @@ export default function PlanimetriaEditor({
                       className={documentSource?.kind === "remote" ? "active" : ""}
                       onClick={() => void loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName)}
                     >
-                      ERP
+                      {valuationGroup ? "PDF combinato" : "ERP"}
                     </button>
+                  </div>
+                )}
+                {valuationGroup && (
+                  <div className="valuation-group-editor-members">
+                    {valuationGroup.properties.map((member) => (
+                      <span key={member.id}>
+                        Sub {member.subalterno || "—"} · {member.documents.planimetria ? "PDF incluso" : "PDF assente"}
+                      </span>
+                    ))}
                   </div>
                 )}
                 <div className="loaded-doc">
@@ -9945,12 +10029,21 @@ export default function PlanimetriaEditor({
                     </span>
                     <span className="editor-imu-collapse-value">
                       <small>IMU prevista</small>
-                      <strong>{editorEstimatedImu ? moneyFormatter.format(editorEstimatedImu.amount) : "Non calcolabile"}</strong>
+                      <strong>{editorEstimatedImuAmount === null ? "Non calcolabile" : moneyFormatter.format(editorEstimatedImuAmount)}</strong>
                     </span>
                     <ChevronDown size={16} />
                   </button>
                   {!imuDetailsCollapsed && (
                     <div className="editor-summary-collapse-content editor-imu-collapse-content">
+                {valuationGroup && (
+                  <div className="editor-imu-summary valuation-group-imu-note">
+                    <span>Calcolo complessivo</span>
+                    <small>
+                      La nuova rendita viene ripartita proporzionalmente tra le {valuationGroup.properties.length} unità;
+                      l’IMU è poi calcolata per ciascuna categoria, aliquota e moltiplicatore e sommata nel totale.
+                    </small>
+                  </div>
+                )}
                 <div className="editor-imu-rate-control">
                   <div className="editor-imu-rate-head">
                     <span>Aliquota IMU applicata</span>
@@ -9963,7 +10056,7 @@ export default function PlanimetriaEditor({
                       inputMode="decimal"
                       value={imuRateInput}
                       placeholder={systemImuRate === null ? "Es. 1,06" : String(systemImuRate).replace(".", ",")}
-                      disabled={imuOverrideSaving !== null}
+                      disabled={Boolean(valuationGroup) || imuOverrideSaving !== null}
                       onChange={(event) => setImuRateInput(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
@@ -9978,7 +10071,7 @@ export default function PlanimetriaEditor({
                     <button
                       className="button secondary compact-button"
                       type="button"
-                      disabled={imuOverrideSaving !== null}
+                      disabled={Boolean(valuationGroup) || imuOverrideSaving !== null}
                       onClick={applyImuRateOverride}
                     >
                       {imuOverrideSaving === "rate" ? "Salvataggio..." : "Applica"}
@@ -9987,7 +10080,7 @@ export default function PlanimetriaEditor({
                       <button
                         className="inline-reset-button"
                         type="button"
-                        disabled={imuOverrideSaving !== null}
+                        disabled={Boolean(valuationGroup) || imuOverrideSaving !== null}
                         onClick={() => void saveImuOverride("rate", null)}
                       >
                         Ripristina sistema
@@ -10007,7 +10100,7 @@ export default function PlanimetriaEditor({
                       inputMode="decimal"
                       value={imuMultiplierInput}
                       placeholder={systemImuMultiplier === null ? "Es. 65" : String(systemImuMultiplier).replace(".", ",")}
-                      disabled={imuOverrideSaving !== null}
+                      disabled={Boolean(valuationGroup) || imuOverrideSaving !== null}
                       onChange={(event) => setImuMultiplierInput(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
@@ -10022,7 +10115,7 @@ export default function PlanimetriaEditor({
                     <button
                       className="button secondary compact-button"
                       type="button"
-                      disabled={imuOverrideSaving !== null}
+                      disabled={Boolean(valuationGroup) || imuOverrideSaving !== null}
                       onClick={applyImuMultiplierOverride}
                     >
                       {imuOverrideSaving === "multiplier" ? "Salvataggio..." : "Applica"}
@@ -10031,7 +10124,7 @@ export default function PlanimetriaEditor({
                       <button
                         className="inline-reset-button"
                         type="button"
-                        disabled={imuOverrideSaving !== null}
+                        disabled={Boolean(valuationGroup) || imuOverrideSaving !== null}
                         onClick={() => void saveImuOverride("multiplier", null)}
                       >
                         Ripristina sistema

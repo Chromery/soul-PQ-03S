@@ -48,6 +48,36 @@ export class PropertiesController {
   }
 }
 
+@Controller("property-valuation-groups")
+export class PropertyValuationGroupsController {
+  constructor(private readonly properties: PropertiesService) {}
+
+  @Get(":id/analysis-draft")
+  getDraft(@Param("id") valuationGroupId: string) {
+    return this.properties.getValuationGroupDraft(valuationGroupId);
+  }
+
+  @Put(":id/analysis-draft")
+  saveDraft(@Param("id") valuationGroupId: string, @Body() body: unknown) {
+    return this.properties.saveValuationGroupDraft(valuationGroupId, body);
+  }
+
+  @Get(":id/documents/planimetria/download")
+  async downloadCombinedPlan(
+    @Param("id") valuationGroupId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const document = await this.properties.openValuationGroupPlan(valuationGroupId);
+    response.setHeader("Content-Type", "application/pdf");
+    response.setHeader("Content-Disposition", contentDisposition(document.fileName));
+    response.setHeader("Content-Length", String(document.buffer.byteLength));
+    response.setHeader("Cache-Control", "private, max-age=60");
+    response.setHeader("X-Soul-PQ-Included-Properties", document.includedPropertyIds.join(","));
+    response.setHeader("X-Soul-PQ-Missing-Properties", document.missingPropertyIds.join(","));
+    return new StreamableFile(document.buffer);
+  }
+}
+
 function contentDisposition(fileName: string) {
   const fallback = fileName.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
   return `inline; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;

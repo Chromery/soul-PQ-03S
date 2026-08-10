@@ -74,7 +74,7 @@ paths:
                         nome: Mario Rossi
                         email: mario.rossi@soul.it
                       responsabile_tecnico: null
-                      note: Cliente prioritario. Verificare immobili in categoria D prima dell'appuntamento.
+                      note_studio: Cliente prioritario. Verificare immobili in categoria D prima dell'appuntamento.
                       link_studio_erp: https://erp.soul.example/studi/SF-47824-2026-001
                       versione_numero: 1
                       metriche:
@@ -189,6 +189,7 @@ paths:
                         appuntamento_attivo: true
                         commerciale_assegnato: Mario Rossi
                         responsabile_tecnico: Responsabile tecnico Soul
+                        note_studio: Cliente prioritario.
                         note: Cliente prioritario.
                         link_studio_erp: https://erp.soul.example/studi/SF-47824-2026-001
                         modificato_il: "2026-06-22T09:45:12.000Z"
@@ -408,6 +409,10 @@ components:
           description: Facoltativo. Se assente PQ usa il default backend.
         note:
           type: string
+          description: Alias retrocompatibile facoltativo di note_studio.
+        note_studio:
+          type: string
+          description: Note facoltative associate all'intero studio. Se assente, un aggiornamento ERP conserva il valore esistente.
         link_studio_erp:
           type: string
           format: uri
@@ -762,6 +767,10 @@ components:
           type: string
         note:
           type: string
+          description: Alias retrocompatibile delle note studio.
+        note_studio:
+          type: string
+          description: Note associate all'intero studio.
         link_studio_erp:
           type:
             - string

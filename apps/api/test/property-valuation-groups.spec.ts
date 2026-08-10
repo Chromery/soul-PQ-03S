@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
+import { PDFDocument } from "pdf-lib";
+import { Readable } from "node:stream";
+import { PropertiesService, allocateGroupRendita } from "../src/properties/properties.service.js";
 import {
   StudiesService,
   validatePropertyValuationGroupSelection,
@@ -15,6 +18,60 @@ test("la valutazione complessiva richiede almeno due immobili distinti", () => {
     validatePropertyValuationGroupSelection([" IMM-1 ", "IMM-2", "IMM-2"]),
     ["IMM-1", "IMM-2"],
   );
+});
+
+test("ripartisce la rendita complessiva in proporzione alle rendite attuali senza perdere centesimi", () => {
+  const allocations = allocateGroupRendita(1000.01, [
+    { id: "SUB-702", currentRendita: 300 },
+    { id: "SUB-703", currentRendita: 700 },
+  ]);
+
+  assert.equal(allocations.get("SUB-702"), 300);
+  assert.equal(allocations.get("SUB-703"), 700.01);
+  assert.equal(Array.from(allocations.values()).reduce((sum, value) => sum + value, 0), 1000.01);
+});
+
+test("combina gli elaborati delle unita in un unico PDF multipagina", async () => {
+  async function onePagePdf() {
+    const pdf = await PDFDocument.create();
+    pdf.addPage([200, 200]);
+    return Buffer.from(await pdf.save());
+  }
+  const firstPdf = await onePagePdf();
+  const secondPdf = await onePagePdf();
+  const prisma = {
+    propertyValuationGroup: {
+      findUnique: async () => ({
+        id: "GRUPPO-1",
+        studyId: "STUDIO-1",
+        properties: [
+          {
+            id: "IMM-1",
+            displayOrder: 0,
+            documents: [{ type: "PLANIMETRIA", storageKey: "erp/imm-1.pdf" }],
+          },
+          {
+            id: "IMM-2",
+            displayOrder: 1,
+            documents: [{ type: "PLANIMETRIA", storageKey: "erp/imm-2.pdf" }],
+          },
+        ],
+      }),
+    },
+  };
+  const storage = {
+    readPdfObject: async (key: string) => ({
+      stream: Readable.from(key.includes("imm-1") ? firstPdf : secondPdf),
+    }),
+  };
+  const service = new PropertiesService(prisma as never, storage as never, {} as never, {} as never);
+
+  const combined = await service.openValuationGroupPlan("GRUPPO-1");
+  const loaded = await PDFDocument.load(combined.buffer);
+
+  assert.equal(loaded.getPageCount(), 2);
+  assert.deepEqual(combined.includedPropertyIds, ["IMM-1", "IMM-2"]);
+  assert.deepEqual(combined.missingPropertyIds, []);
 });
 
 test("raggruppa soltanto immobili dello studio non gia raggruppati", async () => {
@@ -78,14 +135,38 @@ test("rifiuta di inserire in un nuovo gruppo un immobile gia raggruppato", async
 
 test("lo scioglimento conserva gli immobili e rimuove soltanto il gruppo", async () => {
   const writes: string[] = [];
+  const propertyUpdates: Array<Record<string, unknown>> = [];
   const prisma = {
+    property: {
+      findMany: async () => [],
+    },
+    feasibilityStudy: {
+      update: async () => {
+        writes.push("study-totals-refreshed");
+      },
+    },
     propertyValuationGroup: {
-      findFirst: async () => ({ id: "GRUPPO-1" }),
+      findFirst: async () => ({
+        id: "GRUPPO-1",
+        analysisDraft: {
+          payload: {
+            previousPropertyValues: [{
+              id: "IMM-1",
+              estimatedRendita: 810,
+              diffPercent: -19,
+              estimatedImu: 120,
+              imuDiff: -30,
+              hasStudy: true,
+            }],
+          },
+        },
+      }),
     },
     $transaction: async (operation: (tx: Record<string, any>) => Promise<void>) => operation({
       property: {
-        updateMany: async () => {
-          writes.push("properties-unlinked");
+        updateMany: async (input: Record<string, unknown>) => {
+          propertyUpdates.push(input);
+          writes.push(propertyUpdates.length === 1 ? "properties-unlinked" : "property-restored");
         },
       },
       propertyValuationGroup: {
@@ -100,5 +181,20 @@ test("lo scioglimento conserva gli immobili e rimuove soltanto il gruppo", async
 
   await service.ungroupProperties("STUDIO-1", "GRUPPO-1");
 
-  assert.deepEqual(writes, ["properties-unlinked", "group-deleted"]);
+  assert.deepEqual(writes, [
+    "properties-unlinked",
+    "property-restored",
+    "group-deleted",
+    "study-totals-refreshed",
+  ]);
+  assert.deepEqual(propertyUpdates[1], {
+    where: { id: "IMM-1", studyId: "STUDIO-1" },
+    data: {
+      estimatedRendita: 810,
+      diffPercent: -19,
+      estimatedImu: 120,
+      imuDiff: -30,
+      hasStudy: true,
+    },
+  });
 });
