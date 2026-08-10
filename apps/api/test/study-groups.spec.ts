@@ -74,7 +74,11 @@ test("scioglie il gruppo senza eliminare gli studi", async () => {
   const writes: string[] = [];
   const prisma = {
     studyGroup: {
-      findUnique: async () => ({ id: "GRUPPO-1" }),
+      findUnique: async () => ({
+        id: "GRUPPO-1",
+        studies: [{ id: "STUDIO-1" }, { id: "STUDIO-2" }],
+        analysisDraft: null,
+      }),
     },
     $transaction: async (operation: (tx: Record<string, any>) => Promise<void>) => operation({
       feasibilityStudy: {
@@ -91,9 +95,17 @@ test("scioglie il gruppo senza eliminare gli studi", async () => {
   };
   const service = new StudiesService(prisma as never, {} as never, {} as never);
   service.list = async () => [];
+  (service as any).refreshStudyTotals = async (studyId: string) => {
+    writes.push(`totals-${studyId}`);
+  };
 
   const result = await service.ungroupStudies("GRUPPO-1");
 
   assert.deepEqual(result, []);
-  assert.deepEqual(writes, ["studies-unlinked", "group-deleted"]);
+  assert.deepEqual(writes, [
+    "studies-unlinked",
+    "group-deleted",
+    "totals-STUDIO-1",
+    "totals-STUDIO-2",
+  ]);
 });

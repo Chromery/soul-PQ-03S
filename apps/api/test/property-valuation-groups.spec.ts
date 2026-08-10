@@ -74,6 +74,56 @@ test("combina gli elaborati delle unita in un unico PDF multipagina", async () =
   assert.deepEqual(combined.missingPropertyIds, []);
 });
 
+test("combina in un solo PDF gli immobili appartenenti a studi diversi dello stesso gruppo", async () => {
+  async function onePagePdf() {
+    const pdf = await PDFDocument.create();
+    pdf.addPage([200, 200]);
+    return Buffer.from(await pdf.save());
+  }
+  const firstPdf = await onePagePdf();
+  const secondPdf = await onePagePdf();
+  const prisma = {
+    studyGroup: {
+      findUnique: async () => ({
+        id: "GRUPPO-STUDI-1",
+        studies: [
+          {
+            id: "STUDIO-1",
+            createdAt: new Date("2026-01-01"),
+            properties: [{
+              id: "IMM-1",
+              displayOrder: 0,
+              documents: [{ type: "PLANIMETRIA", storageKey: "erp/studio-1.pdf" }],
+            }],
+          },
+          {
+            id: "STUDIO-2",
+            createdAt: new Date("2026-01-02"),
+            properties: [{
+              id: "IMM-2",
+              displayOrder: 0,
+              documents: [{ type: "PLANIMETRIA", storageKey: "erp/studio-2.pdf" }],
+            }],
+          },
+        ],
+      }),
+    },
+  };
+  const storage = {
+    readPdfObject: async (key: string) => ({
+      stream: Readable.from(key.includes("studio-1") ? firstPdf : secondPdf),
+    }),
+  };
+  const service = new PropertiesService(prisma as never, storage as never, {} as never, {} as never);
+
+  const combined = await service.openStudyGroupPlan("GRUPPO-STUDI-1");
+  const loaded = await PDFDocument.load(combined.buffer);
+
+  assert.equal(loaded.getPageCount(), 2);
+  assert.deepEqual(combined.includedPropertyIds, ["IMM-1", "IMM-2"]);
+  assert.deepEqual(combined.missingPropertyIds, []);
+});
+
 test("raggruppa soltanto immobili dello studio non gia raggruppati", async () => {
   const writes: Array<Record<string, unknown>> = [];
   const prisma = {

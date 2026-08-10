@@ -71,7 +71,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.58.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.58.1";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -677,7 +677,9 @@ type AppRoute =
   | { view: "activity" }
   | { view: "study"; studyId: string }
   | { view: "editor"; studyId: string; propertyId: string }
-  | { view: "groupEditor"; studyId: string; groupId: string };
+  | { view: "groupEditor"; studyId: string; groupId: string }
+  | { view: "studyGroup"; groupId: string }
+  | { view: "studyGroupEditor"; groupId: string };
 
 function routeFromLocation(): AppRoute {
   const params = new URLSearchParams(window.location.search);
@@ -698,6 +700,12 @@ function routeFromLocation(): AppRoute {
   }
   if (parts[0] === "studi" && parts[1] && parts[2] === "valutazioni" && parts[3] && parts[4] === "planimetria") {
     return { view: "groupEditor", studyId: parts[1], groupId: parts[3] };
+  }
+  if (parts[0] === "gruppi-studio" && parts[1] && parts[2] === "planimetria") {
+    return { view: "studyGroupEditor", groupId: parts[1] };
+  }
+  if (parts[0] === "gruppi-studio" && parts[1]) {
+    return { view: "studyGroup", groupId: parts[1] };
   }
   if (parts[0] === "immobili") return { view: "properties" };
   if (parts[0] === "analisi") return { view: "analysis" };
@@ -729,6 +737,10 @@ function pathForRoute(route: AppRoute) {
       return `/studi/${encodeURIComponent(route.studyId)}/immobili/${encodeURIComponent(route.propertyId)}/planimetria`;
     case "groupEditor":
       return `/studi/${encodeURIComponent(route.studyId)}/valutazioni/${encodeURIComponent(route.groupId)}/planimetria`;
+    case "studyGroup":
+      return `/gruppi-studio/${encodeURIComponent(route.groupId)}`;
+    case "studyGroupEditor":
+      return `/gruppi-studio/${encodeURIComponent(route.groupId)}/planimetria`;
   }
 }
 
@@ -740,8 +752,11 @@ function navSectionForRoute(route: AppRoute) {
       return "Studi di fattibilità";
     case "editor":
     case "groupEditor":
+    case "studyGroupEditor":
     case "properties":
       return "Immobili";
+    case "studyGroup":
+      return "Studi di fattibilità";
     case "analysis":
       return "Analisi";
     case "report":
@@ -2476,7 +2491,11 @@ function recalculateStudyRenditaTotals(study: FeasibilityStudy): FeasibilityStud
   };
 }
 
-function propertyForValuationGroupEditor(groupId: string, properties: PropertyItem[]): PropertyItem | null {
+function propertyForValuationGroupEditor(
+  groupId: string,
+  properties: PropertyItem[],
+  combinedPlanUrl = `/api/property-valuation-groups/${encodeURIComponent(groupId)}/documents/planimetria/download`,
+): PropertyItem | null {
   if (properties.length < 2) return null;
   const first = properties[0];
   const currentImu = nullableSum(properties.map((property) => property.currentImu));
@@ -2510,7 +2529,7 @@ function propertyForValuationGroupEditor(groupId: string, properties: PropertyIt
     },
     documentUrls: {
       planimetria: planCount > 0
-        ? `/api/property-valuation-groups/${encodeURIComponent(groupId)}/documents/planimetria/download`
+        ? combinedPlanUrl
         : null,
       visura: null,
       elencoSubalterni: null,
@@ -2683,7 +2702,7 @@ function App() {
     function handlePopState() {
       const nextRoute = routeFromLocation();
       if (
-        (route.view === "editor" || route.view === "groupEditor") &&
+        (route.view === "editor" || route.view === "groupEditor" || route.view === "studyGroupEditor") &&
         editorDirty &&
         !window.confirm("Sono presenti modifiche alla planimetria non salvate. Uscire comunque?")
       ) {
@@ -2700,7 +2719,7 @@ function App() {
 
   function navigate(nextRoute: AppRoute) {
     if (
-      (route.view === "editor" || route.view === "groupEditor") &&
+      (route.view === "editor" || route.view === "groupEditor" || route.view === "studyGroupEditor") &&
       editorDirty &&
       !window.confirm("Sono presenti modifiche alla planimetria non salvate. Uscire comunque?")
     ) {
@@ -2786,6 +2805,17 @@ function App() {
     : [];
   const editorGroupProperty = route.view === "groupEditor"
     ? propertyForValuationGroupEditor(route.groupId, editorGroupProperties)
+    : null;
+  const activeStudyGroupStudies = route.view === "studyGroup" || route.view === "studyGroupEditor"
+    ? studies.filter((study) => study.studyGroupId === route.groupId)
+    : [];
+  const activeStudyGroupProperties = activeStudyGroupStudies.flatMap((study) => study.properties);
+  const activeStudyGroupEditorProperty = route.view === "studyGroupEditor"
+    ? propertyForValuationGroupEditor(
+      route.groupId,
+      activeStudyGroupProperties,
+      `/api/study-groups/${encodeURIComponent(route.groupId)}/documents/planimetria/download`,
+    )
     : null;
 
   const totals = useMemo(() => {
@@ -3437,6 +3467,64 @@ function App() {
     );
   }
 
+  if (
+    route.view === "studyGroupEditor"
+    && activeStudyGroupStudies.length >= 2
+    && activeStudyGroupEditorProperty
+  ) {
+    return (
+      <Shell
+        query={query}
+        setQuery={handleGlobalQuery}
+        toast={toast}
+        activeSection={navSectionForRoute(route)}
+        onNavigate={navigate}
+        activityFeed={activityFeed}
+        editorMode
+      >
+        <Suspense fallback={<div className="editor-loading">Caricamento intero gruppo...</div>}>
+          <PlanimetriaEditor
+            study={{
+              id: route.groupId,
+              company: `Gruppo · ${activeStudyGroupStudies.length} studi`,
+              provincia: null,
+            }}
+            property={activeStudyGroupEditorProperty}
+            valuationGroup={{
+              id: route.groupId,
+              kind: "study",
+              properties: activeStudyGroupProperties,
+            }}
+            onBack={() => navigate({ view: "studyGroup", groupId: route.groupId })}
+            onDirtyChange={setEditorDirty}
+            onGroupDraftSaved={updateValuationGroupEstimatedValues}
+          />
+        </Suspense>
+      </Shell>
+    );
+  }
+
+  if (route.view === "studyGroup" && activeStudyGroupStudies.length >= 2) {
+    return (
+      <Shell
+        query={query}
+        setQuery={handleGlobalQuery}
+        toast={toast}
+        activeSection={navSectionForRoute(route)}
+        onNavigate={navigate}
+        activityFeed={activityFeed}
+      >
+        <StudyGroupDetail
+          groupId={route.groupId}
+          studies={activeStudyGroupStudies}
+          onBack={() => navigate({ view: "studies" })}
+          onOpenStudy={(studyId) => navigate({ view: "study", studyId })}
+          onOpenEditor={() => navigate({ view: "studyGroupEditor", groupId: route.groupId })}
+        />
+      </Shell>
+    );
+  }
+
   if (route.view === "study" && activeStudy) {
     return (
       <Shell
@@ -3559,6 +3647,7 @@ function App() {
     (route.view === "study" && !activeStudy)
     || (route.view === "editor" && (!editorStudy || !editorProperty))
     || (route.view === "groupEditor" && (!editorStudy || !editorGroupProperty))
+    || ((route.view === "studyGroup" || route.view === "studyGroupEditor") && activeStudyGroupStudies.length < 2)
   ) {
     return (
       <Shell
@@ -3982,6 +4071,7 @@ function App() {
                       onToggle={() => toggleStudyGroupExpansion(row.groupId)}
                       onSelect={() => toggleStudyGroupSelection(row.studies)}
                       onSelectStudy={toggleStudySelection}
+                      onOpenGroup={() => navigate({ view: "studyGroup", groupId: row.groupId })}
                       onOpenStudy={(studyId) => navigate({ view: "study", studyId })}
                       onUpdateStudy={updateStudy}
                     />
@@ -5365,6 +5455,139 @@ function PendingPage({
   );
 }
 
+function StudyGroupDetail({
+  groupId,
+  studies,
+  onBack,
+  onOpenStudy,
+  onOpenEditor,
+}: {
+  groupId: string;
+  studies: FeasibilityStudy[];
+  onBack: () => void;
+  onOpenStudy: (studyId: string) => void;
+  onOpenEditor: () => void;
+}) {
+  const properties = studies.flatMap((study) => (
+    study.properties.map((property) => ({ study, property }))
+  ));
+  const companies = Array.from(new Set(studies.map((study) => study.company)));
+  const currentRendita = sumNumbers(properties.map(({ property }) => property.currentRendita));
+  const estimatedRendita = sumNumbers(properties.map(({ property }) => property.estimatedRendita));
+  const currentImu = nullableSum(properties.map(({ property }) => property.currentImu));
+  const estimatedImu = nullableSum(properties.map(({ property }) => property.estimatedImu));
+  const planCount = properties.filter(({ property }) => Boolean(property.documentUrls?.planimetria)).length;
+
+  return (
+    <main className="detail-page study-group-detail-page">
+      <button className="back-link" type="button" onClick={onBack}>
+        <ChevronLeft size={17} />
+        Tutti gli studi
+      </button>
+
+      <section className="detail-hero study-group-detail-hero">
+        <div>
+          <p className="eyebrow">Gruppo di studi</p>
+          <h1>{companies.length} {companies.length === 1 ? "società" : "società"} · {studies.length} studi</h1>
+          <p>{companies.join(" · ")}</p>
+          <span className="study-group-detail-id">ID gruppo {groupId}</span>
+        </div>
+        <button className="button primary" type="button" disabled={properties.length === 0} onClick={onOpenEditor}>
+          <Layers3 size={17} />
+          Editor complessivo del gruppo
+        </button>
+      </section>
+
+      <section className="study-group-summary-grid" aria-label="Riepilogo gruppo">
+        <article><span>Studi</span><strong>{studies.length}</strong></article>
+        <article><span>Immobili</span><strong>{properties.length}</strong></article>
+        <article><span>Elaborati disponibili</span><strong>{planCount}/{properties.length}</strong></article>
+        <article><span>Rendita attuale</span><strong>{formatEuro(currentRendita)}</strong></article>
+        <article><span>Rendita prevista</span><strong>{formatEuro(estimatedRendita)}</strong></article>
+        <article><span>Variazione IMU</span><strong>{
+          currentImu === null || estimatedImu === null
+            ? "Non calcolabile"
+            : formatEuro(estimatedImu - currentImu)
+        }</strong></article>
+      </section>
+
+      <section className="detail-card study-group-members-section">
+        <div className="section-title">
+          <div>
+            <h2>Studi del gruppo</h2>
+            <span>Apri un singolo studio oppure lavora sull’intero gruppo dal pulsante in alto.</span>
+          </div>
+        </div>
+        <div className="study-group-member-grid">
+          {studies.map((study) => (
+            <button key={study.id} type="button" onClick={() => onOpenStudy(study.id)}>
+              <span className="study-group-member-icon"><Building2 size={18} /></span>
+              <span>
+                <strong>{study.company}</strong>
+                <small>{study.id} · {study.properties.length} immobili · {study.comune} ({study.provincia})</small>
+              </span>
+              <ChevronRight size={17} />
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="detail-card study-group-properties-section">
+        <div className="section-title">
+          <div>
+            <h2>Immobili dell’intero gruppo</h2>
+            <span>{properties.length} unità provenienti da {studies.length} studi</span>
+          </div>
+        </div>
+        <div className="table-scroll study-group-properties-table-wrap">
+          <table className="smart-table study-group-properties-table">
+            <thead>
+              <tr>
+                <th>Studio / società</th>
+                <th>Ubicazione</th>
+                <th>Foglio</th>
+                <th>Part.</th>
+                <th>Sub</th>
+                <th>Cat.</th>
+                <th>Rendita attuale</th>
+                <th>Rendita prevista</th>
+                <th>Elab.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {properties.map(({ study, property }) => (
+                <tr
+                  key={`${study.id}-${property.id}`}
+                  className="data-row-clickable"
+                  tabIndex={0}
+                  onClick={() => onOpenStudy(study.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") onOpenStudy(study.id);
+                  }}
+                >
+                  <td><strong>{study.company}</strong><small>{study.id}</small></td>
+                  <td title={propertyLocation(property)}>{propertyLocation(property)}</td>
+                  <td>{property.foglio || "—"}</td>
+                  <td>{property.particella || "—"}</td>
+                  <td>{property.subalterno || "—"}</td>
+                  <td>{property.categoria || "—"}</td>
+                  <td>{formatEuro(property.currentRendita)}</td>
+                  <td>{formatEuro(property.estimatedRendita)}</td>
+                  <td>
+                    <span className={`document-presence-dot${property.documentUrls?.planimetria ? " available" : ""}`}>
+                      {property.documentUrls?.planimetria ? "Sì" : "No"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function StudyGroupRows({
   groupId,
   studies,
@@ -5374,6 +5597,7 @@ function StudyGroupRows({
   onToggle,
   onSelect,
   onSelectStudy,
+  onOpenGroup,
   onOpenStudy,
   onUpdateStudy,
 }: {
@@ -5385,6 +5609,7 @@ function StudyGroupRows({
   onToggle: () => void;
   onSelect: () => void;
   onSelectStudy: (studyId: string) => void;
+  onOpenGroup: () => void;
   onOpenStudy: (studyId: string) => void;
   onUpdateStudy: (studyId: string, input: StudyUpdate) => Promise<boolean>;
 }) {
@@ -5461,6 +5686,17 @@ function StudyGroupRows({
             <div className="company-cell study-group-title">
               <strong>{studies.length} studi · {companyNames.length} società</strong>
               <span title={companyNames.join(", ")}>{companyNames.join(" · ")}</span>
+              <button
+                className="study-group-open-button"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenGroup();
+                }}
+              >
+                <Layers3 size={13} />
+                Apri intero gruppo
+              </button>
             </div>
           </td>
         )}

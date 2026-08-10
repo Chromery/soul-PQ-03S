@@ -14,6 +14,7 @@ import type {
   Property,
   PropertyDocument,
   PropertyValuationGroupAnalysisDraft,
+  StudyGroupAnalysisDraft,
   StudyVersion,
 } from "../generated/prisma/client.js";
 import { ImuService } from "../imu/imu.service.js";
@@ -41,6 +42,7 @@ type PropertyWithRelations = Property & {
 type StudyWithRelations = FeasibilityStudy & {
   properties: PropertyWithRelations[];
   versions: StudyVersion[];
+  studyGroup: { analysisDraft: StudyGroupAnalysisDraft | null } | null;
 };
 
 type NormalizedDocument = {
@@ -158,6 +160,7 @@ export class ErpSyncService {
           orderBy: [{ displayOrder: "asc" }, { id: "asc" }],
         },
         versions: { orderBy: { versionNumber: "desc" } },
+        studyGroup: { include: { analysisDraft: true } },
       },
       orderBy: { updatedAt: "desc" },
     });
@@ -499,11 +502,12 @@ export class ErpSyncService {
       ...study.properties.flatMap((property) => (
         property.valuationGroup?.analysisDraft ? [property.valuationGroup.analysisDraft.updatedAt] : []
       )),
+      ...(study.studyGroup?.analysisDraft ? [study.studyGroup.analysisDraft.updatedAt] : []),
     ]);
     const now = new Date();
     const calculatedProperties = study.properties.map((property) => {
       const currentRendita = Number(property.currentRendita);
-      const estimatedRendita = property.valuationGroup?.analysisDraft
+      const estimatedRendita = study.studyGroup?.analysisDraft || property.valuationGroup?.analysisDraft
         ? Number(property.estimatedRendita)
         : estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
           ?? Number(property.estimatedRendita);

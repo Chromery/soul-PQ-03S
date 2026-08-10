@@ -638,6 +638,7 @@ type PlanimetriaEditorProps = {
   property: EditorProperty;
   valuationGroup?: {
     id: string;
+    kind?: "property" | "study";
     properties: EditorProperty[];
   };
   onBack: () => void;
@@ -667,7 +668,8 @@ type PlanimetriaEditorProps = {
 };
 
 type SavedValuationGroupDraft = SavedDraft & {
-  valuationGroupId: string;
+  valuationGroupId?: string;
+  studyGroupId?: string;
   estimatedImu: number | null;
   properties: Array<{
     id: string;
@@ -1591,7 +1593,7 @@ export default function PlanimetriaEditor({
   const [revision, setRevision] = useState(0);
   const analysisTargetId = valuationGroup?.id ?? property.id;
   const analysisDraftUrl = valuationGroup
-    ? `${API_BASE_URL}/property-valuation-groups/${encodeURIComponent(valuationGroup.id)}/analysis-draft`
+    ? `${API_BASE_URL}/${valuationGroup.kind === "study" ? "study-groups" : "property-valuation-groups"}/${encodeURIComponent(valuationGroup.id)}/analysis-draft`
     : `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/analysis-draft`;
   const scaleExtractionPropertyId = valuationGroup?.properties[0]?.id ?? property.id;
 

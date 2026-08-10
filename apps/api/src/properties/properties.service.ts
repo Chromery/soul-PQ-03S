@@ -139,6 +139,30 @@ export class PropertiesService {
     };
   }
 
+  async getStudyGroupDraft(studyGroupId: string) {
+    await this.requireStudyGroup(studyGroupId);
+    const draft = await this.prisma.studyGroupAnalysisDraft.findUnique({
+      where: { studyGroupId },
+    });
+    if (!draft) return null;
+    const payload =
+      typeof draft.payload === "object" && draft.payload !== null && !Array.isArray(draft.payload)
+        ? (draft.payload as Record<string, unknown>)
+        : {};
+    const payloadHasScaleSource = typeof payload.scaleSource === "string";
+    return {
+      ...payload,
+      scaleSource: payloadHasScaleSource
+        ? normalizeScaleSource(payload.scaleSource)
+        : normalizeScaleSource(draft.scaleSource === "USER" ? "DEFAULT" : draft.scaleSource),
+      aiScaleDenominator: draft.aiScaleDenominator,
+      aiScaleLabel: draft.aiScaleLabel,
+      aiSheetSize: draft.aiSheetSize,
+      aiScaleConfidence: draft.aiScaleConfidence === null ? null : Number(draft.aiScaleConfidence),
+      aiScaleDetectedAt: draft.aiScaleDetectedAt?.toISOString() ?? null,
+    };
+  }
+
   async saveDraft(propertyId: string, body: unknown) {
     const payload = this.validatePayload(propertyId, body);
     const property = await this.requireProperty(propertyId);
@@ -315,6 +339,113 @@ export class PropertiesService {
     };
   }
 
+  async saveStudyGroupDraft(studyGroupId: string, body: unknown) {
+    const payload = this.validatePayload(studyGroupId, body);
+    const group = await this.requireStudyGroup(studyGroupId);
+    const properties = group.studies.flatMap((study) => study.properties);
+    if (properties.length === 0) {
+      throw new BadRequestException("Il gruppo di studi non contiene immobili da valutare");
+    }
+    const existingDraft = await this.prisma.studyGroupAnalysisDraft.findUnique({
+      where: { studyGroupId },
+      select: { payload: true },
+    });
+    const previousPropertyValues = previousValuationGroupPropertyValues(existingDraft?.payload)
+      ?? properties.map((property) => ({
+        id: property.id,
+        estimatedRendita: Number(property.estimatedRendita),
+        diffPercent: Number(property.diffPercent),
+        estimatedImu: property.estimatedImu === null ? null : Number(property.estimatedImu),
+        imuDiff: Number(property.imuDiff),
+        hasStudy: property.hasStudy,
+      }));
+    const savedAt = new Date(payload.savedAt);
+    const aiScaleDetectedAt = payload.aiScaleDetectedAt ? new Date(payload.aiScaleDetectedAt) : null;
+    const totalEstimatedRendita = estimatedRenditaFromDraftPayload(payload, false);
+    if (totalEstimatedRendita === null) {
+      throw new BadRequestException("La bozza complessiva non contiene una rendita stimata valida");
+    }
+    const allocations = allocateGroupRendita(
+      totalEstimatedRendita,
+      properties.map((property) => ({
+        id: property.id,
+        currentRendita: Number(property.currentRendita),
+      })),
+    );
+    const data = {
+      documentSource: (payload.document === null ? Prisma.JsonNull : payload.document) as Prisma.InputJsonValue,
+      payload: {
+        ...payload,
+        [PREVIOUS_GROUP_VALUES_KEY]: previousPropertyValues,
+      } as unknown as Prisma.InputJsonValue,
+      sheetSize: payload.sheetSize,
+      scaleDenominator: payload.scaleDenominator,
+      scaleSource: payload.scaleSource,
+      aiScaleDenominator: payload.aiScaleDenominator,
+      aiScaleLabel: payload.aiScaleLabel,
+      aiSheetSize: payload.aiSheetSize,
+      aiScaleConfidence: payload.aiScaleConfidence,
+      aiScaleDetectedAt,
+      totalArea: payload.totalArea,
+      totalEstimatedValue: totalEstimatedRendita,
+      savedAt,
+    };
+    const propertyUpdates = properties.map((property) => {
+      const estimatedRendita = allocations.get(property.id) ?? 0;
+      const currentImuCalculation = this.calculateImu(Number(property.currentRendita), property);
+      const estimatedImuCalculation = this.calculateImu(estimatedRendita, property);
+      const currentImu = calculatedAmount(currentImuCalculation)
+        ?? (property.currentImu === null ? null : Number(property.currentImu));
+      const estimatedImu = calculatedAmount(estimatedImuCalculation);
+      return {
+        property,
+        estimatedRendita,
+        currentImu,
+        estimatedImu,
+        imuCalculation: estimatedImuCalculation,
+      };
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.studyGroupAnalysisDraft.upsert({
+        where: { studyGroupId },
+        create: { studyGroupId, ...data },
+        update: data,
+      });
+      for (const update of propertyUpdates) {
+        await tx.property.update({
+          where: { id: update.property.id },
+          data: {
+            estimatedRendita: update.estimatedRendita,
+            diffPercent: percentageDiff(Number(update.property.currentRendita), update.estimatedRendita),
+            estimatedImu: update.estimatedImu,
+            imuDiff: update.estimatedImu === null || update.currentImu === null
+              ? 0
+              : update.estimatedImu - update.currentImu,
+            hasStudy: true,
+          },
+        });
+      }
+      await tx.studyGroup.update({
+        where: { id: studyGroupId },
+        data: { updatedAt: new Date() },
+      });
+    });
+    for (const study of group.studies) await this.refreshStudyTotals(study.id);
+    const estimatedImu = nullableSum(propertyUpdates.map((update) => update.estimatedImu));
+    return {
+      ...payload,
+      estimatedImu,
+      studyGroupId,
+      properties: propertyUpdates.map((update) => ({
+        id: update.property.id,
+        estimatedRendita: update.estimatedRendita,
+        estimatedImu: update.estimatedImu,
+        imuCalculation: update.imuCalculation,
+      })),
+    };
+  }
+
   async openValuationGroupPlan(valuationGroupId: string) {
     const group = await this.requireValuationGroup(valuationGroupId);
     const merged = await PDFDocument.create();
@@ -341,6 +472,39 @@ export class PropertiesService {
     return {
       buffer: Buffer.from(await merged.save()),
       fileName: `valutazione-complessiva-${valuationGroupId}.pdf`,
+      includedPropertyIds,
+      missingPropertyIds,
+    };
+  }
+
+  async openStudyGroupPlan(studyGroupId: string) {
+    const group = await this.requireStudyGroup(studyGroupId);
+    const merged = await PDFDocument.create();
+    const includedPropertyIds: string[] = [];
+    const missingPropertyIds: string[] = [];
+
+    for (const study of group.studies) {
+      for (const property of study.properties) {
+        const document = property.documents.find((item) => item.type === DocumentType.PLANIMETRIA)
+          ?? property.documents.find((item) => item.type === DocumentType.ELABORATO_PLANIMETRICO);
+        if (!document || document.storageKey.startsWith("demo/")) {
+          missingPropertyIds.push(property.id);
+          continue;
+        }
+        const stored = await this.storage.readPdfObject(document.storageKey);
+        const source = await PDFDocument.load(await streamToBuffer(stored.stream), { ignoreEncryption: true });
+        const pages = await merged.copyPages(source, source.getPageIndices());
+        pages.forEach((page) => merged.addPage(page));
+        includedPropertyIds.push(property.id);
+      }
+    }
+
+    if (merged.getPageCount() === 0) {
+      throw new NotFoundException("Nessun elaborato planimetrico disponibile per il gruppo di studi");
+    }
+    return {
+      buffer: Buffer.from(await merged.save()),
+      fileName: `valutazione-gruppo-studi-${studyGroupId}.pdf`,
       includedPropertyIds,
       missingPropertyIds,
     };
@@ -572,18 +736,41 @@ export class PropertiesService {
     return group;
   }
 
+  private async requireStudyGroup(studyGroupId: string) {
+    const group = await this.prisma.studyGroup.findUnique({
+      where: { id: studyGroupId },
+      include: {
+        studies: {
+          include: {
+            properties: {
+              include: { documents: true },
+              orderBy: [{ displayOrder: "asc" }, { id: "asc" }],
+            },
+          },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        },
+      },
+    });
+    if (!group || group.studies.length < 2) {
+      throw new NotFoundException("Gruppo di studi non trovato");
+    }
+    return group;
+  }
+
   private async refreshStudyTotals(studyId: string) {
     const properties = await this.prisma.property.findMany({
       where: { studyId },
       include: {
         analysisDraft: true,
         valuationGroup: { include: { analysisDraft: true } },
+        study: { select: { studyGroup: { select: { analysisDraft: { select: { id: true } } } } } },
       },
     });
+    const usesStudyGroupDraft = properties.some((property) => Boolean(property.study?.studyGroup?.analysisDraft));
     const originalRendita = sum(properties.map((property) => Number(property.currentRendita)));
     const totalRendita = sum(
       properties.map((property) =>
-        property.valuationGroup?.analysisDraft
+        usesStudyGroupDraft || property.valuationGroup?.analysisDraft
           ? Number(property.estimatedRendita)
           : estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
             ?? Number(property.estimatedRendita)),
@@ -601,7 +788,7 @@ export class PropertiesService {
     );
     const estimatedImu = sum(
       properties.map((property) => {
-        const estimatedRendita = property.valuationGroup?.analysisDraft
+        const estimatedRendita = usesStudyGroupDraft || property.valuationGroup?.analysisDraft
           ? Number(property.estimatedRendita)
           : estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
             ?? Number(property.estimatedRendita);
