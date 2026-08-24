@@ -6,5 +6,6 @@
 **/*.tsbuildinfo
 apps/api/src/generated/prisma
 editor planimetrie functional reference
-visual reference
+visual reference/*
+!visual reference/soul_realestate_rendita_catastale_new_template.pdf
 Assessments

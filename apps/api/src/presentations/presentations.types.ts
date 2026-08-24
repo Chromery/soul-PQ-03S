@@ -14,7 +14,7 @@ export type PresentationPropertySnapshot = {
 export type PresentationPropertyInput = PresentationPropertySnapshot;
 
 export type PresentationSnapshot = {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   generatedAt: string;
   studio: {
     id: string;
@@ -30,13 +30,13 @@ export type PresentationSnapshot = {
 
 export type PresentationSummary = {
   id: string;
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   studyId: string;
   propertyIds: string[];
   propertyCount: number;
   fileName: string;
   createdAt: string;
-  htmlUrl: string;
-  htmlDownloadUrl: string;
+  htmlUrl: string | null;
+  htmlDownloadUrl: string | null;
   pdfUrl: string;
 };

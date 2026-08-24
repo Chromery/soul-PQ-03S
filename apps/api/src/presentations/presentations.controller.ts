@@ -21,6 +21,11 @@ export class StudyPresentationsController {
   createV2(@Param("studyId") studyId: string, @Body() input: CreatePresentationDto) {
     return this.presentations.createV2(studyId, input.propertyIds, input.properties, input.clientName);
   }
+
+  @Post("v3")
+  createV3(@Param("studyId") studyId: string, @Body() input: CreatePresentationDto) {
+    return this.presentations.createV3(studyId, input.propertyIds, input.properties, input.clientName);
+  }
 }
 
 @Controller("presentations")
