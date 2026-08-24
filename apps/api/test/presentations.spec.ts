@@ -149,6 +149,9 @@ test("la presentazione v2 conserva i testi precedenti con le sole revisioni dei 
   assert.match(template, /tfoot td:not\(:first-child\) \{ text-align: right; \}/);
   assert.match(template, /font-family: "Raleway"/);
   assert.doesNotMatch(template, /font-family: "Inter"/);
+  assert.match(template, /html\.presentation-v3 \.economics \.eyebrow \{ color: #006b94; \}/);
+  assert.match(template, /html\.presentation-v3 \.economics h2 \{ color: #343534; font-weight: 700; \}/);
+  assert.match(template, /if \(data\.version === 3\) document\.documentElement\.classList\.add\("presentation-v3"\)/);
 });
 
 test("i campi modificati nell'anteprima vengono congelati nello snapshot della presentazione", async () => {
