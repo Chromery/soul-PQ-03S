@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
+import { PDFDocument } from "pdf-lib";
 import { PresentationsService } from "../src/presentations/presentations.service.js";
 import type { PresentationSnapshot } from "../src/presentations/presentations.types.js";
 
@@ -91,6 +92,37 @@ test("la presentazione v2 usa uno snapshot e un nome file distinti in formato st
   assert.equal(summary.htmlDownloadUrl, "/api/presentations/deck-1/html");
 });
 
+test("la presentazione v3 usa lo snapshot dinamico ed è disponibile soltanto in PDF", async () => {
+  const fixture = serviceFixture();
+  const summary = await fixture.service.createV3("studio-1", ["immobile-1"]);
+
+  const snapshot = fixture.snapshot();
+  assert.ok(snapshot);
+  assert.equal(snapshot.version, 3);
+  assert.equal(summary.version, 3);
+  assert.match(
+    fixture.fileName(),
+    /^Studio di fattibilità _ Ottimizzazione rendita catastale _ Cliente S\.p\.A _ \d{2}-\d{2}-\d{4} _ v3\.pdf$/,
+  );
+  assert.equal(summary.htmlUrl, null);
+  assert.equal(summary.htmlDownloadUrl, null);
+  assert.equal(summary.pdfUrl, "/api/presentations/deck-1/pdf");
+});
+
+test("il template PDF v3 contiene tutte le sei pagine A4 orizzontali", async () => {
+  const templateBytes = await readFile(
+    new URL("../../../visual reference/soul_realestate_rendita_catastale_new_template.pdf", import.meta.url),
+  );
+  const template = await PDFDocument.load(templateBytes);
+
+  assert.equal(template.getPageCount(), 6);
+  template.getPages().forEach((page) => {
+    const { width, height } = page.getSize();
+    assert.ok(Math.abs(width - 841.89) < 0.01);
+    assert.ok(Math.abs(height - 595.276) < 0.01);
+  });
+});
+
 test("la presentazione v2 conserva i testi precedenti con le sole revisioni dei feedback", async () => {
   const template = await readFile(
     new URL("../src/presentations/templates/soul-deck-v2.html", import.meta.url),
@@ -115,6 +147,11 @@ test("la presentazione v2 conserva i testi precedenti con le sole revisioni dei 
   assert.doesNotMatch(template, /data-date/);
   assert.match(template, /grid-template-columns: minmax\(0, 39fr\) minmax\(0, 61fr\)/);
   assert.match(template, /tfoot td:not\(:first-child\) \{ text-align: right; \}/);
+  assert.match(template, /font-family: "Raleway"/);
+  assert.doesNotMatch(template, /font-family: "Inter"/);
+  assert.match(template, /html\.presentation-v3 \.economics \.eyebrow \{ color: #006b94; \}/);
+  assert.match(template, /html\.presentation-v3 \.economics h2 \{ color: #343534; font-weight: 700; \}/);
+  assert.match(template, /if \(data\.version === 3\) document\.documentElement\.classList\.add\("presentation-v3"\)/);
 });
 
 test("i campi modificati nell'anteprima vengono congelati nello snapshot della presentazione", async () => {

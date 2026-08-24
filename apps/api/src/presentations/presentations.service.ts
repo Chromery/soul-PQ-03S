@@ -19,7 +19,12 @@ import type {
 const TEMPLATE_URLS = {
   1: new URL("./templates/soul-deck.html", import.meta.url),
   2: new URL("./templates/soul-deck-v2.html", import.meta.url),
+  3: new URL("./templates/soul-deck-v2.html", import.meta.url),
 } as const;
+const V3_BASE_PDF_URL = new URL(
+  "../../../../visual reference/soul_realestate_rendita_catastale_new_template.pdf",
+  import.meta.url,
+);
 const HYBRID_SLIDES_V1 = [
   { number: 3, format: "jpeg", quality: 93 },
   { number: 4, format: "jpeg", quality: 93 },
@@ -29,6 +34,9 @@ const HYBRID_SLIDES_V2 = [
   { number: 2, format: "jpeg", quality: 94 },
   { number: 3, format: "jpeg", quality: 94 },
   { number: 4, format: "jpeg", quality: 94 },
+  { number: 5, format: "png" },
+] as const;
+const HYBRID_SLIDES_V3 = [
   { number: 5, format: "png" },
 ] as const;
 const ASSET_URLS = {
@@ -44,7 +52,7 @@ const ASSET_URLS = {
 
 @Injectable()
 export class PresentationsService implements OnModuleDestroy {
-  private readonly templatePromises = new Map<1 | 2, Promise<string>>();
+  private readonly templatePromises = new Map<1 | 2 | 3, Promise<string>>();
   private browserPromise?: Promise<Browser>;
   private readonly pdfCache = new Map<string, Buffer>();
   private readonly chromiumExecutablePath: string;
@@ -75,8 +83,17 @@ export class PresentationsService implements OnModuleDestroy {
     return this.createVersion(2, studyId, propertyIds, propertyInputs, clientName);
   }
 
+  async createV3(
+    studyId: string,
+    propertyIds: string[],
+    propertyInputs: PresentationPropertyInput[] = [],
+    clientName?: string,
+  ) {
+    return this.createVersion(3, studyId, propertyIds, propertyInputs, clientName);
+  }
+
   private async createVersion(
-    version: 1 | 2,
+    version: 1 | 2 | 3,
     studyId: string,
     propertyIds: string[],
     propertyInputs: PresentationPropertyInput[] = [],
@@ -172,8 +189,12 @@ export class PresentationsService implements OnModuleDestroy {
 
   async renderHtml(id: string) {
     const deck = await this.findDeck(id);
+    const snapshot = deck.snapshot as unknown as PresentationSnapshot;
+    if (snapshot.version === 3) {
+      throw new BadRequestException("La presentazione v3 è disponibile esclusivamente in formato PDF");
+    }
     return {
-      html: await this.renderSnapshot(deck.snapshot as unknown as PresentationSnapshot),
+      html: await this.renderSnapshot(snapshot),
       fileName: deck.fileName.replace(/\.pdf$/i, ".html"),
     };
   }
@@ -192,9 +213,17 @@ export class PresentationsService implements OnModuleDestroy {
       await writeFile(htmlPath, html, "utf8");
       const browser = await this.browser();
       const exportConfig = exportConfigFor(snapshot.version);
-      await createNativePdf(browser, htmlPath, nativePdfPath, exportConfig);
       const captures = await captureHybridSlides(browser, htmlPath, temporaryDirectory, exportConfig);
-      const pdf = await composeHybridPdf(nativePdfPath, captures, snapshot, exportConfig.hybridSlides);
+      const pdf = snapshot.version === 3
+        ? await composeV3Pdf(captures, snapshot)
+        : await createHybridPdf(
+            browser,
+            htmlPath,
+            nativePdfPath,
+            captures,
+            snapshot,
+            exportConfig,
+          );
       this.cachePdf(id, pdf);
       return { pdf, fileName: deck.fileName };
     } finally {
@@ -219,7 +248,7 @@ export class PresentationsService implements OnModuleDestroy {
     ));
   }
 
-  private template(version: 1 | 2) {
+  private template(version: 1 | 2 | 3) {
     const existing = this.templatePromises.get(version);
     if (existing) return existing;
     const template = inlineTemplateAssets(TEMPLATE_URLS[version]);
@@ -265,13 +294,13 @@ type ExportConfig = {
   hybridSlides: readonly HybridSlide[];
 };
 
-function exportConfigFor(version: 1 | 2): ExportConfig {
-  return version === 2
+function exportConfigFor(version: 1 | 2 | 3): ExportConfig {
+  return version >= 2
     ? {
         viewport: { width: 1400, height: 990 },
         pageWidth: "297mm",
         pageHeight: "210mm",
-        hybridSlides: HYBRID_SLIDES_V2,
+        hybridSlides: version === 3 ? HYBRID_SLIDES_V3 : HYBRID_SLIDES_V2,
       }
     : {
         viewport: { width: 1600, height: 900 },
@@ -366,6 +395,18 @@ async function captureHybridSlides(
   return captures;
 }
 
+async function createHybridPdf(
+  browser: Browser,
+  htmlPath: string,
+  nativePdfPath: string,
+  captures: Map<number, HybridCapture>,
+  snapshot: PresentationSnapshot,
+  config: ExportConfig,
+) {
+  await createNativePdf(browser, htmlPath, nativePdfPath, config);
+  return composeHybridPdf(nativePdfPath, captures, snapshot, config.hybridSlides);
+}
+
 async function composeHybridPdf(
   nativePdfPath: string,
   captures: Map<number, HybridCapture>,
@@ -399,12 +440,55 @@ async function composeHybridPdf(
     page.drawImage(image, { x: 0, y: 0, width, height });
   }
 
+  setPdfMetadata(outputPdf, snapshot);
+  return Buffer.from(await outputPdf.save({ useObjectStreams: true }));
+}
+
+async function composeV3Pdf(
+  captures: Map<number, HybridCapture>,
+  snapshot: PresentationSnapshot,
+) {
+  const templatePdf = await PDFDocument.load(await readFile(fileURLToPath(V3_BASE_PDF_URL)));
+  if (templatePdf.getPageCount() < 5) {
+    throw new Error("Il template PDF v3 non contiene la pagina 5 da sostituire");
+  }
+
+  const economicsCapture = captures.get(5);
+  if (!economicsCapture) {
+    throw new Error("La pagina economica dinamica della presentazione v3 non è stata generata");
+  }
+
+  const outputPdf = await PDFDocument.create();
+  for (let pageIndex = 0; pageIndex < templatePdf.getPageCount(); pageIndex += 1) {
+    if (pageIndex !== 4) {
+      const [templatePage] = await outputPdf.copyPages(templatePdf, [pageIndex]);
+      outputPdf.addPage(templatePage);
+      continue;
+    }
+
+    const { width, height } = templatePdf.getPage(pageIndex).getSize();
+    const imageBytes = await readFile(economicsCapture.path);
+    const image = economicsCapture.format === "jpeg"
+      ? await outputPdf.embedJpg(imageBytes)
+      : await outputPdf.embedPng(imageBytes);
+    const page = outputPdf.addPage([width, height]);
+    page.drawImage(image, { x: 0, y: 0, width, height });
+  }
+
+  setPdfMetadata(outputPdf, snapshot, "Soul PDF v3 hybrid exporter");
+  return Buffer.from(await outputPdf.save({ useObjectStreams: true }));
+}
+
+function setPdfMetadata(
+  outputPdf: PDFDocument,
+  snapshot: PresentationSnapshot,
+  creator = "Soul slides hybrid exporter",
+) {
   outputPdf.setTitle("Ottimizzazione rendita catastale");
   outputPdf.setAuthor("Soul S.r.l.");
-  outputPdf.setCreator("Soul slides hybrid exporter");
+  outputPdf.setCreator(creator);
   outputPdf.setSubject(`Proposta per ${snapshot.studio.company}`);
   outputPdf.setCreationDate(new Date(snapshot.generatedAt));
-  return Buffer.from(await outputPdf.save({ useObjectStreams: true }));
 }
 
 async function inlineTemplateAssets(templateUrl: URL) {
@@ -435,8 +519,8 @@ function cadastralReference(foglio: string | null, particella: string | null, su
   return parts.length > 0 ? parts.join(" - ") : "Dati catastali non disponibili";
 }
 
-function presentationFileName(company: string, createdAt: Date, version: 1 | 2) {
-  if (version === 2) {
+function presentationFileName(company: string, createdAt: Date, version: 1 | 2 | 3) {
+  if (version >= 2) {
     const normalizedCompany = company
       .replace(/[\\/:*?"<>|]+/g, " ")
       .replace(/\s+/g, " ")
@@ -448,7 +532,8 @@ function presentationFileName(company: string, createdAt: Date, version: 1 | 2) 
       year: "numeric",
       timeZone: "Europe/Rome",
     }).format(createdAt).replaceAll("/", "-");
-    return `Studio di fattibilità _ Ottimizzazione rendita catastale _ ${normalizedCompany} _ ${date}.pdf`;
+    const versionSuffix = version === 3 ? " _ v3" : "";
+    return `Studio di fattibilità _ Ottimizzazione rendita catastale _ ${normalizedCompany} _ ${date}${versionSuffix}.pdf`;
   }
   const slug = company
     .normalize("NFD")
@@ -484,23 +569,25 @@ function toSummary(deck: {
   const propertyIds = Array.isArray(deck.propertyIds)
     ? deck.propertyIds.filter((value): value is string => typeof value === "string")
     : [];
+  const version = presentationVersion(deck.snapshot);
   return {
     id: deck.id,
-    version: presentationVersion(deck.snapshot),
+    version,
     studyId: deck.studyId,
     propertyIds,
     propertyCount: propertyIds.length,
     fileName: deck.fileName,
     createdAt: deck.createdAt.toISOString(),
-    htmlUrl: `/api/presentations/${encodeURIComponent(deck.id)}`,
-    htmlDownloadUrl: `/api/presentations/${encodeURIComponent(deck.id)}/html`,
+    htmlUrl: version === 3 ? null : `/api/presentations/${encodeURIComponent(deck.id)}`,
+    htmlDownloadUrl: version === 3 ? null : `/api/presentations/${encodeURIComponent(deck.id)}/html`,
     pdfUrl: `/api/presentations/${encodeURIComponent(deck.id)}/pdf`,
   };
 }
 
-function presentationVersion(snapshot: Prisma.JsonValue | PresentationSnapshot): 1 | 2 {
+function presentationVersion(snapshot: Prisma.JsonValue | PresentationSnapshot): 1 | 2 | 3 {
   if (snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) && "version" in snapshot) {
-    return snapshot.version === 2 ? 2 : 1;
+    if (snapshot.version === 3) return 3;
+    if (snapshot.version === 2) return 2;
   }
   return 1;
 }

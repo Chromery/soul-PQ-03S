@@ -112,6 +112,8 @@
     .economics { padding: 38px 52px 32px; background: #f3f7f9; }
     .economics-header { display: flex; align-items: end; justify-content: space-between; margin-bottom: 22px; }
     .economics h2 { margin: 8px 0 0; color: var(--blue); font-size: 38px; line-height: 1.05; letter-spacing: -.035em; }
+    html.presentation-v3 .economics .eyebrow { color: #006b94; }
+    html.presentation-v3 .economics h2 { color: #343534; font-weight: 700; }
     .economics-date { font-size: 14px; color: #647989; letter-spacing: .1em; text-transform: uppercase; }
     .properties-card, .summary-card, .saving-card { background: white; border: 1px solid #dce6ec; box-shadow: 0 7px 20px rgba(7,46,89,.055); }
     .card-title { padding: 14px 18px 13px; border-bottom: 1px solid #dce6ec; font-size: 14px; font-weight: 800; letter-spacing: .11em; color: var(--blue); text-transform: uppercase; }
@@ -286,6 +288,7 @@
   <nav class="viewer-nav" aria-label="Navigazione presentazione"><button type="button" id="previous">←</button><output id="counter">1 / 6</output><button type="button" id="next">→</button></nav>
   <script>
     const data = __SOUL_DECK_DATA__;
+    if (data.version === 3) document.documentElement.classList.add("presentation-v3");
     const euro = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const compactEuro = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
     const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[character]);

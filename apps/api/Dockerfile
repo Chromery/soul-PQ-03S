@@ -33,5 +33,6 @@ COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/apps/api/src/generated apps/api/src/generated
 COPY apps/api/prisma apps/api/prisma
 COPY apps/api/prisma.config.ts apps/api/prisma.config.ts
+COPY ["visual reference/soul_realestate_rendita_catastale_new_template.pdf", "visual reference/soul_realestate_rendita_catastale_new_template.pdf"]
 EXPOSE 3000
 CMD ["sh", "-c", "npm run db:migrate:deploy --workspace @soul/api && npm run db:seed --workspace @soul/api && npm run start --workspace @soul/api"]

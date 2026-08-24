@@ -227,14 +227,14 @@ type StudyTableRow =
 
 type PresentationDeck = {
   id: string;
-  version?: 1 | 2;
+  version?: 1 | 2 | 3;
   studyId: string;
   propertyIds: string[];
   propertyCount: number;
   fileName: string;
   createdAt: string;
-  htmlUrl: string;
-  htmlDownloadUrl: string;
+  htmlUrl: string | null;
+  htmlDownloadUrl: string | null;
   pdfUrl: string;
 };
 
@@ -6327,9 +6327,15 @@ function PresentationAction({
   study: FeasibilityStudy;
   draft: PresentationDraft;
   onNotice: (message: string) => void;
-  version?: 1 | 2;
+  version?: 1 | 2 | 3;
 }) {
   const isV2 = version === 2;
+  const isV3 = version === 3;
+  const actionLabel = isV3
+    ? "Generazione PDF v3"
+    : isV2
+      ? "Creazione presentazione v2"
+      : "Genera presentazione";
   const [menuOpen, setMenuOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedPropertyIds, setSelectedPropertyIds] = useState<string[]>(() => defaultPresentationPropertyIds(study));
@@ -6398,7 +6404,7 @@ function PresentationAction({
     }
     setBusy(true);
     try {
-      const endpoint = `${API_BASE_URL}/studies/${encodeURIComponent(study.id)}/presentations${isV2 ? "/v2" : ""}`;
+      const endpoint = `${API_BASE_URL}/studies/${encodeURIComponent(study.id)}/presentations${version === 1 ? "" : `/v${version}`}`;
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -6416,7 +6422,11 @@ function PresentationAction({
       const deck = (await response.json()) as PresentationDeck;
       setGeneratedDeck(deck);
       setLatestDeck(deck);
-      onNotice(isV2 ? "Presentazione v2 generata e salvata." : "Presentazione generata e salvata.");
+      onNotice(isV3
+        ? "PDF v3 generato e salvato."
+        : isV2
+          ? "Presentazione v2 generata e salvata."
+          : "Presentazione generata e salvata.");
     } catch (error) {
       console.error(error);
       onNotice(error instanceof Error ? error.message : "Impossibile generare la presentazione.");
@@ -6433,6 +6443,10 @@ function PresentationAction({
   }
 
   function downloadHtml(deck: PresentationDeck) {
+    if (!deck.htmlDownloadUrl) {
+      onNotice("Questa versione è disponibile esclusivamente in PDF.");
+      return;
+    }
     const link = document.createElement("a");
     link.href = deck.htmlDownloadUrl;
     link.click();
@@ -6440,6 +6454,10 @@ function PresentationAction({
   }
 
   async function copyDeckLink(deck: PresentationDeck) {
+    if (!deck.htmlUrl) {
+      onNotice("Questa versione è disponibile esclusivamente in PDF.");
+      return;
+    }
     const url = new URL(deck.htmlUrl, window.location.origin).toString();
     try {
       await copyText(url);
@@ -6460,7 +6478,7 @@ function PresentationAction({
           onClick={openGenerator}
         >
           <Presentation size={16} />
-          {isV2 ? "Creazione presentazione v2" : "Genera presentazione"}
+          {actionLabel}
         </button>
         <button
           className="button secondary split-toggle"
@@ -6474,22 +6492,28 @@ function PresentationAction({
         </button>
         {menuOpen && latestDeck && (
           <div className="split-menu">
-            <button type="button" onClick={() => window.open(latestDeck.htmlUrl, "_blank", "noopener,noreferrer")}>
-              <ExternalLink size={15} />
-              Apri ultima versione HTML
-            </button>
+            {latestDeck.htmlUrl && (
+              <button type="button" onClick={() => window.open(latestDeck.htmlUrl!, "_blank", "noopener,noreferrer")}>
+                <ExternalLink size={15} />
+                Apri ultima versione HTML
+              </button>
+            )}
             <button type="button" onClick={() => downloadPdf(latestDeck)}>
               <Download size={15} />
               Scarica ultima versione PDF
             </button>
-            <button type="button" onClick={() => downloadHtml(latestDeck)}>
-              <FileDown size={15} />
-              Scarica HTML autocontenuto
-            </button>
-            <button type="button" onClick={() => void copyDeckLink(latestDeck)}>
-              <Copy size={15} />
-              Copia link HTML
-            </button>
+            {latestDeck.htmlDownloadUrl && (
+              <button type="button" onClick={() => downloadHtml(latestDeck)}>
+                <FileDown size={15} />
+                Scarica HTML autocontenuto
+              </button>
+            )}
+            {latestDeck.htmlUrl && (
+              <button type="button" onClick={() => void copyDeckLink(latestDeck)}>
+                <Copy size={15} />
+                Copia link HTML
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -6512,7 +6536,7 @@ function PresentationAction({
             <div className="modal-head">
               <div>
                 <h2 id={`presentation-title-${study.id}`}>
-                  {isV2 ? "Creazione presentazione v2" : "Genera presentazione cliente"}
+                  {isV3 ? "Generazione PDF v3" : isV2 ? "Creazione presentazione v2" : "Genera presentazione cliente"}
                 </h2>
                 <p>{study.company} · {study.id}</p>
               </div>
@@ -6572,27 +6596,33 @@ function PresentationAction({
                 <div>
                   <CheckCircle2 size={19} />
                   <span>
-                    <strong>Presentazione pronta</strong>
+                    <strong>{isV3 ? "PDF v3 pronto" : "Presentazione pronta"}</strong>
                     {generatedDeck.propertyCount} immobili · {formatDateTime(generatedDeck.createdAt)}
                   </span>
                 </div>
                 <div>
-                  <a className="button secondary" href={generatedDeck.htmlUrl} target="_blank" rel="noreferrer">
-                    <ExternalLink size={15} />
-                    Apri HTML
-                  </a>
+                  {generatedDeck.htmlUrl && (
+                    <a className="button secondary" href={generatedDeck.htmlUrl} target="_blank" rel="noreferrer">
+                      <ExternalLink size={15} />
+                      Apri HTML
+                    </a>
+                  )}
                   <button className="button secondary" type="button" onClick={() => downloadPdf(generatedDeck)}>
                     <Download size={15} />
                     Scarica PDF
                   </button>
-                  <button className="button secondary" type="button" onClick={() => downloadHtml(generatedDeck)}>
-                    <FileDown size={15} />
-                    Scarica HTML
-                  </button>
-                  <button className="button secondary" type="button" onClick={() => void copyDeckLink(generatedDeck)}>
-                    <Copy size={15} />
-                    Copia link
-                  </button>
+                  {generatedDeck.htmlDownloadUrl && (
+                    <button className="button secondary" type="button" onClick={() => downloadHtml(generatedDeck)}>
+                      <FileDown size={15} />
+                      Scarica HTML
+                    </button>
+                  )}
+                  {generatedDeck.htmlUrl && (
+                    <button className="button secondary" type="button" onClick={() => void copyDeckLink(generatedDeck)}>
+                      <Copy size={15} />
+                      Copia link
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -6603,7 +6633,15 @@ function PresentationAction({
               </button>
               <button className="button primary" type="button" disabled={busy || selectedPropertyIds.length === 0 || selectionHasInvalidData} onClick={() => void generatePresentation()}>
                 <Presentation size={15} />
-                {busy ? "Generazione..." : generatedDeck ? "Genera nuova versione" : isV2 ? "Genera presentazione v2" : "Genera presentazione"}
+                {busy
+                  ? "Generazione..."
+                  : generatedDeck
+                    ? "Genera nuova versione"
+                    : isV3
+                      ? "Genera PDF v3"
+                      : isV2
+                        ? "Genera presentazione v2"
+                        : "Genera presentazione"}
               </button>
             </div>
           </section>
@@ -7474,6 +7512,12 @@ function StudyDetail({
             draft={presentationDraft}
             onNotice={onNotice}
             version={2}
+          />
+          <PresentationAction
+            study={study}
+            draft={presentationDraft}
+            onNotice={onNotice}
+            version={3}
           />
           <button className="button secondary" onClick={onExport}>
             <FileSpreadsheet size={17} />
