@@ -1031,6 +1031,35 @@ a.button {
   min-width: 0;
 }
 
+.study-group-name-heading,
+.study-group-name-editor,
+.study-group-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.study-group-name-heading h1 {
+  margin: 0;
+}
+
+.study-group-name-editor input {
+  width: min(520px, 60vw);
+  padding: 8px 10px;
+  border: 1px solid #9bb7d5;
+  border-radius: 8px;
+  color: #173154;
+  background: #fff;
+  font: inherit;
+  font-size: clamp(20px, 2.3vw, 30px);
+  font-weight: 800;
+}
+
+.study-group-hero-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .study-group-detail-id {
   display: inline-flex;
   margin-top: 7px;
@@ -1127,13 +1156,15 @@ a.button {
   white-space: nowrap;
 }
 
-.study-group-properties-table-wrap {
+.study-group-properties-table-wrap.resizable-table-wrap {
   overflow-x: auto;
 }
 
-.study-group-properties-table {
+.study-group-properties-table.resizable-data-table {
   width: 100%;
+  min-width: 1900px !important;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .study-group-properties-table th,
@@ -1162,6 +1193,11 @@ a.button {
 .study-group-properties-table td:first-child small {
   margin-top: 2px;
   color: #7b8b9e;
+}
+
+.study-group-properties-table .sort-header {
+  min-width: 0;
+  white-space: normal;
 }
 
 .document-presence-dot {
@@ -5706,6 +5742,32 @@ button.activity-item {
   white-space: nowrap;
 }
 
+.property-notes-tool textarea {
+  width: 100%;
+  min-height: 104px;
+  resize: vertical;
+  padding: 9px 10px;
+  border: 1px solid #cbd8e6;
+  border-radius: 7px;
+  color: #183657;
+  background: #fbfdff;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.property-notes-tool textarea:focus {
+  border-color: #4b93df;
+  outline: 2px solid rgb(75 147 223 / 16%);
+}
+
+.property-notes-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 8px;
+}
+
 .tool-block-chevron {
   color: var(--secondary);
   transition: transform 160ms ease;
@@ -7493,6 +7555,10 @@ button.activity-item {
 .plan-stage canvas:first-child {
   position: relative;
   display: block;
+}
+
+.plan-stage canvas.pdf-analysis-layer {
+  visibility: hidden;
 }
 
 .plan-empty-state {

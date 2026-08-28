@@ -33,7 +33,7 @@ type PropertyWithDocuments = Property & {
 type StudyWithRelations = FeasibilityStudy & {
   properties: PropertyWithDocuments[];
   versions: StudyVersion[];
-  studyGroup: { analysisDraft: StudyGroupAnalysisDraft | null } | null;
+  studyGroup: { name: string | null; analysisDraft: StudyGroupAnalysisDraft | null } | null;
 };
 
 type CreateStudyInput = {
@@ -181,7 +181,7 @@ export class StudiesService {
     const uniqueStudyIds = validateStudyGroupSelection(studyIds);
     const studies = await this.prisma.feasibilityStudy.findMany({
       where: { id: { in: uniqueStudyIds } },
-      select: { id: true, studyGroupId: true },
+      select: { id: true, studyGroupId: true, company: true },
     });
     if (studies.length !== uniqueStudyIds.length) {
       throw new BadRequestException("Uno o piu studi non esistono");
@@ -191,11 +191,23 @@ export class StudiesService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      const group = await tx.studyGroup.create({ data: {} });
+      const group = await tx.studyGroup.create({
+        data: { name: defaultStudyGroupName(studies.map((study) => study.company)) },
+      });
       await tx.feasibilityStudy.updateMany({
         where: { id: { in: uniqueStudyIds } },
         data: { studyGroupId: group.id },
       });
+    });
+    return this.list();
+  }
+
+  async updateStudyGroup(groupId: string, name: string) {
+    const group = await this.prisma.studyGroup.findUnique({ where: { id: groupId }, select: { id: true } });
+    if (!group) return null;
+    await this.prisma.studyGroup.update({
+      where: { id: groupId },
+      data: { name: name.trim() },
     });
     return this.list();
   }
@@ -490,6 +502,7 @@ export class StudiesService {
     const estimatedImu = sum(properties.map((property) => property.estimatedImu ?? 0));
     return {
       ...studyFields,
+      studyGroupName: study.studyGroup?.name ?? null,
       diffRendita: Number(study.diffRendita),
       diffImu: estimatedImu - currentImu,
       originalRendita: Number(study.originalRendita),
@@ -535,6 +548,7 @@ export class StudiesService {
       valuationGroupId: property.valuationGroupId,
       address: property.address,
       humanReadableAddress: property.humanReadableAddress,
+      notes: property.notes,
       comune: property.comune,
       provincia: property.provincia,
       formapsComune: formapsTerritory?.municipality ?? null,
@@ -832,4 +846,10 @@ function sum(values: number[]) {
 
 function calculatedAmount(calculation: ImuCalculation | null) {
   return calculation?.status === "calculated" ? calculation.amount : null;
+}
+
+function defaultStudyGroupName(companies: Array<string | null | undefined>) {
+  const uniqueCompanies = Array.from(new Set(companies.map((company) => company?.trim() ?? "").filter(Boolean)));
+  const label = uniqueCompanies.length > 0 ? uniqueCompanies.join(" + ") : "Studi selezionati";
+  return `Gruppo ${label}`.slice(0, 240);
 }

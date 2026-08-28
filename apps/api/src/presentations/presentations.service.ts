@@ -52,6 +52,13 @@ const ASSET_URLS = {
   __ASSET_HANDSHAKE__: { url: new URL("./templates/assets/soul-handshake.png", import.meta.url), contentType: "image/png" },
 } as const;
 
+type PresentationStudy = NonNullable<Awaited<ReturnType<StudiesService["find"]>>>;
+type PresentationSourceProperty = {
+  study: PresentationStudy;
+  property: PresentationStudy["properties"][number];
+};
+type PresentationOwner = { studyId: string; studyGroupId?: never } | { studyId?: never; studyGroupId: string };
+
 @Injectable()
 export class PresentationsService implements OnModuleDestroy {
   private readonly templatePromises = new Map<1 | 2 | 3, Promise<string>>();
@@ -95,6 +102,42 @@ export class PresentationsService implements OnModuleDestroy {
     return this.createVersion(3, studyId, propertyIds, propertyInputs, clientName);
   }
 
+  async createStudyGroupV3(
+    studyGroupId: string,
+    propertyIds: string[],
+    propertyInputs: PresentationPropertyInput[] = [],
+    clientName?: string,
+  ) {
+    const group = await this.prisma.studyGroup.findUnique({
+      where: { id: studyGroupId },
+      select: { id: true, name: true, studies: { select: { id: true }, orderBy: { createdAt: "asc" } } },
+    });
+    if (!group) throw new NotFoundException("Gruppo studi non trovato");
+    const studies = await Promise.all(group.studies.map(({ id }) => this.studies.find(id)));
+    if (studies.some((study) => !study)) throw new NotFoundException("Uno studio del gruppo non è più disponibile");
+    const resolvedStudies = studies as PresentationStudy[];
+    const groupName = normalizedPresentationText(group.name)
+      || defaultStudyGroupName(resolvedStudies.map((study) => study.company));
+    return this.createFromSources({
+      version: 3,
+      owner: { studyGroupId },
+      clientName: normalizePresentationText(clientName, groupName),
+      studio: {
+        id: group.id,
+        vat: uniquePresentationText(resolvedStudies.map((study) => study.vat)),
+        comune: uniquePresentationText(resolvedStudies.map((study) => study.comune)),
+        provincia: uniquePresentationText(resolvedStudies.map((study) => study.provincia)),
+        commercialOwner: uniquePresentationText(resolvedStudies.map((study) => study.commercialOwner)),
+        technicalOwner: uniquePresentationText(resolvedStudies.map((study) => study.technicalOwner)),
+      },
+      sources: resolvedStudies.flatMap((study) => (
+        study.properties.map((property) => ({ study, property }))
+      )),
+      propertyIds,
+      propertyInputs,
+    });
+  }
+
   private async createVersion(
     version: 1 | 2 | 3,
     studyId: string,
@@ -105,19 +148,48 @@ export class PresentationsService implements OnModuleDestroy {
     const study = await this.studies.find(studyId);
     if (!study) throw new NotFoundException("Studio non trovato");
 
+    return this.createFromSources({
+      version,
+      owner: { studyId: study.id },
+      clientName: normalizePresentationText(clientName, study.company),
+      studio: {
+        id: study.id,
+        vat: study.vat,
+        comune: study.comune,
+        provincia: study.provincia,
+        commercialOwner: study.commercialOwner,
+        technicalOwner: study.technicalOwner,
+      },
+      sources: study.properties.map((property) => ({ study, property })),
+      propertyIds,
+      propertyInputs,
+    });
+  }
+
+  private async createFromSources(input: {
+    version: 1 | 2 | 3;
+    owner: PresentationOwner;
+    clientName: string;
+    studio: Omit<PresentationSnapshot["studio"], "company">;
+    sources: PresentationSourceProperty[];
+    propertyIds: string[];
+    propertyInputs: PresentationPropertyInput[];
+  }) {
+    const { version, owner, clientName, studio, sources, propertyIds, propertyInputs } = input;
+
     const requestedIds = new Set(propertyIds);
-    const selectedProperties = study.properties.filter((property) => requestedIds.has(property.id));
-    if (selectedProperties.length !== propertyIds.length) {
-      const availableIds = new Set(study.properties.map((property) => property.id));
+    const selectedSources = sources.filter(({ property }) => requestedIds.has(property.id));
+    if (selectedSources.length !== propertyIds.length) {
+      const availableIds = new Set(sources.map(({ property }) => property.id));
       const invalidIds = propertyIds.filter((propertyId) => !availableIds.has(propertyId));
       throw new BadRequestException(
         invalidIds.length > 0
-          ? `Gli immobili ${invalidIds.join(", ")} non appartengono allo studio`
+          ? `Gli immobili ${invalidIds.join(", ")} non appartengono alla selezione`
           : "La selezione immobili contiene duplicati",
       );
     }
 
-    const selectedIdSet = new Set(selectedProperties.map((property) => property.id));
+    const selectedIdSet = new Set(selectedSources.map(({ property }) => property.id));
     const invalidInputIds = propertyInputs
       .map((property) => property.id)
       .filter((propertyId) => !selectedIdSet.has(propertyId));
@@ -129,7 +201,7 @@ export class PresentationsService implements OnModuleDestroy {
     const propertyInputById = new Map(propertyInputs.map((property) => [property.id, property]));
 
     const generatedAt = new Date();
-    const snapshotProperties = await Promise.all(selectedProperties.map(async (property) => {
+    const snapshotProperties = await Promise.all(selectedSources.map(async ({ study, property }) => {
       const input = propertyInputById.get(property.id);
       let humanReadableAddress = normalizedPresentationText(property.humanReadableAddress);
       if (!humanReadableAddress) {
@@ -180,21 +252,16 @@ export class PresentationsService implements OnModuleDestroy {
       version,
       generatedAt: generatedAt.toISOString(),
       studio: {
-        id: study.id,
-        company: normalizePresentationText(clientName, study.company),
-        vat: study.vat,
-        comune: study.comune,
-        provincia: study.provincia,
-        commercialOwner: study.commercialOwner,
-        technicalOwner: study.technicalOwner,
+        ...studio,
+        company: clientName,
       },
       immobili: snapshotProperties,
     };
     const fileName = presentationFileName(snapshot.studio.company, generatedAt, version);
     const deck = await this.prisma.presentationDeck.create({
       data: {
-        studyId: study.id,
-        propertyIds: selectedProperties.map((property) => property.id),
+        ...owner,
+        propertyIds: selectedSources.map(({ property }) => property.id),
         snapshot: snapshot as unknown as Prisma.InputJsonValue,
         fileName,
       },
@@ -205,6 +272,15 @@ export class PresentationsService implements OnModuleDestroy {
   async list(studyId: string) {
     const decks = await this.prisma.presentationDeck.findMany({
       where: { studyId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+    return decks.map(toSummary);
+  }
+
+  async listStudyGroup(studyGroupId: string) {
+    const decks = await this.prisma.presentationDeck.findMany({
+      where: { studyGroupId },
       orderBy: { createdAt: "desc" },
       take: 20,
     });
@@ -579,6 +655,16 @@ function normalizedPresentationText(value: string | null | undefined) {
   return normalized || null;
 }
 
+function uniquePresentationText(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map(normalizedPresentationText).filter((value): value is string => Boolean(value))))
+    .join(" · ");
+}
+
+function defaultStudyGroupName(companies: string[]) {
+  const names = uniquePresentationText(companies);
+  return `Gruppo ${names || "studi selezionati"}`.slice(0, 240);
+}
+
 function presentationAddress(
   input: string | undefined,
   humanReadableAddress: string | null,
@@ -634,7 +720,8 @@ function toOptionalCurrencyPrecision(value: number | null | undefined) {
 
 function toSummary(deck: {
   id: string;
-  studyId: string;
+  studyId: string | null;
+  studyGroupId: string | null;
   propertyIds: Prisma.JsonValue;
   snapshot: Prisma.JsonValue | PresentationSnapshot;
   fileName: string;
@@ -648,6 +735,7 @@ function toSummary(deck: {
     id: deck.id,
     version,
     studyId: deck.studyId,
+    studyGroupId: deck.studyGroupId,
     propertyIds,
     propertyCount: propertyIds.length,
     fileName: deck.fileName,

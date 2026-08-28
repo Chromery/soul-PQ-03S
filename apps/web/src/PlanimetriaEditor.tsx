@@ -31,6 +31,7 @@ import {
   RotateCcw,
   RotateCw,
   Ruler,
+  Save,
   Circle,
   Square,
   Sparkles,
@@ -64,6 +65,7 @@ const ZOOM_KEYBOARD_STEP = 10;
 const ZOOM_SLIDER_STEP = 1;
 const ZOOM_WHEEL_SENSITIVITY = 0.00045;
 const ZOOM_WHEEL_MAX_DELTA = 240;
+const PDF_DISPLAY_RESOLUTION_MULTIPLIER = 2;
 const SMART_TRACE_DEFAULTS = DEFAULT_EDITOR_PREFERENCES.smartSelection;
 
 type PdfDocument = Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>;
@@ -165,6 +167,7 @@ type EditorPriceList = {
 type EditorProperty = {
   id: string;
   address: string;
+  notes?: string;
   comune: string;
   provincia?: string | null;
   formapsComune?: string | null;
@@ -653,6 +656,7 @@ type PlanimetriaEditorProps = {
     propertyId: string,
     patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
   ) => Promise<ImuOverrideUpdate>;
+  onNotesSave?: (propertyId: string, notes: string) => Promise<boolean>;
   onDocumentSaved?: (
     propertyId: string,
     type: "planimetria" | "elenco_subalterni",
@@ -1467,10 +1471,12 @@ export default function PlanimetriaEditor({
   onDirtyChange,
   onDraftSaved,
   onImuOverridesSave,
+  onNotesSave,
   onDocumentSaved,
   onGroupDraftSaved,
 }: PlanimetriaEditorProps) {
   const editorRootRef = useRef<HTMLElement | null>(null);
+  const pdfDisplayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const waveCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1504,6 +1510,9 @@ export default function PlanimetriaEditor({
   const areaTableResizeRef = useRef<{ startY: number; startHeight: number; pointerId: number } | null>(null);
 
   const [status, setStatus] = useState("Caricamento planimetria");
+  const [notesDraft, setNotesDraft] = useState(property.notes ?? "");
+  const [savedNotes, setSavedNotes] = useState(property.notes ?? "");
+  const [notesSaving, setNotesSaving] = useState(false);
   const [busy, setBusy] = useState(false);
   const [fileName, setFileName] = useState("");
   const [currentPage, setCurrentPage] = useState(0);
@@ -1991,6 +2000,12 @@ export default function PlanimetriaEditor({
   useEffect(() => {
     setPriceListDropdownOpen(true);
   }, [property.id]);
+
+  useEffect(() => {
+    const notes = property.notes ?? "";
+    setNotesDraft(notes);
+    setSavedNotes(notes);
+  }, [property.id, property.notes]);
 
   useEffect(() => {
     setAreaTuningTrials(readAreaTuningTrials(property.id));
@@ -2589,6 +2604,25 @@ export default function PlanimetriaEditor({
     } finally {
       setSubalterniUploading(false);
       if (subalterniInputRef.current) subalterniInputRef.current.value = "";
+    }
+  }
+
+  async function savePropertyNotes() {
+    if (!onNotesSave || notesSaving || notesDraft === savedNotes) return;
+    setNotesSaving(true);
+    setStatus("Salvataggio note immobile");
+    try {
+      const saved = await onNotesSave(property.id, notesDraft);
+      if (!saved) throw new Error("Salvataggio note immobile non riuscito");
+      const normalized = notesDraft.trim();
+      setNotesDraft(normalized);
+      setSavedNotes(normalized);
+      setStatus("Note immobile salvate");
+    } catch (error) {
+      console.error(error);
+      setStatus(error instanceof Error ? error.message : "Salvataggio note immobile non riuscito");
+    } finally {
+      setNotesSaving(false);
     }
   }
 
@@ -3332,6 +3366,9 @@ export default function PlanimetriaEditor({
       const width = Math.round(viewport.width);
       const height = Math.round(viewport.height);
       const { pdfCanvas, maskCanvas, waveCanvas, pdf } = getCanvases();
+      const pdfDisplayCanvas = pdfDisplayCanvasRef.current;
+      const pdfDisplay = pdfDisplayCanvas?.getContext("2d");
+      if (!pdfDisplayCanvas || !pdfDisplay) throw new Error("Canvas PDF ad alta risoluzione non disponibile");
 
       resizeLayer(pdfCanvas, width, height);
       resizeLayer(maskCanvas, width, height);
@@ -3348,6 +3385,28 @@ export default function PlanimetriaEditor({
         throw error;
       } finally {
         if (runtime.renderTask === renderTask) runtime.renderTask = null;
+      }
+
+      const displayViewport = page.getViewport({
+        scale: runtime.renderScale * PDF_DISPLAY_RESOLUTION_MULTIPLIER,
+        rotation: pageRotation,
+      });
+      const displayWidth = Math.round(displayViewport.width);
+      const displayHeight = Math.round(displayViewport.height);
+      resizeLayer(pdfDisplayCanvas, displayWidth, displayHeight);
+      pdfDisplay.imageSmoothingEnabled = true;
+      pdfDisplay.imageSmoothingQuality = "high";
+      pdfDisplay.fillStyle = "#ffffff";
+      pdfDisplay.fillRect(0, 0, displayWidth, displayHeight);
+      const displayRenderTask = page.render({ canvasContext: pdfDisplay, viewport: displayViewport });
+      runtime.renderTask = displayRenderTask;
+      try {
+        await displayRenderTask.promise;
+      } catch (error) {
+        if ((error as { name?: string })?.name === "RenderingCancelledException") return false;
+        throw error;
+      } finally {
+        if (runtime.renderTask === displayRenderTask) runtime.renderTask = null;
       }
 
       if (token !== runtime.renderToken) return false;
@@ -8575,6 +8634,41 @@ export default function PlanimetriaEditor({
             </button>
           </div>
 
+          {!valuationGroup && onNotesSave && (
+            <section className="tool-block property-notes-tool">
+              <div className="tool-block-head">
+                <span className="tool-block-title">Note immobile</span>
+                <span className="tool-block-meta">{notesDraft.length}/4000</span>
+              </div>
+              <textarea
+                value={notesDraft}
+                maxLength={4000}
+                rows={5}
+                placeholder="Inserisci note tecniche o operative per questo immobile…"
+                aria-label="Note del singolo immobile"
+                onChange={(event) => setNotesDraft(event.target.value)}
+              />
+              <div className="property-notes-actions">
+                <button
+                  className="button secondary compact-button"
+                  type="button"
+                  disabled={notesSaving || notesDraft === savedNotes}
+                  onClick={() => setNotesDraft(savedNotes)}
+                >
+                  Ripristina
+                </button>
+                <button
+                  className="button primary compact-button"
+                  type="button"
+                  disabled={notesSaving || notesDraft === savedNotes}
+                  onClick={() => void savePropertyNotes()}
+                >
+                  <Save size={14} /> {notesSaving ? "Salvataggio…" : "Salva note"}
+                </button>
+              </div>
+            </section>
+          )}
+
           <section className={`tool-block ${collapsedSections.usage ? "collapsed" : ""}`}>
             <button className="tool-block-toggle" type="button" onClick={() => toggleToolSection("usage")}>
               <span className="tool-block-title">Destinazione d'uso</span>
@@ -9042,7 +9136,8 @@ export default function PlanimetriaEditor({
                 onPointerMove={onStagePointerMove}
                 onPointerUp={onStagePointerUp}
               >
-                <canvas ref={pdfCanvasRef} />
+                <canvas ref={pdfDisplayCanvasRef} className="pdf-display-layer" aria-hidden="true" />
+                <canvas ref={pdfCanvasRef} className="pdf-analysis-layer" aria-hidden="true" />
                 <canvas ref={maskCanvasRef} />
                 <canvas ref={waveCanvasRef} />
               </div>

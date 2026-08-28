@@ -31,7 +31,8 @@ export type PresentationSnapshot = {
 export type PresentationSummary = {
   id: string;
   version: 1 | 2 | 3;
-  studyId: string;
+  studyId: string | null;
+  studyGroupId: string | null;
   propertyIds: string[];
   propertyCount: number;
   fileName: string;

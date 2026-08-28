@@ -164,6 +164,75 @@ test("la generazione PDF normalizza, salva e sostituisce l'indirizzo ERP non mod
   assert.equal(snapshot.immobili[0].comune, "Merano (BZ)");
 });
 
+test("la presentazione v3 di gruppo include tutti gli studi e usa il nome rinominato", async () => {
+  const firstStudy = studyFixture();
+  const secondStudy = {
+    ...studyFixture(),
+    id: "studio-2",
+    company: "Seconda Società S.r.l.",
+    vat: "IT99887766554",
+    comune: "Bergamo",
+    provincia: "BG",
+    properties: [{
+      ...studyFixture().properties[0],
+      id: "immobile-2",
+      comune: "Bergamo",
+      provincia: "BG",
+      address: "Via delle Industrie 44",
+      humanReadableAddress: "Via delle Industrie 44",
+    }],
+  };
+  let deckData: Record<string, any> | null = null;
+  const prisma = {
+    studyGroup: {
+      findUnique: async () => ({
+        id: "gruppo-1",
+        name: "Portafoglio Logistico Nord",
+        studies: [{ id: firstStudy.id }, { id: secondStudy.id }],
+      }),
+    },
+    property: { update: async () => undefined },
+    presentationDeck: {
+      create: async ({ data }: { data: Record<string, any> }) => {
+        deckData = data;
+        return {
+          ...data,
+          id: "deck-gruppo-1",
+          studyId: null,
+          studyGroupId: "gruppo-1",
+          createdAt: new Date("2026-08-28T18:00:00.000Z"),
+        };
+      },
+    },
+  };
+  const studies = {
+    find: async (id: string) => id === firstStudy.id ? firstStudy : id === secondStudy.id ? secondStudy : null,
+  };
+  const service = new PresentationsService(
+    prisma as never,
+    studies as never,
+    { normalize: async () => "" } as never,
+    { get: (_key: string, fallback: string) => fallback } as never,
+  );
+
+  const summary = await service.createStudyGroupV3(
+    "gruppo-1",
+    ["immobile-1", "immobile-2"],
+  );
+
+  assert.ok(deckData);
+  assert.equal(deckData.studyGroupId, "gruppo-1");
+  assert.equal(deckData.studyId, undefined);
+  assert.equal(deckData.snapshot.studio.company, "Portafoglio Logistico Nord");
+  assert.deepEqual(
+    deckData.snapshot.immobili.map((property: { societa: string }) => property.societa),
+    ["Cliente S.p.A.", "Seconda Società S.r.l."],
+  );
+  assert.equal(summary.studyId, null);
+  assert.equal(summary.studyGroupId, "gruppo-1");
+  assert.match(summary.fileName, /Portafoglio Logistico Nord/);
+});
+
 test("il template PDF v3 contiene tutte le sei pagine A4 orizzontali", async () => {
   const templateBytes = await readFile(
     new URL("../../../visual reference/soul_realestate_rendita_catastale_new_template.pdf", import.meta.url),

@@ -28,6 +28,26 @@ export class StudyPresentationsController {
   }
 }
 
+@Controller("study-groups/:studyGroupId/presentations")
+export class StudyGroupPresentationsController {
+  constructor(private readonly presentations: PresentationsService) {}
+
+  @Get()
+  list(@Param("studyGroupId") studyGroupId: string) {
+    return this.presentations.listStudyGroup(studyGroupId);
+  }
+
+  @Post("v3")
+  createV3(@Param("studyGroupId") studyGroupId: string, @Body() input: CreatePresentationDto) {
+    return this.presentations.createStudyGroupV3(
+      studyGroupId,
+      input.propertyIds,
+      input.properties,
+      input.clientName,
+    );
+  }
+}
+
 @Controller("presentations")
 export class PresentationsController {
   constructor(private readonly presentations: PresentationsService) {}
