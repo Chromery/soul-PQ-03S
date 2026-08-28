@@ -12,6 +12,13 @@
       font-weight: 100 900;
       font-display: swap;
     }
+    @font-face {
+      font-family: "Roboto";
+      src: url("__ASSET_ROBOTO__") format("woff2");
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: swap;
+    }
     :root {
       --blue: #072e59;
       --blue-2: #0d416f;
@@ -119,6 +126,14 @@
     .card-title { padding: 14px 18px 13px; border-bottom: 1px solid #dce6ec; font-size: 14px; font-weight: 800; letter-spacing: .11em; color: var(--blue); text-transform: uppercase; }
     .properties-card { width: 100%; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .property-col-company { width: 11%; }
+    .property-col-municipality { width: 8%; }
+    .property-col-address { width: 12%; }
+    .property-col-cadastral { width: 12%; }
+    .property-col-category { width: 5%; }
+    .property-col-current-rent { width: 10%; }
+    .property-col-estimated-rent, .property-col-rent-difference, .property-col-imu-difference { width: 11%; }
+    .property-col-reduction { width: 9%; }
     th { padding: 11px 7px 10px; background: #eaf3f6; color: #456173; font-size: 11px; line-height: 1.18; text-align: right; text-transform: uppercase; letter-spacing: .015em; }
     th:first-child, th:nth-child(2), th:nth-child(3), th:nth-child(4), th:nth-child(5), td:first-child, td:nth-child(2), td:nth-child(3), td:nth-child(4), td:nth-child(5) { text-align: left; }
     td { padding: 11px 7px; border-top: 1px solid #e3ebef; color: #243f52; font-size: 12px; line-height: 1.25; text-align: right; vertical-align: middle; overflow-wrap: anywhere; }
@@ -128,6 +143,27 @@
     .properties-card td.bad { color: var(--bad); font-weight: 750; }
     .properties-card tfoot td { background: #eef4f6; color: var(--blue); font-weight: 800; }
     .properties-card tfoot td:not(:first-child) { text-align: right; }
+    html.presentation-v3 .property-col-company { width: 11%; }
+    html.presentation-v3 .property-col-municipality { width: 10%; }
+    html.presentation-v3 .property-col-address { width: 13%; }
+    html.presentation-v3 .property-col-cadastral { width: 16%; }
+    html.presentation-v3 .property-col-category { width: 5%; }
+    html.presentation-v3 .property-col-current-rent, html.presentation-v3 .property-col-imu-difference { width: 9%; }
+    html.presentation-v3 .property-col-estimated-rent, html.presentation-v3 .property-col-rent-difference { width: 10%; }
+    html.presentation-v3 .property-col-reduction { width: 7%; }
+    html.presentation-v3 .properties-card th,
+    html.presentation-v3 .properties-card td { padding-left: 9px; padding-right: 9px; }
+    html.presentation-v3 .properties-card th:nth-child(4),
+    html.presentation-v3 .properties-card td:nth-child(4) { white-space: nowrap; overflow-wrap: normal; }
+    html.presentation-v3 .properties-card td:nth-child(n+6),
+    html.presentation-v3 .metric strong,
+    html.presentation-v3 .annual-saving strong,
+    html.presentation-v3 .ten-year-head strong,
+    html.presentation-v3 .chart-y,
+    html.presentation-v3 .chart-x {
+      font-family: "Roboto", Arial, sans-serif;
+      font-variant-numeric: tabular-nums;
+    }
     .properties-card.compact th { padding-top: 7px; padding-bottom: 7px; font-size: 10.5px; }
     .properties-card.compact td { padding-top: 6px; padding-bottom: 6px; font-size: 11px; }
     .properties-card.compact td strong { font-size: 11.5px; }
@@ -261,7 +297,7 @@
 
     <section class="slide economics" id="slide-5">
       <header class="economics-header"><div><div class="eyebrow">Simulazione economica</div><h2>Ottimizzazione rendita catastale</h2></div></header>
-      <section class="properties-card" id="properties-card"><div class="card-title">Immobili oggetto di analisi</div><table><colgroup><col style="width:11%"><col style="width:8%"><col style="width:12%"><col style="width:12%"><col style="width:5%"><col style="width:10%"><col style="width:11%"><col style="width:11%"><col style="width:11%"><col style="width:9%"></colgroup><thead><tr><th>Società</th><th>Comune</th><th>Indirizzo</th><th>Foglio - Particella - Sub</th><th>Cat.</th><th>R.C. attuale</th><th>R.C. attribuibile</th><th>Differenza rendita</th><th>Differenza IMU</th><th>% rid.</th></tr></thead><tbody id="property-rows"></tbody><tfoot><tr id="property-totals"></tr></tfoot></table></section>
+      <section class="properties-card" id="properties-card"><div class="card-title">Immobili oggetto di analisi</div><table><colgroup><col class="property-col-company"><col class="property-col-municipality"><col class="property-col-address"><col class="property-col-cadastral"><col class="property-col-category"><col class="property-col-current-rent"><col class="property-col-estimated-rent"><col class="property-col-rent-difference"><col class="property-col-imu-difference"><col class="property-col-reduction"></colgroup><thead><tr><th>Società</th><th>Comune</th><th>Indirizzo</th><th>Foglio - Particella - Sub</th><th>Cat.</th><th>R.C. attuale</th><th>R.C. attribuibile</th><th>Differenza rendita</th><th>Differenza IMU</th><th>% rid.</th></tr></thead><tbody id="property-rows"></tbody><tfoot><tr id="property-totals"></tr></tfoot></table></section>
       <div class="bottom-grid">
         <section class="summary-card"><div class="card-title">Sintesi</div><div class="summary-body">
           <div class="metric"><small>Rendita catastale attuale</small><strong id="total-current-rent"></strong></div>

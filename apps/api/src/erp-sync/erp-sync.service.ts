@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Optional, UnauthorizedException } from
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import { ActivitiesService } from "../activities/activities.service.js";
+import { AddressNormalizationService } from "../address-normalization/address-normalization.service.js";
 import { erpDocumentType, parseDocumentType } from "../document-types.js";
 import {
   formapsTerritoryByMunicipalityId,
@@ -59,6 +60,7 @@ type NormalizedDocument = {
 type NormalizedProperty = {
   id: string;
   address: string;
+  humanReadableAddress: string | null;
   comune: string;
   provincia: string;
   ubicazione?: string;
@@ -93,6 +95,7 @@ export class ErpSyncService {
     private readonly visuraExtraction: VisuraExtractionService,
     private readonly priceLists: PriceListsService,
     private readonly imu: ImuService,
+    private readonly addressNormalization: AddressNormalizationService,
     config: ConfigService,
     @Optional() private readonly activities?: ActivitiesService,
   ) {
@@ -186,6 +189,22 @@ export class ErpSyncService {
     const normalizedProperties = properties.map((property, index) =>
       this.normalizeProperty(asRecord(property, `immobili[${index}]`), index),
     );
+    const existingPropertyAddresses = await this.prisma.property.findMany({
+      where: { id: { in: normalizedProperties.map((property) => property.id) } },
+      select: { id: true, humanReadableAddress: true },
+    });
+    const humanReadableAddressByPropertyId = new Map(
+      existingPropertyAddresses.map((property) => [property.id, property.humanReadableAddress]),
+    );
+    await Promise.all(normalizedProperties.map(async (property) => {
+      property.humanReadableAddress = humanReadableAddressByPropertyId.get(property.id)
+        ?? await this.addressNormalization.normalize({
+          address: property.address,
+          ubicazione: property.ubicazione,
+          comune: property.comune,
+          provincia: property.provincia,
+        });
+    }));
 
     const originalRendita = decimalNumber(
       metrics?.rendita_originale_totale,
@@ -288,6 +307,7 @@ export class ErpSyncService {
       const baseProperty = {
         studyId: studioErpId,
         address: property.address,
+        humanReadableAddress: property.humanReadableAddress,
         comune: property.comune,
         provincia: property.provincia || null,
         ubicazione: property.ubicazione,
@@ -447,6 +467,7 @@ export class ErpSyncService {
     return {
       id,
       address: optionalString(input.indirizzo_normalizzato) ?? optionalString(input.ubicazione) ?? "",
+      humanReadableAddress: null,
       comune,
       provincia,
       ubicazione: inputUbicazione,
@@ -562,6 +583,7 @@ export class ErpSyncService {
         codice_comune_catastale: property.codiceComuneCatastale,
         formaps_municipality_id: property.formapsMunicipalityId,
         ubicazione: property.ubicazione,
+        indirizzo_human_readable: property.humanReadableAddress,
         comune: property.comune,
         provincia: property.provincia,
         categoria: property.categoria,

@@ -18,7 +18,7 @@ test("il sync ERP salva l'elenco subalterni sullo stesso endpoint senza avviare 
       upsert: async () => undefined,
     },
     studyVersion: { upsert: async () => undefined },
-    property: { upsert: async () => undefined },
+    property: { findMany: async () => [], upsert: async () => undefined },
     propertyDocument: {
       findUnique: async () => null,
       upsert: async (input: Record<string, any>) => {
@@ -43,6 +43,7 @@ test("il sync ERP salva l'elenco subalterni sullo stesso endpoint senza avviare 
     { enqueueDocumentPdf: async () => { visuraExtractions++; } } as never,
     { assignForStudy: async () => undefined } as never,
     {} as never,
+    { normalize: async () => "Via Test 1" } as never,
     { get: (_name: string, fallback: string) => fallback } as never,
   );
 

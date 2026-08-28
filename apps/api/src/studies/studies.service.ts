@@ -534,6 +534,7 @@ export class StudiesService {
       id: property.id,
       valuationGroupId: property.valuationGroupId,
       address: property.address,
+      humanReadableAddress: property.humanReadableAddress,
       comune: property.comune,
       provincia: property.provincia,
       formapsComune: formapsTerritory?.municipality ?? null,

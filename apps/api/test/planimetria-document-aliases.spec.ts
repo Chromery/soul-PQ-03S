@@ -46,6 +46,7 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
       },
       studyVersion: { upsert: async () => undefined },
       property: {
+        findMany: async () => [],
         upsert: async (input: Record<string, any>) => {
           propertyUpserts.push(input);
           return undefined;
@@ -81,6 +82,7 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
       { enqueueDocumentPdf: async () => undefined } as never,
       { assignForStudy: async () => undefined } as never,
       {} as never,
+      { normalize: async () => "Via Test 1" } as never,
       { get: (_name: string, fallback: string) => fallback } as never,
     );
 
@@ -117,6 +119,7 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
     assert.equal(documentUpserts.length, 1);
     assert.equal(propertyUpserts[0]?.create.provincia, "MI");
     assert.equal(propertyUpserts[0]?.create.comune, "MONZA");
+    assert.equal(propertyUpserts[0]?.create.humanReadableAddress, "Via Test 1");
     assert.equal(documentUpserts[0]?.create.type, DocumentType.PLANIMETRIA);
     assert.equal(storageWrites[0]?.tipo, "planimetria");
     assert.equal(extractionJobs.length, 1);
@@ -126,6 +129,7 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
 
 test("il sync ricava la provincia dalla ubicazione catastale quando il campo ERP è assente", () => {
   const service = new ErpSyncService(
+    {} as never,
     {} as never,
     {} as never,
     {} as never,

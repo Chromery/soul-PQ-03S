@@ -71,7 +71,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.58.1";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.60.0";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -126,6 +126,7 @@ type PropertyItem = {
   id: string;
   valuationGroupId?: string | null;
   address: string;
+  humanReadableAddress?: string | null;
   comune: string;
   provincia?: string | null;
   formapsComune?: string | null;
@@ -6206,8 +6207,14 @@ function presentationDraftFromStudy(study: FeasibilityStudy): PresentationDraft 
     properties: study.properties.map((property) => ({
       id: property.id,
       societa: study.company,
-      comune: property.comune || study.comune,
-      indirizzo: property.address || property.ubicazione || "Ubicazione non disponibile",
+      comune: presentationMunicipality(
+        property.comune || study.comune,
+        property.provincia || study.provincia,
+      ),
+      indirizzo: property.humanReadableAddress
+        || property.address
+        || property.ubicazione
+        || "Ubicazione non disponibile",
       foglioParticellaSub: cadastralPropertyReference(property).split(" · ").join(" - "),
       categoria: property.categoria,
       renditaAttuale: formatPresentationMoneyInput(property.currentRendita),
@@ -6216,6 +6223,28 @@ function presentationDraftFromStudy(study: FeasibilityStudy): PresentationDraft 
       imuOttenibile: formatPresentationMoneyInput(property.estimatedImu),
     })),
   };
+}
+
+function presentationMunicipality(comune: string, provincia?: string | null) {
+  const normalizedComune = comune.replace(/\s*\([A-Z]{2}\)\s*$/i, "").replace(/\s+/g, " ").trim();
+  const normalizedProvincia = provincia?.replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase();
+  const humanReadableComune = humanizePresentationMunicipality(normalizedComune);
+  return normalizedProvincia ? `${humanReadableComune} (${normalizedProvincia})` : humanReadableComune;
+}
+
+function humanizePresentationMunicipality(value: string) {
+  if (!value || value !== value.toLocaleUpperCase("it-IT")) return value;
+  const lowercaseWords = new Set(["a", "da", "dal", "dalla", "de", "del", "della", "delle", "di", "in", "sul"]);
+  return value
+    .toLocaleLowerCase("it-IT")
+    .split(/\s+/)
+    .map((word, index) => {
+      if (index > 0 && lowercaseWords.has(word)) return word;
+      return word.replace(/(^|[-'])(\p{L})/gu, (_match, separator: string, letter: string) => (
+        `${separator}${letter.toLocaleUpperCase("it-IT")}`
+      ));
+    })
+    .join(" ");
 }
 
 function presentationImuFromRendita(

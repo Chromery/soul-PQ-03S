@@ -178,6 +178,7 @@ model Property {
   studyId               String
   valuationGroupId      String?
   address               String
+  humanReadableAddress  String?
   comune                String
   provincia             String?
   ubicazione            String?
