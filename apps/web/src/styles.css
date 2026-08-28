@@ -7557,6 +7557,10 @@ button.activity-item {
   display: block;
 }
 
+.plan-stage canvas.pdf-analysis-layer {
+  visibility: hidden;
+}
+
 .plan-empty-state {
   position: absolute;
   inset: 0;

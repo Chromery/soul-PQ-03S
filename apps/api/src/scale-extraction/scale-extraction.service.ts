@@ -12,6 +12,9 @@ import { PrismaService } from "../prisma/prisma.service.js";
 
 type JsonRecord = Record<string, unknown>;
 
+export const SCALE_EXTRACTION_SHEET_SIZE_INSTRUCTION =
+  "Per sheet_size leggi le diciture stampate nella tavola: se sono presenti sia 'Formato di acquisizione' sia 'Formato stampa richiesto', usa SEMPRE il valore di 'Formato stampa richiesto'. Non usare il formato di acquisizione quando il formato stampa richiesto è leggibile. La frase 'Fattore di scala non utilizzabile' non invalida il formato foglio. Compila sheet_size anche quando la scala 1:N non è presente.";
+
 type CreateScaleExtractionInput = {
   file_name: string;
   file_base64: string;
@@ -332,6 +335,7 @@ export class ScaleExtractionService {
         text:
           `Analizza la pagina ${page.pageNumber}. Cerca una dicitura nel formato 'Scala 1:N', dove N è il denominatore da trascrivere. ` +
           "Devi accettare SOLO un denominatore adiacente alla parola 'Scala': ignora completamente tutti gli altri numeri nel disegno, anche se sembrano denominatori plausibili. La dicitura può essere piccola, verticale o ruotata: esamina mentalmente ogni vista a 0, 90, 180 e 270 gradi. Le immagini successive sono viste della stessa pagina, non pagine diverse. La frase di footer 'Fattore di scala non utilizzabile' riguarda il fattore del file e non annulla una diversa dicitura stampata 'Scala 1:N'. Se non trovi la parola 'Scala' con il rapporto accanto, usa found=false e valori null. Copia in evidence la dicitura esatta letta. " +
+          `${SCALE_EXTRACTION_SHEET_SIZE_INSTRUCTION} ` +
           `Il formato fisico della pagina PDF rilevato dai metadati è ${page.sheetSize ?? "non determinato"}; non provare a ricavare la scala da questo dato. ` +
           "Restituisci esattamente questi campi: {\"found\":boolean,\"scale_denominator\":number|null,\"scale_label\":string|null,\"sheet_size\":\"A3\"|\"A4\"|null,\"confidence\":number,\"evidence\":string|null,\"warnings\":string[]}." +
           (retry
@@ -352,7 +356,7 @@ export class ScaleExtractionService {
         {
           role: "system",
           content:
-            "Sei un tecnico catastale. Devi leggere la scala esplicita stampata in una singola pagina di una planimetria o di un elaborato planimetrico italiano. Accetta il denominatore solo quando appartiene alla stessa etichetta che contiene la parola 'Scala'. Non dedurre mai la scala da particelle, subalterni, quote, protocolli o altri numeri presenti nel disegno. Rispondi esclusivamente con un oggetto JSON valido, senza testo introduttivo.",
+            "Sei un tecnico catastale. Devi leggere la scala esplicita stampata in una singola pagina di una planimetria o di un elaborato planimetrico italiano. Accetta il denominatore solo quando appartiene alla stessa etichetta che contiene la parola 'Scala'. Non dedurre mai la scala da particelle, subalterni, quote, protocolli o altri numeri presenti nel disegno. Per il formato foglio, 'Formato stampa richiesto' ha priorità assoluta su 'Formato di acquisizione'. Rispondi esclusivamente con un oggetto JSON valido, senza testo introduttivo.",
         },
         {
           role: "user",
@@ -988,11 +992,19 @@ function parseNeuralwattPageExtraction(rawBody: string, page: RenderedPdfPage) {
   return {
     ...result,
     page_number: page.pageNumber,
-    sheet_size: page.sheetSize ?? result.sheet_size,
+    sheet_size: resolveExtractedSheetSize(result.sheet_size, page.sheetSize),
     orientation_rotation: page.orientation?.rotation ?? null,
     orientation_confidence: page.orientation?.confidence ?? 0,
     orientation_evidence: page.orientation?.evidence ?? null,
   };
+}
+
+export function resolveExtractedSheetSize(
+  extracted: unknown,
+  pdfMetadata: unknown,
+): "A3" | "A4" | null {
+  if (extracted === "A3" || extracted === "A4") return extracted;
+  return pdfMetadata === "A3" || pdfMetadata === "A4" ? pdfMetadata : null;
 }
 
 function validateExtractionResult(value: Partial<ScaleExtractionResult>, sourceText = ""): ScaleExtractionResult {

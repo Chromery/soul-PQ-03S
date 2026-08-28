@@ -65,6 +65,7 @@ const ZOOM_KEYBOARD_STEP = 10;
 const ZOOM_SLIDER_STEP = 1;
 const ZOOM_WHEEL_SENSITIVITY = 0.00045;
 const ZOOM_WHEEL_MAX_DELTA = 240;
+const PDF_DISPLAY_RESOLUTION_MULTIPLIER = 2;
 const SMART_TRACE_DEFAULTS = DEFAULT_EDITOR_PREFERENCES.smartSelection;
 
 type PdfDocument = Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>;
@@ -1475,6 +1476,7 @@ export default function PlanimetriaEditor({
   onGroupDraftSaved,
 }: PlanimetriaEditorProps) {
   const editorRootRef = useRef<HTMLElement | null>(null);
+  const pdfDisplayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const waveCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -3364,6 +3366,9 @@ export default function PlanimetriaEditor({
       const width = Math.round(viewport.width);
       const height = Math.round(viewport.height);
       const { pdfCanvas, maskCanvas, waveCanvas, pdf } = getCanvases();
+      const pdfDisplayCanvas = pdfDisplayCanvasRef.current;
+      const pdfDisplay = pdfDisplayCanvas?.getContext("2d");
+      if (!pdfDisplayCanvas || !pdfDisplay) throw new Error("Canvas PDF ad alta risoluzione non disponibile");
 
       resizeLayer(pdfCanvas, width, height);
       resizeLayer(maskCanvas, width, height);
@@ -3380,6 +3385,28 @@ export default function PlanimetriaEditor({
         throw error;
       } finally {
         if (runtime.renderTask === renderTask) runtime.renderTask = null;
+      }
+
+      const displayViewport = page.getViewport({
+        scale: runtime.renderScale * PDF_DISPLAY_RESOLUTION_MULTIPLIER,
+        rotation: pageRotation,
+      });
+      const displayWidth = Math.round(displayViewport.width);
+      const displayHeight = Math.round(displayViewport.height);
+      resizeLayer(pdfDisplayCanvas, displayWidth, displayHeight);
+      pdfDisplay.imageSmoothingEnabled = true;
+      pdfDisplay.imageSmoothingQuality = "high";
+      pdfDisplay.fillStyle = "#ffffff";
+      pdfDisplay.fillRect(0, 0, displayWidth, displayHeight);
+      const displayRenderTask = page.render({ canvasContext: pdfDisplay, viewport: displayViewport });
+      runtime.renderTask = displayRenderTask;
+      try {
+        await displayRenderTask.promise;
+      } catch (error) {
+        if ((error as { name?: string })?.name === "RenderingCancelledException") return false;
+        throw error;
+      } finally {
+        if (runtime.renderTask === displayRenderTask) runtime.renderTask = null;
       }
 
       if (token !== runtime.renderToken) return false;
@@ -9109,7 +9136,8 @@ export default function PlanimetriaEditor({
                 onPointerMove={onStagePointerMove}
                 onPointerUp={onStagePointerUp}
               >
-                <canvas ref={pdfCanvasRef} />
+                <canvas ref={pdfDisplayCanvasRef} className="pdf-display-layer" aria-hidden="true" />
+                <canvas ref={pdfCanvasRef} className="pdf-analysis-layer" aria-hidden="true" />
                 <canvas ref={maskCanvasRef} />
                 <canvas ref={waveCanvasRef} />
               </div>

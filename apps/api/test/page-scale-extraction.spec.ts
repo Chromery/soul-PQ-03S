@@ -3,7 +3,17 @@ import test from "node:test";
 import {
   normalizeScaleExtractionResult,
   pageOrientationsFromBboxHtml,
+  resolveExtractedSheetSize,
+  SCALE_EXTRACTION_SHEET_SIZE_INSTRUCTION,
 } from "../src/scale-extraction/scale-extraction.service.js";
+
+test("il formato stampa richiesto prevale sul formato fisico o di acquisizione", () => {
+  assert.equal(resolveExtractedSheetSize("A3", "A4"), "A3");
+  assert.equal(resolveExtractedSheetSize(null, "A4"), "A4");
+  assert.match(SCALE_EXTRACTION_SHEET_SIZE_INSTRUCTION, /Formato stampa richiesto/);
+  assert.match(SCALE_EXTRACTION_SHEET_SIZE_INSTRUCTION, /SEMPRE/);
+  assert.match(SCALE_EXTRACTION_SHEET_SIZE_INSTRUCTION, /Non usare il formato di acquisizione/);
+});
 
 test("mantiene una scala distinta per ogni pagina estratta", () => {
   const result = normalizeScaleExtractionResult({
