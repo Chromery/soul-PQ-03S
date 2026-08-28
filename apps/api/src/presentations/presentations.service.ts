@@ -7,6 +7,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { AddressNormalizationService } from "../address-normalization/address-normalization.service.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { StudiesService } from "../studies/studies.service.js";
@@ -42,6 +43,7 @@ const HYBRID_SLIDES_V3 = [
 const ASSET_URLS = {
   __ASSET_INTER__: { url: new URL("../../../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2", import.meta.url), contentType: "font/woff2" },
   __ASSET_RALEWAY__: { url: new URL("../../../../node_modules/@fontsource-variable/raleway/files/raleway-latin-wght-normal.woff2", import.meta.url), contentType: "font/woff2" },
+  __ASSET_ROBOTO__: { url: new URL("../../../../node_modules/@fontsource-variable/roboto/files/roboto-latin-wght-normal.woff2", import.meta.url), contentType: "font/woff2" },
   __ASSET_LOGO__: { url: new URL("./templates/assets/soul-logo.svg", import.meta.url), contentType: "image/svg+xml" },
   __ASSET_COVER__: { url: new URL("./templates/assets/soul-exterior-mountain-facade.jpg", import.meta.url), contentType: "image/jpeg" },
   __ASSET_RECEPTION__: { url: new URL("./templates/assets/soul-reception.png", import.meta.url), contentType: "image/png" },
@@ -60,6 +62,7 @@ export class PresentationsService implements OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly studies: StudiesService,
+    private readonly addressNormalization: AddressNormalizationService,
     config: ConfigService,
   ) {
     this.chromiumExecutablePath = config.get<string>("CHROMIUM_EXECUTABLE_PATH", "/usr/bin/chromium");
@@ -126,6 +129,53 @@ export class PresentationsService implements OnModuleDestroy {
     const propertyInputById = new Map(propertyInputs.map((property) => [property.id, property]));
 
     const generatedAt = new Date();
+    const snapshotProperties = await Promise.all(selectedProperties.map(async (property) => {
+      const input = propertyInputById.get(property.id);
+      let humanReadableAddress = normalizedPresentationText(property.humanReadableAddress);
+      if (!humanReadableAddress) {
+        humanReadableAddress = await this.addressNormalization.normalize({
+          address: property.address,
+          ubicazione: property.ubicazione,
+          comune: property.comune || study.comune,
+          provincia: property.provincia || study.provincia,
+        });
+        if (humanReadableAddress) {
+          await this.prisma.property.update({
+            where: { id: property.id },
+            data: { humanReadableAddress },
+          });
+        }
+      }
+      return {
+        id: property.id,
+        societa: normalizePresentationText(input?.societa, study.company),
+        comune: presentationMunicipality(
+          normalizePresentationText(input?.comune, property.comune || study.comune),
+          property.provincia || study.provincia,
+        ),
+        indirizzo: presentationAddress(
+          input?.indirizzo,
+          humanReadableAddress,
+          property.address,
+          property.ubicazione,
+        ),
+        foglioParticellaSub: normalizePresentationText(
+          input?.foglioParticellaSub,
+          cadastralReference(property.foglio, property.particella, property.subalterno),
+        ),
+        categoria: normalizePresentationText(input?.categoria, property.categoria),
+        renditaAttuale: toCurrencyPrecision(input?.renditaAttuale ?? Number(property.currentRendita)),
+        renditaAttribuibile: toCurrencyPrecision(
+          input?.renditaAttribuibile ?? Number(property.estimatedRendita),
+        ),
+        imuAttuale: toOptionalCurrencyPrecision(
+          input ? input.imuAttuale : property.currentImu == null ? null : Number(property.currentImu),
+        ),
+        imuOttenibile: toOptionalCurrencyPrecision(
+          input ? input.imuOttenibile : property.estimatedImu == null ? null : Number(property.estimatedImu),
+        ),
+      };
+    }));
     const snapshot: PresentationSnapshot = {
       version,
       generatedAt: generatedAt.toISOString(),
@@ -138,33 +188,7 @@ export class PresentationsService implements OnModuleDestroy {
         commercialOwner: study.commercialOwner,
         technicalOwner: study.technicalOwner,
       },
-      immobili: selectedProperties.map((property) => {
-        const input = propertyInputById.get(property.id);
-        return {
-          id: property.id,
-          societa: normalizePresentationText(input?.societa, study.company),
-          comune: normalizePresentationText(input?.comune, property.comune || study.comune),
-          indirizzo: normalizePresentationText(
-            input?.indirizzo,
-            property.address || property.ubicazione || "Ubicazione non disponibile",
-          ),
-          foglioParticellaSub: normalizePresentationText(
-            input?.foglioParticellaSub,
-            cadastralReference(property.foglio, property.particella, property.subalterno),
-          ),
-          categoria: normalizePresentationText(input?.categoria, property.categoria),
-          renditaAttuale: toCurrencyPrecision(input?.renditaAttuale ?? Number(property.currentRendita)),
-          renditaAttribuibile: toCurrencyPrecision(
-            input?.renditaAttribuibile ?? Number(property.estimatedRendita),
-          ),
-          imuAttuale: toOptionalCurrencyPrecision(
-            input ? input.imuAttuale : property.currentImu == null ? null : Number(property.currentImu),
-          ),
-          imuOttenibile: toOptionalCurrencyPrecision(
-            input ? input.imuOttenibile : property.estimatedImu == null ? null : Number(property.estimatedImu),
-          ),
-        };
-      }),
+      immobili: snapshotProperties,
     };
     const fileName = presentationFileName(snapshot.studio.company, generatedAt, version);
     const deck = await this.prisma.presentationDeck.create({
@@ -548,6 +572,56 @@ function presentationFileName(company: string, createdAt: Date, version: 1 | 2 |
 function normalizePresentationText(input: string | undefined, fallback: string) {
   const normalized = input?.replace(/\s+/g, " ").trim();
   return normalized || fallback;
+}
+
+function normalizedPresentationText(value: string | null | undefined) {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  return normalized || null;
+}
+
+function presentationAddress(
+  input: string | undefined,
+  humanReadableAddress: string | null,
+  rawAddress: string | null | undefined,
+  ubicazione: string | null | undefined,
+) {
+  const normalizedInput = normalizedPresentationText(input);
+  const fallback = humanReadableAddress
+    ?? normalizedPresentationText(rawAddress)
+    ?? normalizedPresentationText(ubicazione)
+    ?? "Ubicazione non disponibile";
+  if (!normalizedInput) return fallback;
+
+  const comparableInput = comparablePresentationText(normalizedInput);
+  const isUneditedRawValue = [rawAddress, ubicazione, "Ubicazione non disponibile"]
+    .some((value) => comparablePresentationText(value) === comparableInput);
+  return isUneditedRawValue ? fallback : normalizedInput;
+}
+
+function presentationMunicipality(value: string, province: string | null | undefined) {
+  const withoutProvince = value.replace(/\s*\([A-Z]{2}\)\s*$/i, "").replace(/\s+/g, " ").trim();
+  const humanReadable = humanizeMunicipality(withoutProvince);
+  const normalizedProvince = province?.replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase();
+  return normalizedProvince ? `${humanReadable} (${normalizedProvince})` : humanReadable;
+}
+
+function humanizeMunicipality(value: string) {
+  if (!value || value !== value.toLocaleUpperCase("it-IT")) return value;
+  const lowercaseWords = new Set(["a", "da", "dal", "dalla", "de", "del", "della", "delle", "di", "in", "sul"]);
+  return value
+    .toLocaleLowerCase("it-IT")
+    .split(/\s+/)
+    .map((word, index) => {
+      if (index > 0 && lowercaseWords.has(word)) return word;
+      return word.replace(/(^|[-'])(\p{L})/gu, (_match, separator: string, letter: string) => (
+        `${separator}${letter.toLocaleUpperCase("it-IT")}`
+      ));
+    })
+    .join(" ");
+}
+
+function comparablePresentationText(value: string | null | undefined) {
+  return value?.replace(/\s+/g, " ").trim().toLocaleLowerCase("it-IT") ?? "";
 }
 
 function toCurrencyPrecision(value: number) {

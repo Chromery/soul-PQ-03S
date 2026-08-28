@@ -19,7 +19,9 @@ function studyFixture() {
       {
         id: "immobile-1",
         comune: "Merano",
+        provincia: "BZ",
         address: "Via Roma 10",
+        humanReadableAddress: "Via Roma 10" as string | null,
         ubicazione: null,
         foglio: "12",
         particella: "34",
@@ -34,11 +36,21 @@ function studyFixture() {
   };
 }
 
-function serviceFixture() {
+function serviceFixture(options: { humanReadableAddress?: string | null; normalizedAddress?: string } = {}) {
   let capturedSnapshot: PresentationSnapshot | null = null;
   let capturedFileName = "";
+  const addressWrites: string[] = [];
+  let addressNormalizationCalls = 0;
   const study = studyFixture();
+  if ("humanReadableAddress" in options) {
+    study.properties[0].humanReadableAddress = options.humanReadableAddress ?? null;
+  }
   const prisma = {
+    property: {
+      update: async ({ data }: { data: { humanReadableAddress: string } }) => {
+        addressWrites.push(data.humanReadableAddress);
+      },
+    },
     presentationDeck: {
       create: async ({ data }: { data: { snapshot: PresentationSnapshot; fileName: string } }) => {
         capturedSnapshot = data.snapshot;
@@ -54,12 +66,25 @@ function serviceFixture() {
     },
   };
   const studies = { find: async () => study };
+  const addressNormalization = {
+    normalize: async () => {
+      addressNormalizationCalls++;
+      return options.normalizedAddress ?? "Via Roma 10";
+    },
+  };
   const config = { get: (_key: string, fallback: string) => fallback };
-  const service = new PresentationsService(prisma as never, studies as never, config as never);
+  const service = new PresentationsService(
+    prisma as never,
+    studies as never,
+    addressNormalization as never,
+    config as never,
+  );
   return {
     service,
     snapshot: () => capturedSnapshot,
     fileName: () => capturedFileName,
+    addressWrites,
+    addressNormalizationCalls: () => addressNormalizationCalls,
   };
 }
 
@@ -109,6 +134,36 @@ test("la presentazione v3 usa lo snapshot dinamico ed è disponibile soltanto in
   assert.equal(summary.pdfUrl, "/api/presentations/deck-1/pdf");
 });
 
+test("la generazione PDF normalizza, salva e sostituisce l'indirizzo ERP non modificato", async () => {
+  const fixture = serviceFixture({
+    humanReadableAddress: null,
+    normalizedAddress: "Via delle Industrie 44",
+  });
+  await fixture.service.createV3(
+    "studio-1",
+    ["immobile-1"],
+    [{
+      id: "immobile-1",
+      societa: "Cliente S.p.A.",
+      comune: "MERANO",
+      indirizzo: "Via Roma 10",
+      foglioParticellaSub: "Fg. 12 - Part. 34 - Sub. 5",
+      categoria: "D/7",
+      renditaAttuale: 1234.57,
+      renditaAttribuibile: 987.65,
+      imuAttuale: 2198.77,
+      imuOttenibile: 1765.43,
+    }],
+  );
+
+  const snapshot = fixture.snapshot();
+  assert.ok(snapshot);
+  assert.equal(fixture.addressNormalizationCalls(), 1);
+  assert.deepEqual(fixture.addressWrites, ["Via delle Industrie 44"]);
+  assert.equal(snapshot.immobili[0].indirizzo, "Via delle Industrie 44");
+  assert.equal(snapshot.immobili[0].comune, "Merano (BZ)");
+});
+
 test("il template PDF v3 contiene tutte le sei pagine A4 orizzontali", async () => {
   const templateBytes = await readFile(
     new URL("../../../visual reference/soul_realestate_rendita_catastale_new_template.pdf", import.meta.url),
@@ -148,7 +203,10 @@ test("la presentazione v2 conserva i testi precedenti con le sole revisioni dei 
   assert.match(template, /grid-template-columns: minmax\(0, 39fr\) minmax\(0, 61fr\)/);
   assert.match(template, /tfoot td:not\(:first-child\) \{ text-align: right; \}/);
   assert.match(template, /font-family: "Raleway"/);
-  assert.doesNotMatch(template, /font-family: "Inter"/);
+  assert.match(template, /font-family: "Roboto"/);
+  assert.match(template, /html\.presentation-v3 \.properties-card th:nth-child\(4\)/);
+  assert.match(template, /white-space: nowrap; overflow-wrap: normal;/);
+  assert.match(template, /html\.presentation-v3 \.properties-card td:nth-child\(n\+6\)/);
   assert.match(template, /html\.presentation-v3 \.economics \.eyebrow \{ color: #006b94; \}/);
   assert.match(template, /html\.presentation-v3 \.economics h2 \{ color: #343534; font-weight: 700; \}/);
   assert.match(template, /if \(data\.version === 3\) document\.documentElement\.classList\.add\("presentation-v3"\)/);
@@ -182,7 +240,7 @@ test("i campi modificati nell'anteprima vengono congelati nello snapshot della p
   assert.deepEqual(snapshot.immobili[0], {
     id: "immobile-1",
     societa: "Società manuale",
-    comune: "Comune manuale",
+    comune: "Comune manuale (BZ)",
     indirizzo: "Indirizzo manuale",
     foglioParticellaSub: "Fg. 1 - Part. 2 - Sub. 3",
     categoria: "D/8",
