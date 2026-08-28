@@ -1156,13 +1156,13 @@ a.button {
   white-space: nowrap;
 }
 
-.study-group-properties-table-wrap {
+.study-group-properties-table-wrap.resizable-table-wrap {
   overflow-x: auto;
 }
 
-.study-group-properties-table {
+.study-group-properties-table.resizable-data-table {
   width: 100%;
-  min-width: 1900px;
+  min-width: 1900px !important;
   border-collapse: collapse;
   table-layout: fixed;
 }
