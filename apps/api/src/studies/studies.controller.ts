@@ -3,6 +3,7 @@ import { CreatePropertyValuationGroupDto } from "./dto/create-property-valuation
 import { CreateStudyGroupDto } from "./dto/create-study-group.dto.js";
 import { ReorderStudyPropertiesDto } from "./dto/reorder-study-properties.dto.js";
 import { UpdateStudyDto } from "./dto/update-study.dto.js";
+import { UpdateStudyGroupDto } from "./dto/update-study-group.dto.js";
 import { StudiesService } from "./studies.service.js";
 
 @Controller("studies")
@@ -27,6 +28,13 @@ export class StudiesController {
   @Delete("groups/:groupId")
   async ungroupStudies(@Param("groupId") groupId: string) {
     const studies = await this.studies.ungroupStudies(groupId);
+    if (!studies) throw new NotFoundException("Gruppo studi non trovato");
+    return studies;
+  }
+
+  @Patch("groups/:groupId")
+  async updateStudyGroup(@Param("groupId") groupId: string, @Body() input: UpdateStudyGroupDto) {
+    const studies = await this.studies.updateStudyGroup(groupId, input.name);
     if (!studies) throw new NotFoundException("Gruppo studi non trovato");
     return studies;
   }

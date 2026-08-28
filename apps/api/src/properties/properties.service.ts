@@ -519,8 +519,9 @@ export class PropertiesService {
     const hasImuRateOverride = Object.prototype.hasOwnProperty.call(input, "imuRateOverride");
     const hasImuMultiplierOverride = Object.prototype.hasOwnProperty.call(input, "imuMultiplierOverride");
     const hasOneri = Object.prototype.hasOwnProperty.call(input, "oneri");
+    const hasNotes = Object.prototype.hasOwnProperty.call(input, "notes");
     const hasImuOverride = hasImuRateOverride || hasImuMultiplierOverride;
-    if (!hasOutcome && !hasImuOverride && !hasOneri) {
+    if (!hasOutcome && !hasImuOverride && !hasOneri && !hasNotes) {
       throw new BadRequestException("Nessuna modifica immobile supportata");
     }
     const existing = await this.prisma.property.findUnique({
@@ -540,6 +541,7 @@ export class PropertiesService {
         ? null
         : Number(existing.imuMultiplierOverride);
     const oneri = hasOneri ? validateOneri(input.oneri) : existing.oneri;
+    const notes = hasNotes ? validatePropertyNotes(input.notes) : existing.notes;
     const property = await this.prisma.property.update({
       where: { id: propertyId },
       data: {
@@ -547,10 +549,11 @@ export class PropertiesService {
         ...(hasImuRateOverride ? { imuRateOverride } : {}),
         ...(hasImuMultiplierOverride ? { imuMultiplierOverride } : {}),
         ...(hasOneri ? { oneri } : {}),
+        ...(hasNotes ? { notes } : {}),
       },
     });
     if (!hasImuOverride && !hasOneri) {
-      return { id: property.id, outcome: property.outcome, oneri: property.oneri };
+      return { id: property.id, outcome: property.outcome, oneri: property.oneri, notes: property.notes };
     }
 
     const calculationProperty = { ...property, imuRateOverride, imuMultiplierOverride };
@@ -579,6 +582,7 @@ export class PropertiesService {
       id: property.id,
       outcome: property.outcome,
       oneri,
+      notes: property.notes,
       estimatedRendita,
       diffPercent: percentageDiff(Number(property.currentRendita), estimatedRendita),
       imuRateOverride,
@@ -924,6 +928,15 @@ function validatePropertyOutcome(value: unknown) {
 function validateOneri(value: unknown) {
   if (typeof value === "boolean") return value;
   throw new BadRequestException("Flag Oneri non valido");
+}
+
+function validatePropertyNotes(value: unknown) {
+  if (typeof value !== "string") throw new BadRequestException("Note immobile non valide");
+  const normalized = value.replace(/\r\n/g, "\n").trim();
+  if (normalized.length > 4000) {
+    throw new BadRequestException("Le note immobile non possono superare 4000 caratteri");
+  }
+  return normalized;
 }
 
 function validateImuRateOverride(value: unknown) {

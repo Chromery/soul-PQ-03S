@@ -31,6 +31,7 @@ import {
   RotateCcw,
   RotateCw,
   Ruler,
+  Save,
   Circle,
   Square,
   Sparkles,
@@ -165,6 +166,7 @@ type EditorPriceList = {
 type EditorProperty = {
   id: string;
   address: string;
+  notes?: string;
   comune: string;
   provincia?: string | null;
   formapsComune?: string | null;
@@ -653,6 +655,7 @@ type PlanimetriaEditorProps = {
     propertyId: string,
     patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
   ) => Promise<ImuOverrideUpdate>;
+  onNotesSave?: (propertyId: string, notes: string) => Promise<boolean>;
   onDocumentSaved?: (
     propertyId: string,
     type: "planimetria" | "elenco_subalterni",
@@ -1467,6 +1470,7 @@ export default function PlanimetriaEditor({
   onDirtyChange,
   onDraftSaved,
   onImuOverridesSave,
+  onNotesSave,
   onDocumentSaved,
   onGroupDraftSaved,
 }: PlanimetriaEditorProps) {
@@ -1504,6 +1508,9 @@ export default function PlanimetriaEditor({
   const areaTableResizeRef = useRef<{ startY: number; startHeight: number; pointerId: number } | null>(null);
 
   const [status, setStatus] = useState("Caricamento planimetria");
+  const [notesDraft, setNotesDraft] = useState(property.notes ?? "");
+  const [savedNotes, setSavedNotes] = useState(property.notes ?? "");
+  const [notesSaving, setNotesSaving] = useState(false);
   const [busy, setBusy] = useState(false);
   const [fileName, setFileName] = useState("");
   const [currentPage, setCurrentPage] = useState(0);
@@ -1991,6 +1998,12 @@ export default function PlanimetriaEditor({
   useEffect(() => {
     setPriceListDropdownOpen(true);
   }, [property.id]);
+
+  useEffect(() => {
+    const notes = property.notes ?? "";
+    setNotesDraft(notes);
+    setSavedNotes(notes);
+  }, [property.id, property.notes]);
 
   useEffect(() => {
     setAreaTuningTrials(readAreaTuningTrials(property.id));
@@ -2589,6 +2602,25 @@ export default function PlanimetriaEditor({
     } finally {
       setSubalterniUploading(false);
       if (subalterniInputRef.current) subalterniInputRef.current.value = "";
+    }
+  }
+
+  async function savePropertyNotes() {
+    if (!onNotesSave || notesSaving || notesDraft === savedNotes) return;
+    setNotesSaving(true);
+    setStatus("Salvataggio note immobile");
+    try {
+      const saved = await onNotesSave(property.id, notesDraft);
+      if (!saved) throw new Error("Salvataggio note immobile non riuscito");
+      const normalized = notesDraft.trim();
+      setNotesDraft(normalized);
+      setSavedNotes(normalized);
+      setStatus("Note immobile salvate");
+    } catch (error) {
+      console.error(error);
+      setStatus(error instanceof Error ? error.message : "Salvataggio note immobile non riuscito");
+    } finally {
+      setNotesSaving(false);
     }
   }
 
@@ -8574,6 +8606,41 @@ export default function PlanimetriaEditor({
               <PanelLeftClose size={18} />
             </button>
           </div>
+
+          {!valuationGroup && onNotesSave && (
+            <section className="tool-block property-notes-tool">
+              <div className="tool-block-head">
+                <span className="tool-block-title">Note immobile</span>
+                <span className="tool-block-meta">{notesDraft.length}/4000</span>
+              </div>
+              <textarea
+                value={notesDraft}
+                maxLength={4000}
+                rows={5}
+                placeholder="Inserisci note tecniche o operative per questo immobile…"
+                aria-label="Note del singolo immobile"
+                onChange={(event) => setNotesDraft(event.target.value)}
+              />
+              <div className="property-notes-actions">
+                <button
+                  className="button secondary compact-button"
+                  type="button"
+                  disabled={notesSaving || notesDraft === savedNotes}
+                  onClick={() => setNotesDraft(savedNotes)}
+                >
+                  Ripristina
+                </button>
+                <button
+                  className="button primary compact-button"
+                  type="button"
+                  disabled={notesSaving || notesDraft === savedNotes}
+                  onClick={() => void savePropertyNotes()}
+                >
+                  <Save size={14} /> {notesSaving ? "Salvataggio…" : "Salva note"}
+                </button>
+              </div>
+            </section>
+          )}
 
           <section className={`tool-block ${collapsedSections.usage ? "collapsed" : ""}`}>
             <button className="tool-block-toggle" type="button" onClick={() => toggleToolSection("usage")}>

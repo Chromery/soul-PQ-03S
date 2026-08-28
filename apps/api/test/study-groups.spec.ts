@@ -22,8 +22,8 @@ test("raggruppa studi esistenti non ancora raggruppati", async () => {
   const prisma = {
     feasibilityStudy: {
       findMany: async () => [
-        { id: "STUDIO-1", studyGroupId: null },
-        { id: "STUDIO-2", studyGroupId: null },
+        { id: "STUDIO-1", studyGroupId: null, company: "Alfa S.p.A." },
+        { id: "STUDIO-2", studyGroupId: null, company: "Beta S.r.l." },
       ],
     },
     $transaction: async (operation: (tx: Record<string, any>) => Promise<void>) => operation({
@@ -46,11 +46,28 @@ test("raggruppa studi esistenti non ancora raggruppati", async () => {
   const result = await service.groupStudies(["STUDIO-1", "STUDIO-2"]);
 
   assert.equal(result[0]?.studyGroupId, "GRUPPO-1");
-  assert.deepEqual(writes[0], { data: {} });
+  assert.deepEqual(writes[0], { data: { name: "Gruppo Alfa S.p.A. + Beta S.r.l." } });
   assert.deepEqual(writes[1], {
     where: { id: { in: ["STUDIO-1", "STUDIO-2"] } },
     data: { studyGroupId: "GRUPPO-1" },
   });
+});
+
+test("rinomina un gruppo e restituisce gli studi aggiornati", async () => {
+  const writes: Array<Record<string, unknown>> = [];
+  const prisma = {
+    studyGroup: {
+      findUnique: async () => ({ id: "GRUPPO-1" }),
+      update: async (input: Record<string, unknown>) => writes.push(input),
+    },
+  };
+  const service = new StudiesService(prisma as never, {} as never, {} as never);
+  service.list = async () => [{ id: "STUDIO-1", studyGroupName: "Portafoglio Nord" }] as never;
+
+  const result = await service.updateStudyGroup("GRUPPO-1", " Portafoglio Nord ");
+
+  assert.equal(result?.[0]?.studyGroupName, "Portafoglio Nord");
+  assert.deepEqual(writes, [{ where: { id: "GRUPPO-1" }, data: { name: "Portafoglio Nord" } }]);
 });
 
 test("rifiuta studi gia presenti in un altro gruppo", async () => {

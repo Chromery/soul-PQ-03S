@@ -71,7 +71,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.60.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.61.0";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -127,6 +127,7 @@ type PropertyItem = {
   valuationGroupId?: string | null;
   address: string;
   humanReadableAddress?: string | null;
+  notes?: string;
   comune: string;
   provincia?: string | null;
   formapsComune?: string | null;
@@ -199,6 +200,7 @@ type ValuationGroupPropertyUpdate = {
 type FeasibilityStudy = {
   id: string;
   studyGroupId?: string | null;
+  studyGroupName?: string | null;
   company: string;
   vat: string;
   comune: string;
@@ -229,7 +231,8 @@ type StudyTableRow =
 type PresentationDeck = {
   id: string;
   version?: 1 | 2 | 3;
-  studyId: string;
+  studyId: string | null;
+  studyGroupId?: string | null;
   propertyIds: string[];
   propertyCount: number;
   fileName: string;
@@ -270,6 +273,8 @@ type PresentationDraft = {
   clientName: string;
   properties: PresentationPropertyDraft[];
 };
+
+type PresentationSource = Pick<FeasibilityStudy, "id" | "company" | "properties">;
 
 type PresentationPropertyPayload = {
   id: string;
@@ -504,6 +509,26 @@ type ArchivePropertyColumnId =
 
 type ArchivePropertySortKey = ArchivePropertyColumnId;
 
+type StudyGroupPropertyColumnId =
+  | "company"
+  | "location"
+  | "sheet"
+  | "parcel"
+  | "sub"
+  | "category"
+  | "currentRendita"
+  | "estimatedRendita"
+  | "renditaDiff"
+  | "currentImu"
+  | "estimatedImu"
+  | "imuDiff"
+  | "documents"
+  | "ownership"
+  | "notes"
+  | "outcome";
+
+type StudyGroupPropertySortKey = StudyGroupPropertyColumnId;
+
 const STUDY_TABLE_COLUMNS = [
   { id: "select", label: "Selezione", defaultWidth: 40, minWidth: 40, hideable: false, resizable: false },
   { id: "id", label: "ID studio", defaultWidth: 112, minWidth: 72 },
@@ -549,6 +574,25 @@ const ARCHIVE_PROPERTY_TABLE_COLUMNS = [
   { id: "study", label: "Studio", defaultWidth: 100, minWidth: 72 },
   { id: "documents", label: "Documenti", defaultWidth: 90, minWidth: 72 },
 ] as const satisfies readonly TableColumnDefinition<ArchivePropertyColumnId>[];
+
+const STUDY_GROUP_PROPERTY_TABLE_COLUMNS = [
+  { id: "company", label: "Studio / società", defaultWidth: 170, minWidth: 120, hideable: false },
+  { id: "location", label: "Ubicazione", defaultWidth: 180, minWidth: 110, hideable: false },
+  { id: "sheet", label: "Foglio", defaultWidth: 54, minWidth: 42 },
+  { id: "parcel", label: "Part.", defaultWidth: 58, minWidth: 42 },
+  { id: "sub", label: "Sub", defaultWidth: 50, minWidth: 40 },
+  { id: "category", label: "Cat.", defaultWidth: 52, minWidth: 42 },
+  { id: "currentRendita", label: "Rendita attuale", defaultWidth: 92, minWidth: 72 },
+  { id: "estimatedRendita", label: "Rendita prevista", defaultWidth: 94, minWidth: 72 },
+  { id: "renditaDiff", label: "Diff. rendita", defaultWidth: 90, minWidth: 70 },
+  { id: "currentImu", label: "IMU attuale", defaultWidth: 86, minWidth: 68 },
+  { id: "estimatedImu", label: "IMU prevista", defaultWidth: 88, minWidth: 68 },
+  { id: "imuDiff", label: "Diff. IMU", defaultWidth: 84, minWidth: 66 },
+  { id: "documents", label: "Documenti", defaultWidth: 86, minWidth: 70 },
+  { id: "ownership", label: "Titolarità", defaultWidth: 94, minWidth: 70 },
+  { id: "notes", label: "Note", defaultWidth: 150, minWidth: 90 },
+  { id: "outcome", label: "Esito", defaultWidth: 84, minWidth: 68 },
+] as const satisfies readonly TableColumnDefinition<StudyGroupPropertyColumnId>[];
 
 function tableColumn<Id extends string>(
   columns: readonly TableColumnDefinition<Id>[],
@@ -3049,6 +3093,50 @@ function App() {
     return update;
   }
 
+  async function savePropertyNotes(propertyId: string, notes: string) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/properties/${encodeURIComponent(propertyId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { message?: string } | null;
+        throw new Error(payload?.message ?? `HTTP ${response.status}`);
+      }
+      const update = (await response.json()) as { notes: string };
+      updatePropertyInStudies(propertyId, (property) => ({ ...property, notes: update.notes }));
+      flash("Note immobile salvate.");
+      return true;
+    } catch (error) {
+      console.error(error);
+      flash(error instanceof Error ? error.message : "Impossibile salvare le note immobile.");
+      return false;
+    }
+  }
+
+  async function renameStudyGroup(groupId: string, name: string) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/studies/groups/${encodeURIComponent(groupId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { message?: string | string[] } | null;
+        const message = Array.isArray(payload?.message) ? payload.message.join(". ") : payload?.message;
+        throw new Error(message ?? `HTTP ${response.status}`);
+      }
+      setStudies((await response.json()) as FeasibilityStudy[]);
+      flash("Nome del gruppo aggiornato.");
+      return true;
+    } catch (error) {
+      console.error(error);
+      flash(error instanceof Error ? error.message : "Impossibile rinominare il gruppo.");
+      return false;
+    }
+  }
+
   async function createStudyFromPq(form: NewStudyFormState) {
     setNewStudyBusy(true);
     try {
@@ -3436,6 +3524,7 @@ function App() {
             onDirtyChange={setEditorDirty}
             onDraftSaved={updatePropertyEstimatedValue}
             onImuOverridesSave={savePropertyImuOverrides}
+            onNotesSave={savePropertyNotes}
             onDocumentSaved={updatePropertyDocument}
           />
         </Suspense>
@@ -3487,7 +3576,7 @@ function App() {
           <PlanimetriaEditor
             study={{
               id: route.groupId,
-              company: `Gruppo · ${activeStudyGroupStudies.length} studi`,
+              company: studyGroupDisplayName(activeStudyGroupStudies),
               provincia: null,
             }}
             property={activeStudyGroupEditorProperty}
@@ -3521,6 +3610,8 @@ function App() {
           onBack={() => navigate({ view: "studies" })}
           onOpenStudy={(studyId) => navigate({ view: "study", studyId })}
           onOpenEditor={() => navigate({ view: "studyGroupEditor", groupId: route.groupId })}
+          onRename={(name) => renameStudyGroup(route.groupId, name)}
+          onNotice={flash}
         />
       </Shell>
     );
@@ -5456,28 +5547,224 @@ function PendingPage({
   );
 }
 
+function studyGroupDisplayName(studies: FeasibilityStudy[]) {
+  const savedName = studies.find((study) => study.studyGroupName?.trim())?.studyGroupName?.trim();
+  if (savedName) return savedName;
+  const companies = Array.from(new Set(studies.map((study) => study.company.trim()).filter(Boolean)));
+  return `Gruppo ${companies.join(" + ") || "studi selezionati"}`;
+}
+
 function StudyGroupDetail({
   groupId,
   studies,
   onBack,
   onOpenStudy,
   onOpenEditor,
+  onRename,
+  onNotice,
 }: {
   groupId: string;
   studies: FeasibilityStudy[];
   onBack: () => void;
   onOpenStudy: (studyId: string) => void;
   onOpenEditor: () => void;
+  onRename: (name: string) => Promise<boolean>;
+  onNotice: (message: string) => void;
 }) {
-  const properties = studies.flatMap((study) => (
+  const groupName = studyGroupDisplayName(studies);
+  const properties = useMemo(() => studies.flatMap((study) => (
     study.properties.map((property) => ({ study, property }))
-  ));
+  )), [studies]);
   const companies = Array.from(new Set(studies.map((study) => study.company)));
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(groupName);
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [sortKey, setSortKey] = useState<StudyGroupPropertySortKey>("company");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const tableColumns = useTableColumns("soul-table-study-group-properties-v1", STUDY_GROUP_PROPERTY_TABLE_COLUMNS);
+  const visibleColumns = useMemo(
+    () => new Set(tableColumns.visibleColumns.map((column) => column.id)),
+    [tableColumns.visibleColumns],
+  );
+  const presentationBaseline = useMemo(
+    () => presentationDraftFromStudyGroup(groupName, studies),
+    [groupName, studies],
+  );
+  const [presentationDraft, setPresentationDraft] = useState<PresentationDraft>(() => presentationBaseline);
+  const [presentationTouchedFields, setPresentationTouchedFields] = useState<Set<string>>(() => new Set());
+  const presentationSource = useMemo<PresentationSource>(() => ({
+    id: groupId,
+    company: groupName,
+    properties: properties.map(({ property }) => property),
+  }), [groupId, groupName, properties]);
+
+  useEffect(() => {
+    setNameDraft(groupName);
+    setRenaming(false);
+  }, [groupId, groupName]);
+
+  useEffect(() => {
+    setPresentationDraft((current) => {
+      const currentById = new Map(current.properties.map((property) => [property.id, property]));
+      return {
+        clientName: presentationTouchedFields.has("clientName") ? current.clientName : presentationBaseline.clientName,
+        properties: presentationBaseline.properties.map((baselineProperty) => {
+          const currentProperty = currentById.get(baselineProperty.id);
+          if (!currentProperty) return baselineProperty;
+          return PRESENTATION_PROPERTY_FIELDS.reduce(
+            (merged, field) => ({
+              ...merged,
+              [field]: presentationTouchedFields.has(`${baselineProperty.id}:${field}`)
+                ? currentProperty[field]
+                : baselineProperty[field],
+            }),
+            { ...baselineProperty },
+          );
+        }),
+      };
+    });
+  }, [presentationBaseline, presentationTouchedFields]);
+
+  const sortedProperties = useMemo(() => [...properties].sort((first, second) => {
+    const documentCount = (property: PropertyItem) => Object.values(property.documentUrls ?? {}).filter(Boolean).length;
+    const values: Record<StudyGroupPropertySortKey, [string | number, string | number]> = {
+      company: [first.study.company, second.study.company],
+      location: [propertyLocation(first.property), propertyLocation(second.property)],
+      sheet: [first.property.foglio ?? "", second.property.foglio ?? ""],
+      parcel: [first.property.particella ?? "", second.property.particella ?? ""],
+      sub: [first.property.subalterno ?? "", second.property.subalterno ?? ""],
+      category: [first.property.categoria, second.property.categoria],
+      currentRendita: [first.property.currentRendita, second.property.currentRendita],
+      estimatedRendita: [first.property.estimatedRendita, second.property.estimatedRendita],
+      renditaDiff: [propertyRenditaDiffAmount(first.property) ?? -Infinity, propertyRenditaDiffAmount(second.property) ?? -Infinity],
+      currentImu: [first.property.currentImu ?? -Infinity, second.property.currentImu ?? -Infinity],
+      estimatedImu: [first.property.estimatedImu ?? -Infinity, second.property.estimatedImu ?? -Infinity],
+      imuDiff: [propertyImuDiffAmount(first.property) ?? -Infinity, propertyImuDiffAmount(second.property) ?? -Infinity],
+      documents: [documentCount(first.property), documentCount(second.property)],
+      ownership: [formatTitolarita(first.property.titolarita, ""), formatTitolarita(second.property.titolarita, "")],
+      notes: [first.property.notes ?? "", second.property.notes ?? ""],
+      outcome: [first.property.outcome, second.property.outcome],
+    };
+    const [left, right] = values[sortKey];
+    const comparison = typeof left === "number" && typeof right === "number"
+      ? left - right
+      : String(left).localeCompare(String(right), "it", { numeric: true, sensitivity: "base" });
+    return sortDirection === "asc" ? comparison : -comparison;
+  }), [properties, sortDirection, sortKey]);
   const currentRendita = sumNumbers(properties.map(({ property }) => property.currentRendita));
   const estimatedRendita = sumNumbers(properties.map(({ property }) => property.estimatedRendita));
   const currentImu = nullableSum(properties.map(({ property }) => property.currentImu));
   const estimatedImu = nullableSum(properties.map(({ property }) => property.estimatedImu));
   const planCount = properties.filter(({ property }) => Boolean(property.documentUrls?.planimetria)).length;
+
+  function handleSort(nextSortKey: StudyGroupPropertySortKey) {
+    if (sortKey === nextSortKey) {
+      setSortDirection((current) => current === "asc" ? "desc" : "asc");
+      return;
+    }
+    setSortKey(nextSortKey);
+    setSortDirection("asc");
+  }
+
+  function renderHeader(columnId: StudyGroupPropertyColumnId) {
+    if (!visibleColumns.has(columnId)) return null;
+    const column = tableColumn(STUDY_GROUP_PROPERTY_TABLE_COLUMNS, columnId);
+    return (
+      <ResizableTableHeader
+        column={column}
+        canResize={tableColumns.canResize(columnId)}
+        resizing={tableColumns.resizingColumn === columnId}
+        onResizeStart={tableColumns.startResize}
+        onNudge={tableColumns.nudgeColumn}
+        ariaSort={ariaSortState(sortKey === columnId, sortDirection)}
+      >
+        <StudyGroupPropertySortHeader
+          label={column.label}
+          sortKey={columnId}
+          activeSort={sortKey}
+          direction={sortDirection}
+          onSort={handleSort}
+        />
+      </ResizableTableHeader>
+    );
+  }
+
+  function updatePresentationTouchedField(key: string, manual: boolean) {
+    setPresentationTouchedFields((current) => {
+      const next = new Set(current);
+      if (manual) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  function updatePresentationClientName(value: string) {
+    updatePresentationTouchedField("clientName", value !== presentationBaseline.clientName);
+    setPresentationDraft((current) => ({ ...current, clientName: value }));
+  }
+
+  function updatePresentationPropertyField(propertyId: string, field: PresentationPropertyField, value: string) {
+    const baselineProperty = presentationBaseline.properties.find((property) => property.id === propertyId);
+    const sourceProperty = properties.find(({ property }) => property.id === propertyId)?.property;
+    const linkedImuField = field === "renditaAttuale"
+      ? "imuAttuale"
+      : field === "renditaAttribuibile" ? "imuOttenibile" : null;
+    const linkedCalculation = field === "renditaAttuale"
+      ? sourceProperty?.currentImuCalculation
+      : field === "renditaAttribuibile" ? sourceProperty?.imuCalculation : null;
+    const recalculatedImu = linkedImuField ? presentationImuFromRendita(value, linkedCalculation) : null;
+    const updates: Partial<PresentationPropertyDraft> = { [field]: value };
+    if (linkedImuField && recalculatedImu !== null) updates[linkedImuField] = recalculatedImu;
+    Object.entries(updates).forEach(([updatedField, updatedValue]) => {
+      const typedField = updatedField as PresentationPropertyField;
+      updatePresentationTouchedField(
+        `${propertyId}:${typedField}`,
+        !baselineProperty || updatedValue !== baselineProperty[typedField],
+      );
+    });
+    setPresentationDraft((current) => ({
+      ...current,
+      properties: current.properties.map((property) => (
+        property.id === propertyId ? { ...property, ...updates } : property
+      )),
+    }));
+  }
+
+  function resetPresentationPropertyField(propertyId: string, field: PresentationPropertyField) {
+    const baselineProperty = presentationBaseline.properties.find((property) => property.id === propertyId);
+    if (!baselineProperty) return;
+    const linkedImuField = field === "renditaAttuale"
+      ? "imuAttuale"
+      : field === "renditaAttribuibile" ? "imuOttenibile" : null;
+    const fields: PresentationPropertyField[] = linkedImuField ? [field, linkedImuField] : [field];
+    fields.forEach((resetField) => updatePresentationTouchedField(`${propertyId}:${resetField}`, false));
+    setPresentationDraft((current) => ({
+      ...current,
+      properties: current.properties.map((property) => property.id === propertyId
+        ? fields.reduce(
+          (next, resetField) => ({ ...next, [resetField]: baselineProperty[resetField] }),
+          property,
+        )
+        : property),
+    }));
+  }
+
+  function resetPresentationDraft() {
+    setPresentationDraft(presentationBaseline);
+    setPresentationTouchedFields(new Set());
+    onNotice("Dati presentazione ripristinati dalla stima.");
+  }
+
+  async function submitRename() {
+    const name = nameDraft.trim();
+    if (!name || name === groupName || renameBusy) {
+      if (name === groupName) setRenaming(false);
+      return;
+    }
+    setRenameBusy(true);
+    if (await onRename(name)) setRenaming(false);
+    setRenameBusy(false);
+  }
 
   return (
     <main className="detail-page study-group-detail-page">
@@ -5489,14 +5776,55 @@ function StudyGroupDetail({
       <section className="detail-hero study-group-detail-hero">
         <div>
           <p className="eyebrow">Gruppo di studi</p>
-          <h1>{companies.length} {companies.length === 1 ? "società" : "società"} · {studies.length} studi</h1>
-          <p>{companies.join(" · ")}</p>
+          {renaming ? (
+            <div className="study-group-name-editor">
+              <input
+                autoFocus
+                value={nameDraft}
+                maxLength={240}
+                aria-label="Nome del gruppo studi"
+                onChange={(event) => setNameDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void submitRename();
+                  if (event.key === "Escape") {
+                    setNameDraft(groupName);
+                    setRenaming(false);
+                  }
+                }}
+              />
+              <button className="button primary compact-button" type="button" disabled={!nameDraft.trim() || renameBusy} onClick={() => void submitRename()}>
+                <Save size={14} /> {renameBusy ? "Salvataggio..." : "Salva"}
+              </button>
+              <button className="icon-button" type="button" disabled={renameBusy} onClick={() => { setNameDraft(groupName); setRenaming(false); }} aria-label="Annulla rinomina">
+                <X size={15} />
+              </button>
+            </div>
+          ) : (
+            <div className="study-group-name-heading">
+              <h1>{groupName}</h1>
+              <button className="icon-button" type="button" onClick={() => setRenaming(true)} aria-label="Rinomina gruppo studi" title="Rinomina gruppo">
+                <Pencil size={16} />
+              </button>
+            </div>
+          )}
+          <p>{companies.join(" · ")} · {studies.length} studi</p>
           <span className="study-group-detail-id">ID gruppo {groupId}</span>
         </div>
-        <button className="button primary" type="button" disabled={properties.length === 0} onClick={onOpenEditor}>
-          <Layers3 size={17} />
-          Editor complessivo del gruppo
-        </button>
+        <div className="study-group-hero-actions">
+          <button className="button secondary" type="button" disabled={properties.length === 0} onClick={() => document.getElementById("presentation-data")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+            <Pencil size={16} /> Modifica dati presentazione
+          </button>
+          <PresentationAction
+            study={presentationSource}
+            draft={presentationDraft}
+            version={3}
+            endpointBase={`/study-groups/${encodeURIComponent(groupId)}/presentations`}
+            onNotice={onNotice}
+          />
+          <button className="button primary" type="button" disabled={properties.length === 0} onClick={onOpenEditor}>
+            <Layers3 size={17} /> Editor complessivo del gruppo
+          </button>
+        </div>
       </section>
 
       <section className="study-group-summary-grid" aria-label="Riepilogo gruppo">
@@ -5539,24 +5867,30 @@ function StudyGroupDetail({
             <h2>Immobili dell’intero gruppo</h2>
             <span>{properties.length} unità provenienti da {studies.length} studi</span>
           </div>
+          <TableColumnMenu
+            columns={STUDY_GROUP_PROPERTY_TABLE_COLUMNS}
+            visibility={tableColumns.visibility}
+            onToggle={tableColumns.toggleColumn}
+            onShowAll={tableColumns.showAllColumns}
+            onResetWidths={tableColumns.resetWidths}
+          />
         </div>
-        <div className="table-scroll study-group-properties-table-wrap">
-          <table className="smart-table study-group-properties-table">
+        <div className="table-scroll study-group-properties-table-wrap resizable-table-wrap">
+          <table className="smart-table study-group-properties-table resizable-data-table">
+            <colgroup>
+              {tableColumns.visibleColumns.map((column) => (
+                <col key={column.id} style={{ width: tableColumns.widthPercent(column.id) }} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
-                <th>Studio / società</th>
-                <th>Ubicazione</th>
-                <th>Foglio</th>
-                <th>Part.</th>
-                <th>Sub</th>
-                <th>Cat.</th>
-                <th>Rendita attuale</th>
-                <th>Rendita prevista</th>
-                <th>Elab.</th>
+                {STUDY_GROUP_PROPERTY_TABLE_COLUMNS.map(({ id }) => renderHeader(id))}
               </tr>
             </thead>
             <tbody>
-              {properties.map(({ study, property }) => (
+              {sortedProperties.map(({ study, property }) => {
+                const imuPercent = deviationPercent(property.currentImu, property.estimatedImu);
+                return (
                 <tr
                   key={`${study.id}-${property.id}`}
                   className="data-row-clickable"
@@ -5566,25 +5900,39 @@ function StudyGroupDetail({
                     if (event.key === "Enter" || event.key === " ") onOpenStudy(study.id);
                   }}
                 >
-                  <td><strong>{study.company}</strong><small>{study.id}</small></td>
-                  <td title={propertyLocation(property)}>{propertyLocation(property)}</td>
-                  <td>{property.foglio || "—"}</td>
-                  <td>{property.particella || "—"}</td>
-                  <td>{property.subalterno || "—"}</td>
-                  <td>{property.categoria || "—"}</td>
-                  <td>{formatEuro(property.currentRendita)}</td>
-                  <td>{formatEuro(property.estimatedRendita)}</td>
-                  <td>
-                    <span className={`document-presence-dot${property.documentUrls?.planimetria ? " available" : ""}`}>
-                      {property.documentUrls?.planimetria ? "Sì" : "No"}
-                    </span>
-                  </td>
+                  {visibleColumns.has("company") && <td><strong>{study.company}</strong><small>{study.id}</small></td>}
+                  {visibleColumns.has("location") && <td className="table-cell-ellipsis" title={propertyLocation(property)}>{propertyLocation(property)}</td>}
+                  {visibleColumns.has("sheet") && <td>{property.foglio || "—"}</td>}
+                  {visibleColumns.has("parcel") && <td>{property.particella || "—"}</td>}
+                  {visibleColumns.has("sub") && <td>{property.subalterno || "—"}</td>}
+                  {visibleColumns.has("category") && <td>{property.categoria || "—"}</td>}
+                  {visibleColumns.has("currentRendita") && <td>{formatEuro(property.currentRendita)}</td>}
+                  {visibleColumns.has("estimatedRendita") && <td>{formatEstimatedValue(property.estimatedRendita)}</td>}
+                  {visibleColumns.has("renditaDiff") && <td><MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} favorableDirection="down" /></td>}
+                  {visibleColumns.has("currentImu") && <td><ImuCurrent property={property} /></td>}
+                  {visibleColumns.has("estimatedImu") && <td><ImuEstimate property={property} /></td>}
+                  {visibleColumns.has("imuDiff") && <td><MoneyPercentStack amount={propertyImuDiffAmount(property)} percent={imuPercent} /></td>}
+                  {visibleColumns.has("documents") && <td><PropertyDocumentAvailability property={property} compact /></td>}
+                  {visibleColumns.has("ownership") && <td className="table-cell-ellipsis" title={formatTitolarita(property.titolarita)}>{formatTitolarita(property.titolarita)}</td>}
+                  {visibleColumns.has("notes") && <td className="table-cell-ellipsis" title={property.notes || "Nessuna nota"}>{property.notes || "—"}</td>}
+                  {visibleColumns.has("outcome") && <td><OutcomeBadge outcome={property.outcome} /></td>}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
       </section>
+      <PresentationDataPreview
+        draft={presentationDraft}
+        baseline={presentationBaseline}
+        manualFields={presentationTouchedFields}
+        manualChanges={presentationTouchedFields.size}
+        onClientNameChange={updatePresentationClientName}
+        onPropertyFieldChange={updatePresentationPropertyField}
+        onPropertyFieldReset={resetPresentationPropertyField}
+        onReset={resetPresentationDraft}
+      />
     </main>
   );
 }
@@ -5643,6 +5991,7 @@ function StudyGroupRows({
     .filter((value): value is number => value !== null && Number.isFinite(value));
   const nextAppointment = nextAppointments.length > 0 ? Math.min(...nextAppointments) : null;
   const companyNames = Array.from(new Set(studies.map((study) => study.company)));
+  const groupName = studyGroupDisplayName(studies);
 
   return (
     <>
@@ -5685,7 +6034,7 @@ function StudyGroupRows({
         {visibleColumns.has("company") && (
           <td>
             <div className="company-cell study-group-title">
-              <strong>{studies.length} studi · {companyNames.length} società</strong>
+              <strong>{groupName}</strong>
               <span title={companyNames.join(", ")}>{companyNames.join(" · ")}</span>
               <button
                 className="study-group-open-button"
@@ -6225,6 +6574,15 @@ function presentationDraftFromStudy(study: FeasibilityStudy): PresentationDraft 
   };
 }
 
+function presentationDraftFromStudyGroup(groupName: string, studies: FeasibilityStudy[]): PresentationDraft {
+  return {
+    clientName: groupName,
+    properties: studies.flatMap((study) => (
+      presentationDraftFromStudy(study).properties
+    )),
+  };
+}
+
 function presentationMunicipality(comune: string, provincia?: string | null) {
   const normalizedComune = comune.replace(/\s*\([A-Z]{2}\)\s*$/i, "").replace(/\s+/g, " ").trim();
   const normalizedProvincia = provincia?.replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase();
@@ -6352,11 +6710,13 @@ function PresentationAction({
   draft,
   onNotice,
   version = 1,
+  endpointBase,
 }: {
-  study: FeasibilityStudy;
+  study: PresentationSource;
   draft: PresentationDraft;
   onNotice: (message: string) => void;
   version?: 1 | 2 | 3;
+  endpointBase?: string;
 }) {
   const isV2 = version === 2;
   const isV3 = version === 3;
@@ -6371,6 +6731,8 @@ function PresentationAction({
   const [latestDeck, setLatestDeck] = useState<PresentationDeck | null>(null);
   const [generatedDeck, setGeneratedDeck] = useState<PresentationDeck | null>(null);
   const [busy, setBusy] = useState(false);
+  const presentationsEndpoint = endpointBase
+    ?? `/studies/${encodeURIComponent(study.id)}/presentations`;
   const propertyDraftById = useMemo(
     () => new Map(draft.properties.map((property) => [property.id, property])),
     [draft.properties],
@@ -6385,7 +6747,7 @@ function PresentationAction({
 
   useEffect(() => {
     const abortController = new AbortController();
-    fetch(`${API_BASE_URL}/studies/${encodeURIComponent(study.id)}/presentations`, {
+    fetch(`${API_BASE_URL}${presentationsEndpoint}`, {
       signal: abortController.signal,
     })
       .then((response) => {
@@ -6401,7 +6763,7 @@ function PresentationAction({
         }
       });
     return () => abortController.abort();
-  }, [study.id, version]);
+  }, [presentationsEndpoint, version]);
 
   useEffect(() => {
     if (!modalOpen) return;
@@ -6433,7 +6795,7 @@ function PresentationAction({
     }
     setBusy(true);
     try {
-      const endpoint = `${API_BASE_URL}/studies/${encodeURIComponent(study.id)}/presentations${version === 1 ? "" : `/v${version}`}`;
+      const endpoint = `${API_BASE_URL}${presentationsEndpoint}${version === 1 ? "" : `/v${version}`}`;
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -6575,7 +6937,7 @@ function PresentationAction({
             </div>
 
             <p className="modal-note">
-              Seleziona gli immobili da includere. I contenuti e gli importi arrivano dall’anteprima editabile presente nella pagina dello studio.
+              Seleziona gli immobili da includere. I contenuti e gli importi arrivano dall’anteprima editabile presente nella pagina corrente.
             </p>
 
             <div className="presentation-selection-toolbar">
@@ -6680,7 +7042,7 @@ function PresentationAction({
   );
 }
 
-function defaultPresentationPropertyIds(study: FeasibilityStudy) {
+function defaultPresentationPropertyIds(study: PresentationSource) {
   const positiveIds = study.properties
     .filter((property) => property.outcome === "Positivo")
     .map((property) => property.id);
@@ -8890,6 +9252,30 @@ function PropertySortHeader({
       ) : (
         <ArrowDownUp size={13} />
       )}
+    </button>
+  );
+}
+
+function StudyGroupPropertySortHeader({
+  label,
+  sortKey,
+  activeSort,
+  direction,
+  onSort,
+}: {
+  label: string;
+  sortKey: StudyGroupPropertySortKey;
+  activeSort: StudyGroupPropertySortKey;
+  direction: "asc" | "desc";
+  onSort: (sortKey: StudyGroupPropertySortKey) => void;
+}) {
+  const active = activeSort === sortKey;
+  return (
+    <button className={`sort-header ${active ? "active" : ""}`} type="button" onClick={() => onSort(sortKey)}>
+      {label}
+      {active
+        ? direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+        : <ArrowDownUp size={13} />}
     </button>
   );
 }

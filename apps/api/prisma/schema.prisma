@@ -73,10 +73,12 @@ model FeasibilityStudy {
 
 model StudyGroup {
   id            String                   @id @default(cuid())
+  name          String?
   createdAt     DateTime                 @default(now())
   updatedAt     DateTime                 @updatedAt
   studies       FeasibilityStudy[]
   analysisDraft StudyGroupAnalysisDraft?
+  presentations PresentationDeck[]
 }
 
 model StudyGroupAnalysisDraft {
@@ -147,15 +149,18 @@ model PropertyValuationGroupAnalysisDraft {
 }
 
 model PresentationDeck {
-  id          String           @id @default(cuid())
-  studyId     String
+  id           String            @id @default(cuid())
+  studyId      String?
+  studyGroupId String?
   propertyIds Json
   snapshot    Json
   fileName    String
-  createdAt   DateTime         @default(now())
-  study       FeasibilityStudy @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  createdAt    DateTime          @default(now())
+  study        FeasibilityStudy? @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  studyGroup   StudyGroup?       @relation(fields: [studyGroupId], references: [id], onDelete: Cascade)
 
   @@index([studyId, createdAt])
+  @@index([studyGroupId, createdAt])
 }
 
 model StudyVersion {
@@ -179,6 +184,7 @@ model Property {
   valuationGroupId      String?
   address               String
   humanReadableAddress  String?
+  notes                 String                  @default("")
   comune                String
   provincia             String?
   ubicazione            String?
