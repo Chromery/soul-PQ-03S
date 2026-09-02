@@ -1,6 +1,6 @@
 # ERP/PQ Sync API Spec
 
-Versione: `v1.3` (estensione retrocompatibile del path `/v1`)
+Versione: `v1.4` (estensione retrocompatibile del path `/v1`)
 
 Questo documento definisce il contratto minimo di integrazione tra ERP Soul e Soul Prospect Qualifier (`PQ`).
 
@@ -19,6 +19,9 @@ PQ espone API server-to-server chiamate dall'ERP. L'autenticazione utenti intern
 - Dalla v1.3 il pull restituisce l'ultima presentazione v3 gia creata manualmente per lo studio
   o per il suo gruppo. Il sync non crea mai una presentazione automaticamente e omette il campo
   `presentazione` quando non esiste una v3.
+- Dalla v1.4 gli esiti studio canonici sono `Aperta`, `Annullata`, `Negativa`, `Positiva` e
+  `Sospesa`. A ogni cambio di esito PQ aggiorna automaticamente `data_esito`; il path `/v1`
+  resta invariato.
 
 ## Convenzioni
 
@@ -79,7 +82,7 @@ Request:
         "provincia": "BZ",
         "regione": "Trentino-Alto Adige"
       },
-      "stato_studio": "in_progress",
+      "stato_studio": "Aperta",
       "data_creazione_studio": "2026-06-10T10:15:00+02:00",
       "data_importazione_erp": "2026-06-21T09:30:00+02:00",
       "data_scadenza": "2026-07-15",
@@ -193,6 +196,9 @@ Regole:
 - `storage_key` e la object key nel bucket S3/B2, non un percorso filesystem locale.
 - L'estrazione AI dei dati da visura non blocca piu la risposta di sync: PQ salva prima studio, immobili e PDF, poi accoda un job asincrono. La response indica quanti job sono stati accodati in `visure_in_coda`.
 - `note_immobile` e facoltativo, ha un limite di 4.000 caratteri e, se assente in un aggiornamento ERP, conserva le note gia presenti in PQ.
+- Se `stato_studio` cambia, PQ salva in `data_esito` il valore non nullo ricevuto dall'ERP oppure,
+  quando il valore e assente o null, la data corrente. Se lo stato non cambia e `data_esito` e
+  assente, la data gia salvata viene conservata.
 
 ### 2. Lettura modifiche PQ da ERP
 
@@ -215,7 +221,7 @@ Response `200 OK`:
       "company_erp_id": "47824",
       "ragione_sociale": "Azienda Srl",
       "partita_iva": "IT00124252687",
-      "stato_studio": "In lavorazione",
+      "stato_studio": "Aperta",
       "data_esito": null,
       "data_prossimo_appuntamento": "2026-06-25T13:00:00.000Z",
       "appuntamento_attivo": true,
@@ -379,13 +385,16 @@ Campi documento obbligatori quando un documento viene inviato:
 
 `stato_studio` accettati:
 
-- `da_iniziare`
-- `in_progress`
-- `in_lavorazione`
-- `in_revisione`
-- `concluso`
-- `archiviato`
-- `annullato`
+- `Aperta`
+- `Annullata`
+- `Negativa`
+- `Positiva`
+- `Sospesa`
+
+Il confronto in ingresso non distingue maiuscole e minuscole. Gli alias della versione precedente
+(`da_iniziare`, `in_progress`, `in_lavorazione`, `in_revisione`, `concluso`, `archiviato`,
+`annullato`) restano tollerati per retrocompatibilita, ma il pull restituisce sempre uno dei cinque
+valori canonici.
 
 `esito` immobile accettati:
 

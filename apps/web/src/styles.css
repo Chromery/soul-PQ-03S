@@ -1627,30 +1627,33 @@ body.is-resizing-columns {
   white-space: nowrap;
 }
 
-.status-badge.concluso,
+.status-badge.positiva,
 .outcome-badge.positive,
 .outcome-select.positive {
   color: #0f8a3a;
   background: var(--success-bg);
 }
 
+.status-badge.negativa,
+.status-select.negativa,
 .outcome-badge.negative,
 .outcome-select.negative {
   color: #d62828;
   background: var(--danger-bg);
 }
 
-.status-badge.da-iniziare {
-  color: #a76200;
-  background: var(--warning-bg);
+.status-badge.annullata,
+.status-select.annullata {
+  color: #526172;
+  background: #eef2f7;
 }
 
-.status-badge.in-lavorazione {
+.status-badge.aperta {
   color: #0b62cf;
   background: var(--info-bg);
 }
 
-.status-badge.in-revisione {
+.status-badge.sospesa {
   color: #6d28d9;
   background: var(--purple-bg);
 }
@@ -1666,22 +1669,17 @@ body.is-resizing-columns {
   font-weight: 800;
 }
 
-.status-select.da-iniziare {
-  color: #a76200;
-  background: var(--warning-bg);
-}
-
-.status-select.in-lavorazione {
+.status-select.aperta {
   color: #0b62cf;
   background: var(--info-bg);
 }
 
-.status-select.in-revisione {
+.status-select.sospesa {
   color: #6d28d9;
   background: var(--purple-bg);
 }
 
-.status-select.concluso {
+.status-select.positiva {
   color: #0f8a3a;
   background: var(--success-bg);
 }

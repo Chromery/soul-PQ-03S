@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Soul Prospect Qualifier - ERP/PQ Sync API
-  version: 1.3.0
+  version: 1.4.0
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -10,9 +10,10 @@ info:
     studi di fattibilita dall'ERP e permettere all'ERP di leggere le modifiche
     successive prodotte in PQ.
 
-    La v1.3 estende in modo retrocompatibile lo stesso endpoint v1 con le note
-    per immobile e l'ultima presentazione v3 creata manualmente. Il sync non crea
-    presentazioni e il pull omette il campo se non esiste una v3.
+    La v1.4 estende in modo retrocompatibile lo stesso endpoint v1 con gli esiti
+    studio allineati all'ERP e l'aggiornamento automatico di `data_esito` a ogni
+    cambio di esito. Restano disponibili le note per immobile e l'ultima
+    presentazione v3 creata manualmente; il sync non crea presentazioni.
 
     L'autenticazione e machine-to-machine tramite header:
     `Authorization: Bearer <ERP_SYNC_TOKEN>`.
@@ -64,7 +65,7 @@ paths:
                         comune: Bolzano
                         provincia: BZ
                         regione: Trentino-Alto Adige
-                      stato_studio: in_progress
+                      stato_studio: Aperta
                       data_creazione_studio: "2026-06-10T10:15:00+02:00"
                       data_importazione_erp: "2026-06-22T09:30:00+02:00"
                       data_scadenza: "2026-07-15"
@@ -184,7 +185,7 @@ paths:
                         company_erp_id: "47824"
                         ragione_sociale: Azienda Srl
                         partita_iva: IT00124252687
-                        stato_studio: In lavorazione
+                        stato_studio: Aperta
                         data_esito: null
                         data_prossimo_appuntamento: "2026-06-25T13:00:00.000Z"
                         appuntamento_attivo: true
@@ -431,6 +432,10 @@ components:
             - string
             - "null"
           format: date-time
+          description: |
+            Data dell'ultimo cambio di esito. Se `stato_studio` cambia e il campo
+            e assente o null, PQ salva automaticamente la data corrente. Se lo
+            stato non cambia, l'assenza del campo conserva la data esistente.
         data_prossimo_appuntamento:
           type:
             - string
@@ -492,13 +497,15 @@ components:
     StatoStudioInput:
       type: string
       enum:
-        - da_iniziare
-        - in_progress
-        - in_lavorazione
-        - in_revisione
-        - concluso
-        - archiviato
-        - annullato
+        - Aperta
+        - Annullata
+        - Negativa
+        - Positiva
+        - Sospesa
+      description: |
+        Esito canonico dello studio. Il confronto in ingresso non distingue
+        maiuscole e minuscole; i precedenti alias restano tollerati per
+        retrocompatibilita.
     MetricheStudioInput:
       type: object
       properties:
@@ -788,12 +795,13 @@ components:
         partita_iva:
           type: string
         stato_studio:
-          type: string
+          $ref: "#/components/schemas/StatoStudioInput"
         data_esito:
           type:
             - string
             - "null"
           format: date-time
+          description: Data dell'ultimo cambio di esito dello studio.
         data_prossimo_appuntamento:
           type:
             - string

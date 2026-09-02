@@ -128,6 +128,7 @@ test("il pull ERP include note immobile e l'ultima presentazione v3 manuale di g
   const response = await fixture.service.listModifiedStudies("2026-09-01T00:00:00.000Z");
 
   assert.equal(response.totale, 1);
+  assert.equal(response.studi[0]?.stato_studio, "Positiva");
   assert.equal(response.studi[0]?.immobili[0]?.note_immobile, "Nota specifica dell'immobile");
   assert.deepEqual(response.studi[0]?.presentazione, {
     presentazione_id: "PRESENTAZIONE-V3-GRUPPO",

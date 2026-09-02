@@ -23,6 +23,11 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { estimatedRenditaFromAnalysisDraft } from "../rendita.js";
 import { municipalityWithSection } from "../visura-extraction/visura-text-extractor.js";
 import type { UpdateStudyDto } from "./dto/update-study.dto.js";
+import {
+  isTerminalStudyOutcome,
+  normalizeStudyOutcome,
+  resolveStudyOutcomeDate,
+} from "./study-outcome.js";
 
 type PropertyWithDocuments = Property & {
   documents: PropertyDocument[];
@@ -104,20 +109,37 @@ export class StudiesService {
   async update(id: string, input: UpdateStudyDto) {
     const exists = await this.prisma.feasibilityStudy.findUnique({
       where: { id },
-      select: { id: true, status: true, company: true },
+      select: { id: true, status: true, company: true, concludedAt: true },
     });
     if (!exists) return null;
 
+    const nextStatus = input.status ? normalizeStudyOutcome(input.status) : undefined;
+    const updateData = nextStatus
+      ? {
+          ...input,
+          status: nextStatus,
+          concludedAt: resolveStudyOutcomeDate({
+            previousStatus: exists.status,
+            nextStatus,
+            currentDate: exists.concludedAt,
+          }),
+        }
+      : input;
+
     const study = await this.prisma.feasibilityStudy.update({
       where: { id },
-      data: input,
+      data: updateData,
       include: {
         properties: { include: propertyInclude(), orderBy: propertyOrderBy() },
         versions: { orderBy: { versionNumber: "desc" } },
         studyGroup: { include: { analysisDraft: true } },
       },
     });
-    if (input.status === "Concluso" && exists.status !== "Concluso") {
+    if (
+      nextStatus
+      && isTerminalStudyOutcome(nextStatus)
+      && !isTerminalStudyOutcome(exists.status)
+    ) {
       try {
         await this.activities?.recordStudyConcluded({ studyId: id, company: study.company, source: "PQ" });
       } catch (error) {
@@ -144,7 +166,7 @@ export class StudiesService {
           comune: input.comune,
           provincia: input.provincia,
           region: input.region,
-          status: "Da iniziare",
+          status: "Aperta",
           createdAt: now,
           concludedAt: null,
           deadline,
@@ -167,7 +189,7 @@ export class StudiesService {
         data: {
           studyId,
           versionNumber: 1,
-          status: "Da iniziare",
+          status: "Aperta",
           technicalOwner: input.technicalOwner,
           notes: "Studio creato direttamente da PQ.",
         },
@@ -502,6 +524,11 @@ export class StudiesService {
     const estimatedImu = sum(properties.map((property) => property.estimatedImu ?? 0));
     return {
       ...studyFields,
+      status: normalizeStudyOutcome(study.status),
+      versions: study.versions.map((version) => ({
+        ...version,
+        status: normalizeStudyOutcome(version.status),
+      })),
       studyGroupName: study.studyGroup?.name ?? null,
       diffRendita: Number(study.diffRendita),
       diffImu: estimatedImu - currentImu,

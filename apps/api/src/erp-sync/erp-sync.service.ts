@@ -25,6 +25,11 @@ import { PriceListsService } from "../price-lists/price-lists.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { estimatedRenditaFromAnalysisDraft } from "../rendita.js";
 import { ScaleExtractionService } from "../scale-extraction/scale-extraction.service.js";
+import {
+  isTerminalStudyOutcome,
+  normalizeStudyOutcome,
+  resolveStudyOutcomeDate,
+} from "../studies/study-outcome.js";
 import { VisuraExtractionService } from "../visura-extraction/visura-extraction.service.js";
 import {
   municipalityWithSection,
@@ -246,9 +251,22 @@ export class ErpSyncService {
     const firstProperty = normalizedProperties[0];
     const sede = asOptionalRecord(input.indirizzo_sede);
     const technicalOwner = ownerName(input.responsabile_tecnico) ?? this.defaultTechnicalOwner;
-    const status = mapStudyStatus(optionalString(input.stato_studio));
     const now = new Date();
-    const dataEsito = nullableDate(input.data_esito, "data_esito");
+    const previousStatus = existing ? normalizeStudyOutcome(existing.status) : null;
+    const requestedStatus = optionalString(input.stato_studio);
+    const status = requestedStatus ? normalizeStudyOutcome(requestedStatus) : previousStatus ?? "Aperta";
+    const dataEsitoProvided = Object.prototype.hasOwnProperty.call(input, "data_esito");
+    const suppliedDataEsito = dataEsitoProvided
+      ? nullableDate(input.data_esito, "data_esito")
+      : undefined;
+    const dataEsito = resolveStudyOutcomeDate({
+      previousStatus: existing?.status,
+      nextStatus: status,
+      currentDate: existing?.concludedAt,
+      suppliedDate: suppliedDataEsito,
+      suppliedDateProvided: dataEsitoProvided,
+      now,
+    });
     const dataScadenza = optionalDate(input.data_scadenza, "data_scadenza") ?? addDays(now, 30);
     const dataCreazione = optionalDate(input.data_creazione_studio, "data_creazione_studio") ?? now;
 
@@ -453,7 +471,7 @@ export class ErpSyncService {
 
     await this.priceLists.assignForStudy(studioErpId);
 
-    if (status === "Concluso" && existing?.status !== "Concluso") {
+    if (isTerminalStudyOutcome(status) && (!existing || !isTerminalStudyOutcome(existing.status))) {
       try {
         await this.activities?.recordStudyConcluded({
           studyId: studioErpId,
@@ -590,7 +608,7 @@ export class ErpSyncService {
       company_erp_id: study.companyErpId,
       ragione_sociale: study.company,
       partita_iva: study.vat,
-      stato_studio: study.status,
+      stato_studio: normalizeStudyOutcome(study.status),
       data_esito: study.concludedAt?.toISOString() ?? null,
       data_prossimo_appuntamento: study.nextAppointment?.toISOString() ?? null,
       appuntamento_attivo: Boolean(study.nextAppointment && study.nextAppointment > now),
@@ -758,17 +776,6 @@ function ownerName(value: unknown) {
   if (typeof value === "string") return optionalString(value);
   const owner = asOptionalRecord(value);
   return optionalString(owner?.nome) ?? optionalString(owner?.email) ?? optionalString(owner?.erp_user_id);
-}
-
-function mapStudyStatus(value?: string) {
-  const normalized = value?.toLowerCase();
-  if (normalized === "da_iniziare") return "Da iniziare";
-  if (normalized === "in_progress" || normalized === "in_lavorazione") return "In lavorazione";
-  if (normalized === "in_revisione") return "In revisione";
-  if (normalized === "concluso") return "Concluso";
-  if (normalized === "archiviato") return "Archiviato";
-  if (normalized === "annullato") return "Annullato";
-  return value ?? "Da iniziare";
 }
 
 function mapPropertyOutcome(value: string | undefined, hasStudy: boolean) {

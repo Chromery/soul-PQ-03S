@@ -1,11 +1,10 @@
 import { IsIn, IsOptional, IsString, MaxLength } from "class-validator";
-
-const studyWorkflowStatuses = ["Da iniziare", "In lavorazione", "In revisione", "Concluso"] as const;
+import { STUDY_OUTCOMES, type StudyOutcome } from "../study-outcome.js";
 
 export class UpdateStudyDto {
   @IsOptional()
-  @IsIn(studyWorkflowStatuses)
-  status?: (typeof studyWorkflowStatuses)[number];
+  @IsIn(STUDY_OUTCOMES)
+  status?: StudyOutcome;
 
   @IsOptional()
   @IsString()

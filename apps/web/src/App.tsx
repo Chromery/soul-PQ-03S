@@ -71,7 +71,7 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.62.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.62.1";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -101,7 +101,7 @@ type ActivityFeedState = {
 
 const ACTIVITY_SEEN_STORAGE_KEY = "soul-activity-seen-at";
 
-type StudyStatus = "Da iniziare" | "In lavorazione" | "In revisione" | "Concluso";
+type StudyStatus = "Aperta" | "Annullata" | "Negativa" | "Positiva" | "Sospesa";
 
 type PropertyOutcome = "Positivo" | "Negativo" | "Neutro";
 
@@ -821,7 +821,7 @@ const demoStudies: FeasibilityStudy[] = [
     comune: "Milano",
     provincia: "MI",
     region: "Lombardia",
-    status: "Concluso",
+    status: "Positiva",
     createdAt: "2026-04-29",
     importedAt: "2026-05-05T09:15:00",
     concludedAt: "2026-05-04",
@@ -1039,7 +1039,7 @@ const demoStudies: FeasibilityStudy[] = [
     comune: "Monza",
     provincia: "MB",
     region: "Lombardia",
-    status: "Da iniziare",
+    status: "Aperta",
     createdAt: "2026-04-27",
     importedAt: "2026-05-05T09:10:00",
     deadline: "2026-05-31",
@@ -1224,7 +1224,7 @@ const demoStudies: FeasibilityStudy[] = [
     comune: "Bergamo",
     provincia: "BG",
     region: "Lombardia",
-    status: "In revisione",
+    status: "Sospesa",
     createdAt: "2026-04-24",
     importedAt: "2026-05-02T10:28:00",
     deadline: "2026-06-08",
@@ -1376,7 +1376,7 @@ const demoStudies: FeasibilityStudy[] = [
     comune: "Brescia",
     provincia: "BS",
     region: "Lombardia",
-    status: "In lavorazione",
+    status: "Aperta",
     createdAt: "2026-04-23",
     importedAt: "2026-05-02T09:48:00",
     deadline: "2026-05-18",
@@ -1497,7 +1497,7 @@ const demoStudies: FeasibilityStudy[] = [
     comune: "Bologna",
     provincia: "BO",
     region: "Emilia-Romagna",
-    status: "In lavorazione",
+    status: "Aperta",
     createdAt: "2026-04-21",
     importedAt: "2026-04-30T11:04:00",
     deadline: "2026-06-15",
@@ -1601,7 +1601,7 @@ const demoStudies: FeasibilityStudy[] = [
     comune: "Rimini",
     provincia: "RN",
     region: "Emilia-Romagna",
-    status: "Concluso",
+    status: "Negativa",
     createdAt: "2026-04-18",
     importedAt: "2026-04-29T16:22:00",
     concludedAt: "2026-05-02",
@@ -1702,17 +1702,19 @@ const sortOptions: Array<{ value: SortKey; label: string }> = [
 
 const statusOptions: Array<StudyStatus | "Tutti"> = [
   "Tutti",
-  "Da iniziare",
-  "In lavorazione",
-  "In revisione",
-  "Concluso",
+  "Aperta",
+  "Annullata",
+  "Negativa",
+  "Positiva",
+  "Sospesa",
 ];
 
 const editableStatusOptions: StudyStatus[] = [
-  "Da iniziare",
-  "In lavorazione",
-  "In revisione",
-  "Concluso",
+  "Aperta",
+  "Annullata",
+  "Negativa",
+  "Positiva",
+  "Sospesa",
 ];
 
 const propertyOutcomeOptions: PropertyOutcome[] = ["Positivo", "Negativo", "Neutro"];
@@ -2866,9 +2868,11 @@ function App() {
   const totals = useMemo(() => {
     const visible = filteredStudies;
     const inProgress = visible.filter(
-      (study) => study.status === "In lavorazione" || study.status === "In revisione",
+      (study) => study.status === "Aperta" || study.status === "Sospesa",
     ).length;
-    const concluded = visible.filter((study) => study.status === "Concluso").length;
+    const concluded = visible.filter(
+      (study) => study.status === "Annullata" || study.status === "Negativa" || study.status === "Positiva",
+    ).length;
     const potentialRendita = visible.reduce((sum, study) => sum + study.totalRendita, 0);
     const averageDiff =
       visible.reduce((sum, study) => sum + study.diffRendita, 0) / Math.max(visible.length, 1);
@@ -3794,7 +3798,7 @@ function App() {
             />
             <MetricCard
               icon={<CheckCircle2 size={22} />}
-              label="Studi conclusi"
+              label="Studi con esito"
               value={numberFormatter.format(totals.concluded)}
               tone="green"
               delta="Nella vista corrente"
@@ -8338,7 +8342,7 @@ function StudyDetail({
         <DetailMetric
           icon={study.diffRendita >= 0 ? <TrendingUp size={22} /> : <TrendingDown size={22} />}
           label="Differenza rendita"
-          value={formatPercent(study.diffRendita)}
+          value={formatEuro(studyRenditaDiffAmount(study))}
           positive={study.diffRendita <= 0}
         />
         <DetailMetric
