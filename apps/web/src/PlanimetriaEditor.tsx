@@ -50,6 +50,7 @@ import { ResizableTableHeader, useTableColumns } from "./tableColumns";
 import type { TableColumnDefinition } from "./tableColumns";
 import {
   DEFAULT_LOT_VALUATION,
+  effectiveLotAreaM2,
   lotValueShare,
   normalizeLotValuation,
   resolveLotValuation,
@@ -1737,7 +1738,7 @@ export default function PlanimetriaEditor({
     documentSource
     || allSelections.length > 0
     || allLotBoundaries.length > 0
-    || (!hasElaboratoPlan && lotValuation.manualAreaM2 > 0),
+    || lotValuation.manualAreaM2 > 0,
   );
   const currentPageRotation = currentPage ? runtimeRef.current.pageRotations.get(currentPage) ?? 0 : 0;
 
@@ -1796,7 +1797,8 @@ export default function PlanimetriaEditor({
       ),
     [allLotBoundaries, scaleDenominator, sheetSize, revision],
   );
-  const effectiveLotArea = hasElaboratoPlan ? tracedLotArea : lotValuation.manualAreaM2;
+  const usesManualLotArea = lotValuation.manualAreaM2 > 0;
+  const effectiveLotArea = effectiveLotAreaM2(tracedLotArea, lotValuation.manualAreaM2);
 
   const selectedLotStats = useMemo(
     () =>
@@ -10008,29 +10010,29 @@ export default function PlanimetriaEditor({
                   {!lotValuationCollapsed && (
                     <div className="editor-summary-collapse-content">
                       <div className="editor-lot-valuation">
-                        {!hasElaboratoPlan && (
-                          <label className="lot-manual-area-field">
-                            <span>
-                              Superficie lotto manuale
-                              <small>Disponibile perché l’elaborato planimetrico non è presente</small>
-                            </span>
-                            <div>
-                              <input
-                                key={`manual-lot-area-${lotValuation.manualAreaM2}`}
-                                type="text"
-                                inputMode="decimal"
-                                defaultValue={areaFormatter.format(lotValuation.manualAreaM2)}
-                                onBlur={(event) => {
-                                  const nextValue = changeManualLotArea(event.currentTarget.value);
-                                  event.currentTarget.value = areaFormatter.format(
-                                    nextValue ?? lotValuation.manualAreaM2,
-                                  );
-                                }}
-                              />
-                              <strong>m²</strong>
-                            </div>
-                          </label>
-                        )}
+                        <label className="lot-manual-area-field">
+                          <span>
+                            Superficie lotto manuale
+                            <small>
+                              Se maggiore di zero sostituisce la superficie tracciata; usa 0 per calcolarla dal disegno
+                            </small>
+                          </span>
+                          <div>
+                            <input
+                              key={`manual-lot-area-${lotValuation.manualAreaM2}`}
+                              type="text"
+                              inputMode="decimal"
+                              defaultValue={areaFormatter.format(lotValuation.manualAreaM2)}
+                              onBlur={(event) => {
+                                const nextValue = changeManualLotArea(event.currentTarget.value);
+                                event.currentTarget.value = areaFormatter.format(
+                                  nextValue ?? lotValuation.manualAreaM2,
+                                );
+                              }}
+                            />
+                            <strong>m²</strong>
+                          </div>
+                        </label>
                         <div className="lot-mode-toggle" role="group" aria-label="Metodo di valorizzazione del lotto">
                           <button
                             type="button"
@@ -10088,7 +10090,11 @@ export default function PlanimetriaEditor({
                             : `${formatM2(effectiveLotArea)} × ${areaFormatter.format(resolvedLotValuation.unitValuePerM2)} €/m² = ${moneyFormatter.format(resolvedLotValuation.lotValue)}; ${moneyFormatter.format(resolvedLotValuation.lotValue)} ÷ ${moneyFormatter.format(selectedLotStats.destinationValue)} = ${areaFormatter.format(resolvedLotValuation.percentage)}%`}
                         </small>
                         <small className="editor-lot-selection-meta">
-                          {hasElaboratoPlan ? "Superficie lotto tracciata" : "Superficie lotto manuale"}:{" "}
+                          {usesManualLotArea
+                            ? "Superficie lotto manuale"
+                            : hasElaboratoPlan
+                              ? "Superficie lotto tracciata"
+                              : "Superficie lotto non impostata"}:{" "}
                           {formatM2(totals.lotArea)} · {selectedLotStats.count} destinazioni incluse
                         </small>
                       </div>

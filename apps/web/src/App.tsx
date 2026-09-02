@@ -66,12 +66,17 @@ import {
   writeEditorPreferences,
 } from "./editorPreferences";
 import { openEntriesInForMaps, toForMapsEntries, toForMapsEntry } from "./formaps";
-import { lotValueShare, normalizeLotValuation, resolveLotValuation } from "./lotValuation";
+import {
+  effectiveLotAreaM2,
+  lotValueShare,
+  normalizeLotValuation,
+  resolveLotValuation,
+} from "./lotValuation";
 import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.62.1";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.62.2";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -2108,7 +2113,7 @@ function planAreaSelectionHasOneri(
   return draft.defaultOneri ?? legacyPropertyOneri;
 }
 
-function planLotAreaFromDraft(draft: PlanAreaDraft, hasElaborato = draft.document !== null) {
+function planLotAreaFromDraft(draft: PlanAreaDraft) {
   const tracedArea = (draft.lotBoundaries ?? []).reduce((sum, boundary) => {
     const totalPixels =
       typeof boundary.totalPixels === "number" && boundary.totalPixels > 0
@@ -2121,12 +2126,13 @@ function planLotAreaFromDraft(draft: PlanAreaDraft, hasElaborato = draft.documen
     return sum + (boundary.region.count / totalPixels) *
       pageRealAreaM2(scale.sheetSize, scale.scaleDenominator);
   }, 0);
-  return tracedArea > 0 || hasElaborato
-    ? tracedArea
-    : normalizeLotValuation(draft.lotValuation).manualAreaM2;
+  return effectiveLotAreaM2(
+    tracedArea,
+    normalizeLotValuation(draft.lotValuation).manualAreaM2,
+  );
 }
 
-function planAreaLotCalculation(draft: PlanAreaDraft, hasElaborato = draft.document !== null) {
+function planAreaLotCalculation(draft: PlanAreaDraft) {
   const baseRows = draft.selections.map((selection) => ({
     selection,
     area: planAreaEffectiveAreaM2(selection, draft),
@@ -2143,7 +2149,7 @@ function planAreaLotCalculation(draft: PlanAreaDraft, hasElaborato = draft.docum
     },
     { destinationValue: 0, areaM2: 0, count: 0 },
   );
-  const lotArea = planLotAreaFromDraft(draft, hasElaborato);
+  const lotArea = planLotAreaFromDraft(draft);
   const resolved = resolveLotValuation(
     draft.lotValuation,
     lotArea,
@@ -2194,7 +2200,6 @@ function planAreaEstimatedRenditaFromDraft(draft: PlanAreaDraft, oneri = false) 
 function recalculatePlanAreaDraftTotals(
   draft: PlanAreaDraft,
   oneri = false,
-  hasElaborato = draft.document !== null,
 ): PlanAreaDraft {
   const legacyOneri = oneri && !planAreaHasAreaOneriData(draft);
   const defaultOneri = draft.defaultOneri ?? legacyOneri;
@@ -2208,7 +2213,7 @@ function recalculatePlanAreaDraftTotals(
       oneri: planAreaSelectionHasOneri(selection, draft, legacyOneri),
     })),
   };
-  const lot = planAreaLotCalculation(migratedDraft, hasElaborato);
+  const lot = planAreaLotCalculation(migratedDraft);
   const totals = lot.baseRows.reduce(
     (acc, row) => {
       acc.area += row.area;
@@ -8439,8 +8444,8 @@ function PropertyAreaDetail({
   const draft = editableDraft;
   const hasElaboratoPlan = Boolean(property.documentUrls?.planimetria || draft?.document);
   const lotCalculation = useMemo(
-    () => (draft ? planAreaLotCalculation(draft, hasElaboratoPlan) : null),
-    [draft, hasElaboratoPlan],
+    () => (draft ? planAreaLotCalculation(draft) : null),
+    [draft],
   );
   const rows = useMemo(() => {
     if (!draft || !lotCalculation) return [];
@@ -8529,6 +8534,7 @@ function PropertyAreaDetail({
     destinationValue: 0,
     lotValue: 0,
   };
+  const usesManualLotArea = lotValuation.manualAreaM2 > 0;
   const defaultOneri = draft
     ? draft.defaultOneri ?? (property.oneri === true && !planAreaHasAreaOneriData(draft))
     : false;
@@ -8541,7 +8547,6 @@ function PropertyAreaDetail({
       return recalculatePlanAreaDraftTotals(
         next,
         property.oneri === true,
-        Boolean(property.documentUrls?.planimetria || next.document),
       );
     });
     setDirty(true);
@@ -8704,7 +8709,6 @@ function PropertyAreaDetail({
         savedAt: new Date().toISOString(),
       },
       property.oneri === true,
-      Boolean(property.documentUrls?.planimetria || draft.document),
     );
     try {
       window.localStorage.setItem(planAreaDraftKey(property.id), JSON.stringify(nextDraft));
@@ -8896,30 +8900,35 @@ function PropertyAreaDetail({
                 <h3>Valorizzazione lotto</h3>
                 <p>
                   {hasElaboratoPlan
-                    ? "La superficie deriva dal poligono Lotto. I check stabiliscono quali valori delle destinazioni entrano nella base percentuale."
+                    ? "Puoi usare il poligono Lotto oppure inserire la superficie manualmente. Un valore manuale maggiore di zero ha priorità sul disegno."
                     : "L’elaborato planimetrico non è presente: inserisci manualmente la superficie del lotto."}
                 </p>
               </div>
-              {!hasElaboratoPlan && (
-                <label className="lot-manual-area-field property-manual-lot-area">
-                  <span>Superficie lotto manuale</span>
-                  <div>
-                    <input
-                      key={`property-manual-lot-area-${lotValuation.manualAreaM2}`}
-                      type="text"
-                      inputMode="decimal"
-                      defaultValue={areaFormatter.format(lotValuation.manualAreaM2)}
-                      onBlur={(event) => handleManualLotAreaBlur(event.currentTarget)}
-                      onKeyDown={(event) =>
-                        handleNumericInputKeyDown(
-                          event,
-                          areaFormatter.format(lotValuation.manualAreaM2),
-                        )}
-                    />
-                    <strong>m²</strong>
-                  </div>
-                </label>
-              )}
+              <label className="lot-manual-area-field property-manual-lot-area">
+                <span>
+                  Superficie lotto manuale
+                  <small>
+                    {usesManualLotArea
+                      ? "Override manuale attivo; usa 0 per tornare alla superficie tracciata"
+                      : "Inserisci un valore per evitare di disegnare il lotto"}
+                  </small>
+                </span>
+                <div>
+                  <input
+                    key={`property-manual-lot-area-${lotValuation.manualAreaM2}`}
+                    type="text"
+                    inputMode="decimal"
+                    defaultValue={areaFormatter.format(lotValuation.manualAreaM2)}
+                    onBlur={(event) => handleManualLotAreaBlur(event.currentTarget)}
+                    onKeyDown={(event) =>
+                      handleNumericInputKeyDown(
+                        event,
+                        areaFormatter.format(lotValuation.manualAreaM2),
+                      )}
+                  />
+                  <strong>m²</strong>
+                </div>
+              </label>
               <div className="lot-mode-toggle" role="group" aria-label="Metodo di valorizzazione del lotto">
                 <button
                   type="button"

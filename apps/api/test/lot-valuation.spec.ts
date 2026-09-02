@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_LOT_VALUATION,
+  effectiveLotAreaM2,
   lotValueShare,
   normalizeLotValuation,
   resolveLotValuation,
@@ -63,4 +64,12 @@ test("la superficie lotto manuale alimenta la valorizzazione al metro quadro", (
 
   assert.equal(valuation.lotValue, 2000);
   assert.equal(valuation.percentage, 20);
+});
+
+test("la superficie lotto manuale prevale su quella tracciata quando valorizzata", () => {
+  assert.equal(effectiveLotAreaM2(750, 1000), 1000);
+});
+
+test("la superficie tracciata resta attiva quando l'override manuale e zero", () => {
+  assert.equal(effectiveLotAreaM2(750, 0), 750);
 });

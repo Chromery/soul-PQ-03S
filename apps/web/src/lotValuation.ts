@@ -69,6 +69,12 @@ export function resolveLotValuation(
   };
 }
 
+export function effectiveLotAreaM2(tracedAreaM2: number, manualAreaM2: number) {
+  const traced = nonNegativeFinite(tracedAreaM2, 0);
+  const manual = nonNegativeFinite(manualAreaM2, 0);
+  return manual > 0 ? manual : traced;
+}
+
 export function lotValueShare(
   baseValue: number,
   areaM2: number,
