@@ -443,7 +443,8 @@ Codici principali:
 
 ## Note Implementative
 
-- Il backend accetta payload fino a `60mb`.
+- Il proxy Nginx accetta fino a `64mb` sulla route di sync; il backend applica il limite
+  effettivo di `60mb` al payload JSON.
 - I PDF vengono salvati tramite `DocumentStorageService`, che usa Backblaze B2 via S3-compatible API.
 - Configurazione richiesta: `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
 - `S3_FORCE_PATH_STYLE` resta configurabile e di default e `true`, scelta conservativa per provider S3-compatible.
