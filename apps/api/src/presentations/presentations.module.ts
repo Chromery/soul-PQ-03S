@@ -12,5 +12,6 @@ import { PresentationsService } from "./presentations.service.js";
   imports: [AddressNormalizationModule, StudiesModule],
   controllers: [StudyPresentationsController, StudyGroupPresentationsController, PresentationsController],
   providers: [PresentationsService],
+  exports: [PresentationsService],
 })
 export class PresentationsModule {}

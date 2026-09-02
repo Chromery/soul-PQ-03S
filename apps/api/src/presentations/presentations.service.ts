@@ -331,6 +331,14 @@ export class PresentationsService implements OnModuleDestroy {
     }
   }
 
+  async renderV3Pdf(id: string) {
+    const deck = await this.findDeck(id);
+    if (presentationVersion(deck.snapshot) !== 3) {
+      throw new NotFoundException("Presentazione v3 non trovata");
+    }
+    return this.renderPdf(id);
+  }
+
   async onModuleDestroy() {
     if (this.browserPromise) await (await this.browserPromise).close();
   }

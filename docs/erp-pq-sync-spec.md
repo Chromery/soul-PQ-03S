@@ -1,6 +1,6 @@
 # ERP/PQ Sync API Spec
 
-Versione: `v1.2` (estensione retrocompatibile del path `/v1`)
+Versione: `v1.3` (estensione retrocompatibile del path `/v1`)
 
 Questo documento definisce il contratto minimo di integrazione tra ERP Soul e Soul Prospect Qualifier (`PQ`).
 
@@ -15,6 +15,10 @@ PQ espone API server-to-server chiamate dall'ERP. L'autenticazione utenti intern
 - Gli endpoint sono ridotti a quelli strettamente necessari alla sincronizzazione.
 - Dalla v1.2 ogni immobile puo includere un PDF opzionale `elenco_subalterni`.
   L'endpoint di sync, i campi esistenti e i payload senza questo documento non cambiano.
+- Dalla v1.3 `note_immobile` viene salvato nel sync ERP -> PQ e restituito nel pull PQ -> ERP.
+- Dalla v1.3 il pull restituisce l'ultima presentazione v3 gia creata manualmente per lo studio
+  o per il suo gruppo. Il sync non crea mai una presentazione automaticamente e omette il campo
+  `presentazione` quando non esiste una v3.
 
 ## Convenzioni
 
@@ -188,6 +192,7 @@ Regole:
 - Per ogni immobile esiste al massimo un documento per tipo. Reinviare `elenco_subalterni` sostituisce il record corrente senza creare duplicati.
 - `storage_key` e la object key nel bucket S3/B2, non un percorso filesystem locale.
 - L'estrazione AI dei dati da visura non blocca piu la risposta di sync: PQ salva prima studio, immobili e PDF, poi accoda un job asincrono. La response indica quanti job sono stati accodati in `visure_in_coda`.
+- `note_immobile` e facoltativo, ha un limite di 4.000 caratteri e, se assente in un aggiornamento ERP, conserva le note gia presenti in PQ.
 
 ### 2. Lettura modifiche PQ da ERP
 
@@ -219,6 +224,17 @@ Response `200 OK`:
       "note": "Cliente prioritario.",
       "link_studio_erp": "https://erp.soul.example/studi/SF-47824-2026-001",
       "modificato_il": "2026-06-21T09:45:12.000Z",
+      "presentazione": {
+        "presentazione_id": "cm123presentazione",
+        "versione": 3,
+        "ambito": "studio",
+        "gruppo_studi_id": null,
+        "immobili_erp_ids": ["162502"],
+        "file_nome": "Studio di fattibilita _ Ottimizzazione rendita catastale _ Azienda Srl _ 21-06-2026 _ v3.pdf",
+        "mime_type": "application/pdf",
+        "creata_il": "2026-06-21T09:45:12.000Z",
+        "download_url": "/api/integrations/erp/v1/presentazioni/cm123presentazione/pdf"
+      },
       "metriche": {
         "rendita_originale_totale": "60634.00",
         "rendita_proposta_totale": "74500.00",
@@ -246,6 +262,7 @@ Response `200 OK`:
           "imu_prevista": "9200.00",
           "in_studio": true,
           "esito": "Non analizzato",
+          "note_immobile": "Planimetria disponibile, verificare tettoie.",
           "documenti": [
             {
               "tipo": "planimetria",
@@ -265,7 +282,28 @@ Response `200 OK`:
 
 Se `modificati_dopo` non viene passato, PQ restituisce tutti gli studi.
 
-### 3. Gestione manuale dell'elenco subalterni in PQ
+La presentazione e opzionale e segue queste regole:
+
+- PQ non la crea durante il sync: deve esistere uno snapshot v3 creato manualmente dall'operatore.
+- Vengono ignorate le presentazioni v1 e v2.
+- Se esistono piu v3 applicabili, viene restituita la piu recente tra quella dello studio e quella
+  del gruppo studi a cui appartiene.
+- La creazione di una v3 aggiorna la data logica `modificato_il`, quindi lo studio compare nel pull
+  successivo anche se gli altri dati non sono cambiati.
+- Se nessuna v3 e presente, il campo `presentazione` viene omesso.
+
+### 3. Download presentazione v3 per ERP
+
+```text
+GET /api/integrations/erp/v1/presentazioni/{presentazione_id}/pdf
+```
+
+Scarica il PDF della v3 indicata da `presentazione.download_url`. Usa lo stesso header
+`Authorization: Bearer <erp_sync_token>` delle altre API ERP e rifiuta presentazioni v1/v2.
+L'endpoint renderizza esclusivamente uno snapshot gia creato manualmente; non crea nuovi record
+di presentazione.
+
+### 4. Gestione manuale dell'elenco subalterni in PQ
 
 L'interfaccia PQ usa gli endpoint applicativi seguenti. Sono documentati anche
 nello Swagger e nella collection Postman:

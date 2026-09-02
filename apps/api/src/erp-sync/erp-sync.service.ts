@@ -12,6 +12,7 @@ import { DocumentType } from "../generated/prisma/enums.js";
 import type {
   FeasibilityStudy,
   PlanAnalysisDraft,
+  PresentationDeck,
   Property,
   PropertyDocument,
   PropertyValuationGroupAnalysisDraft,
@@ -40,10 +41,19 @@ type PropertyWithRelations = Property & {
   valuationGroup: { analysisDraft: PropertyValuationGroupAnalysisDraft | null } | null;
 };
 
+type ErpPresentationDeck = Pick<
+  PresentationDeck,
+  "id" | "studyId" | "studyGroupId" | "propertyIds" | "fileName" | "createdAt"
+>;
+
 type StudyWithRelations = FeasibilityStudy & {
   properties: PropertyWithRelations[];
   versions: StudyVersion[];
-  studyGroup: { analysisDraft: StudyGroupAnalysisDraft | null } | null;
+  presentations: ErpPresentationDeck[];
+  studyGroup: {
+    analysisDraft: StudyGroupAnalysisDraft | null;
+    presentations: ErpPresentationDeck[];
+  } | null;
 };
 
 type NormalizedDocument = {
@@ -80,6 +90,7 @@ type NormalizedProperty = {
   imuDiff: number;
   outcome: string;
   hasStudy: boolean;
+  notes?: string;
   displayOrder: number;
   documents: NormalizedDocument[];
 };
@@ -163,7 +174,21 @@ export class ErpSyncService {
           orderBy: [{ displayOrder: "asc" }, { id: "asc" }],
         },
         versions: { orderBy: { versionNumber: "desc" } },
-        studyGroup: { include: { analysisDraft: true } },
+        presentations: {
+          where: { snapshot: { path: ["version"], equals: 3 } },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+        studyGroup: {
+          include: {
+            analysisDraft: true,
+            presentations: {
+              where: { snapshot: { path: ["version"], equals: 3 } },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            },
+          },
+        },
       },
       orderBy: { updatedAt: "desc" },
     });
@@ -330,8 +355,17 @@ export class ErpSyncService {
       };
       await this.prisma.property.upsert({
         where: { id: property.id },
-        create: { id: property.id, displayOrder: property.displayOrder, ...baseProperty },
-        update: { displayOrder: property.displayOrder, ...baseProperty },
+        create: {
+          id: property.id,
+          displayOrder: property.displayOrder,
+          notes: property.notes ?? "",
+          ...baseProperty,
+        },
+        update: {
+          displayOrder: property.displayOrder,
+          ...baseProperty,
+          ...(property.notes === undefined ? {} : { notes: property.notes }),
+        },
       });
 
       for (const document of property.documents) {
@@ -487,6 +521,7 @@ export class ErpSyncService {
       imuDiff: currentImu !== null && estimatedImu !== null ? estimatedImu - currentImu : 0,
       outcome: mapPropertyOutcome(optionalString(input.esito), Boolean(input.in_studio ?? input.in_study ?? input.is_study)),
       hasStudy: Boolean(input.in_studio ?? input.in_study ?? input.is_study),
+      notes: erpPropertyNotes(input),
       displayOrder: integerNumber(input.ordine_visualizzazione, index),
       documents: uniqueDocuments(
         asArray(input.documenti, "documenti").map((document, documentIndex) =>
@@ -515,6 +550,7 @@ export class ErpSyncService {
   }
 
   private toErpResult(study: StudyWithRelations) {
+    const presentation = latestErpPresentation(study);
     const modifiedAt = maxDate([
       study.updatedAt,
       ...study.properties.map((property) => property.updatedAt),
@@ -524,6 +560,7 @@ export class ErpSyncService {
         property.valuationGroup?.analysisDraft ? [property.valuationGroup.analysisDraft.updatedAt] : []
       )),
       ...(study.studyGroup?.analysisDraft ? [study.studyGroup.analysisDraft.updatedAt] : []),
+      ...(presentation ? [presentation.createdAt] : []),
     ]);
     const now = new Date();
     const calculatedProperties = study.properties.map((property) => {
@@ -563,6 +600,7 @@ export class ErpSyncService {
       note: study.notes,
       link_studio_erp: study.erpUrl,
       modificato_il: modifiedAt.toISOString(),
+      ...(presentation ? { presentazione: erpPresentationPayload(presentation) } : {}),
       metriche: {
         rendita_originale_totale: decimalToString(study.originalRendita),
         rendita_proposta_totale: decimalToString(study.totalRendita),
@@ -606,6 +644,7 @@ export class ErpSyncService {
         scala_ai_rilevata_il: property.aiScaleDetectedAt?.toISOString() ?? null,
         in_studio: property.hasStudy,
         esito: property.outcome,
+        note_immobile: property.notes,
         documenti: property.documents.map((document) => ({
           tipo: erpDocumentType(document.type),
           file_nome: document.fileName,
@@ -662,6 +701,14 @@ function optionalString(value: unknown) {
 
 export function erpStudyNotes(input: Record<string, unknown>) {
   return optionalString(input.note_studio ?? input.note);
+}
+
+export function erpPropertyNotes(input: Record<string, unknown>) {
+  const notes = optionalString(input.note_immobile);
+  if (notes && notes.length > 4000) {
+    throw new BadRequestException("Le note immobile non possono superare 4000 caratteri");
+  }
+  return notes;
 }
 
 function requiredString(value: unknown, path: string) {
@@ -812,4 +859,29 @@ function calculatedAmount(calculation: ImuCalculation | null) {
 
 function maxDate(values: Date[]) {
   return values.reduce((latest, value) => (value > latest ? value : latest), values[0] ?? new Date(0));
+}
+
+function latestErpPresentation(study: StudyWithRelations) {
+  return [
+    ...study.presentations,
+    ...(study.studyGroup?.presentations ?? []),
+  ].reduce<ErpPresentationDeck | null>((latest, presentation) => (
+    !latest || presentation.createdAt > latest.createdAt ? presentation : latest
+  ), null);
+}
+
+function erpPresentationPayload(presentation: ErpPresentationDeck) {
+  return {
+    presentazione_id: presentation.id,
+    versione: 3,
+    ambito: presentation.studyGroupId ? "gruppo_studi" : "studio",
+    gruppo_studi_id: presentation.studyGroupId,
+    immobili_erp_ids: Array.isArray(presentation.propertyIds)
+      ? presentation.propertyIds.filter((value): value is string => typeof value === "string")
+      : [],
+    file_nome: presentation.fileName,
+    mime_type: "application/pdf",
+    creata_il: presentation.createdAt.toISOString(),
+    download_url: `/api/integrations/erp/v1/presentazioni/${encodeURIComponent(presentation.id)}/pdf`,
+  };
 }

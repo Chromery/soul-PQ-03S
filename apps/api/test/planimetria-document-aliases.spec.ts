@@ -102,6 +102,7 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
               particella: "2",
               categoria: "D/1",
               in_studio: true,
+              note_immobile: "Nota ERP dell'immobile",
               documenti: [
                 {
                   tipo: alias,
@@ -120,6 +121,8 @@ for (const alias of ["planimetria", "elaborato", "elaborato_planimetrico"]) {
     assert.equal(propertyUpserts[0]?.create.provincia, "MI");
     assert.equal(propertyUpserts[0]?.create.comune, "MONZA");
     assert.equal(propertyUpserts[0]?.create.humanReadableAddress, "Via Test 1");
+    assert.equal(propertyUpserts[0]?.create.notes, "Nota ERP dell'immobile");
+    assert.equal(propertyUpserts[0]?.update.notes, "Nota ERP dell'immobile");
     assert.equal(documentUpserts[0]?.create.type, DocumentType.PLANIMETRIA);
     assert.equal(storageWrites[0]?.tipo, "planimetria");
     assert.equal(extractionJobs.length, 1);
