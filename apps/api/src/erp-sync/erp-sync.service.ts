@@ -2,7 +2,11 @@ import { BadRequestException, Injectable, Optional, UnauthorizedException } from
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import { ActivitiesService } from "../activities/activities.service.js";
-import { AddressNormalizationService } from "../address-normalization/address-normalization.service.js";
+import {
+  AddressNormalizationService,
+  fallbackHumanReadableAddress,
+  type AddressNormalizationInput,
+} from "../address-normalization/address-normalization.service.js";
 import { erpDocumentType, parseDocumentType } from "../document-types.js";
 import {
   formapsTerritoryByMunicipalityId,
@@ -226,15 +230,16 @@ export class ErpSyncService {
     const humanReadableAddressByPropertyId = new Map(
       existingPropertyAddresses.map((property) => [property.id, property.humanReadableAddress]),
     );
-    await Promise.all(normalizedProperties.map(async (property) => {
-      property.humanReadableAddress = humanReadableAddressByPropertyId.get(property.id)
-        ?? await this.addressNormalization.normalize({
-          address: property.address,
-          ubicazione: property.ubicazione,
-          comune: property.comune,
-          provincia: property.provincia,
-        });
-    }));
+    const propertiesRequiringAddressRefinement = new Set<string>();
+    for (const property of normalizedProperties) {
+      const existingAddress = humanReadableAddressByPropertyId.get(property.id);
+      if (existingAddress) {
+        property.humanReadableAddress = existingAddress;
+        continue;
+      }
+      property.humanReadableAddress = fallbackHumanReadableAddress(addressNormalizationInput(property));
+      if (property.humanReadableAddress) propertiesRequiringAddressRefinement.add(property.id);
+    }
 
     const originalRendita = decimalNumber(
       metrics?.rendita_originale_totale,
@@ -385,6 +390,9 @@ export class ErpSyncService {
           ...(property.notes === undefined ? {} : { notes: property.notes }),
         },
       });
+      if (propertiesRequiringAddressRefinement.has(property.id)) {
+        this.refineHumanReadableAddressInBackground(property);
+      }
 
       for (const document of property.documents) {
         const stored = {
@@ -690,6 +698,35 @@ export class ErpSyncService {
         : Number(property.imuMultiplierOverride),
     });
   }
+
+  private refineHumanReadableAddressInBackground(property: NormalizedProperty) {
+    const fallbackAddress = property.humanReadableAddress;
+    if (!fallbackAddress) return;
+
+    void this.addressNormalization.normalizeInBackground(addressNormalizationInput(property))
+      .then(async (refinedAddress) => {
+        if (!refinedAddress || refinedAddress === fallbackAddress) return;
+        await this.prisma.property.updateMany({
+          where: {
+            id: property.id,
+            humanReadableAddress: fallbackAddress,
+          },
+          data: { humanReadableAddress: refinedAddress },
+        });
+      })
+      .catch((error) => {
+        console.error(`Affinamento indirizzo in background non riuscito per l'immobile ${property.id}`, error);
+      });
+  }
+}
+
+function addressNormalizationInput(property: NormalizedProperty): AddressNormalizationInput {
+  return {
+    address: property.address,
+    ubicazione: property.ubicazione,
+    comune: property.comune,
+    provincia: property.provincia,
+  };
 }
 
 function asRecord(value: unknown, path: string): JsonRecord {

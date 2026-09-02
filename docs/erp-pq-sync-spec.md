@@ -63,6 +63,11 @@ POST /api/integrations/erp/v1/studi/sync
 
 Importa o aggiorna uno o piu studi. Lo stesso payload puo essere reinviato senza creare duplicati, perche PQ fa upsert su `studio_erp_id` e `immobile_erp_id`.
 
+La risposta del sync non attende servizi LLM esterni. Per un immobile privo di
+`indirizzo_human_readable`, PQ salva immediatamente una versione leggibile ottenuta
+localmente e accoda l'affinamento tramite NeuralWatt. L'aggiornamento asincrono
+non sovrascrive eventuali modifiche effettuate nel frattempo dall'operatore.
+
 Request:
 
 ```json

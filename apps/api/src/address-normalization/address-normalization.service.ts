@@ -11,7 +11,15 @@ export type AddressNormalizationInput = {
 const DEFAULT_NEURALWATT_API_URL = "https://api.neuralwatt.com/v1/chat/completions";
 const DEFAULT_ADDRESS_MODEL = "deepseek-v4-flash";
 const DEFAULT_TIMEOUT_MS = 20_000;
+const DEFAULT_BACKGROUND_CONCURRENCY = 3;
 const MAX_ADDRESS_LENGTH = 240;
+
+type BackgroundNormalizationJob = {
+  key: string;
+  input: AddressNormalizationInput;
+  resolve: (address: string | null) => void;
+  reject: (error: unknown) => void;
+};
 
 @Injectable()
 export class AddressNormalizationService {
@@ -19,24 +27,27 @@ export class AddressNormalizationService {
   private readonly apiUrl: string;
   private readonly model: string;
   private readonly timeoutMs: number;
+  private readonly backgroundConcurrency: number;
   private readonly pending = new Map<string, Promise<string | null>>();
+  private readonly backgroundPending = new Map<string, Promise<string | null>>();
+  private readonly backgroundQueue: BackgroundNormalizationJob[] = [];
+  private activeBackgroundJobs = 0;
 
   constructor(private readonly config: ConfigService) {
     this.apiUrl = optionalString(config.get<string>("NEURALWATT_API_URL")) ?? DEFAULT_NEURALWATT_API_URL;
     this.model = optionalString(config.get<string>("NEURALWATT_ADDRESS_MODEL")) ?? DEFAULT_ADDRESS_MODEL;
     this.timeoutMs = boundedInteger(config.get<string>("NEURALWATT_ADDRESS_TIMEOUT_MS"), DEFAULT_TIMEOUT_MS);
+    this.backgroundConcurrency = boundedConcurrency(
+      config.get<string>("NEURALWATT_ADDRESS_BACKGROUND_CONCURRENCY"),
+      DEFAULT_BACKGROUND_CONCURRENCY,
+    );
   }
 
   normalize(input: AddressNormalizationInput) {
     const fallback = fallbackHumanReadableAddress(input);
     if (!fallback) return Promise.resolve(null);
 
-    const key = JSON.stringify([
-      compactText(input.address),
-      compactText(input.ubicazione),
-      compactText(input.comune),
-      compactText(input.provincia),
-    ]);
+    const key = normalizationKey(input);
     const existing = this.pending.get(key);
     if (existing) return existing;
 
@@ -50,6 +61,47 @@ export class AddressNormalizationService {
       .finally(() => this.pending.delete(key));
     this.pending.set(key, request);
     return request;
+  }
+
+  normalizeInBackground(input: AddressNormalizationInput) {
+    const fallback = fallbackHumanReadableAddress(input);
+    if (!fallback) return Promise.resolve(null);
+
+    const key = normalizationKey(input);
+    const running = this.pending.get(key);
+    if (running) return running;
+    const queued = this.backgroundPending.get(key);
+    if (queued) return queued;
+
+    let resolveJob!: (address: string | null) => void;
+    let rejectJob!: (error: unknown) => void;
+    const result = new Promise<string | null>((resolve, reject) => {
+      resolveJob = resolve;
+      rejectJob = reject;
+    });
+    this.backgroundPending.set(key, result);
+    this.backgroundQueue.push({ key, input, resolve: resolveJob, reject: rejectJob });
+    this.drainBackgroundQueue();
+    return result;
+  }
+
+  private drainBackgroundQueue() {
+    while (
+      this.activeBackgroundJobs < this.backgroundConcurrency
+      && this.backgroundQueue.length > 0
+    ) {
+      const job = this.backgroundQueue.shift();
+      if (!job) return;
+      this.activeBackgroundJobs++;
+      void Promise.resolve()
+        .then(() => this.normalize(job.input))
+        .then(job.resolve, job.reject)
+        .finally(() => {
+          this.backgroundPending.delete(job.key);
+          this.activeBackgroundJobs--;
+          this.drainBackgroundQueue();
+        });
+    }
   }
 
   private async normalizeWithNeuralwatt(input: AddressNormalizationInput, fallback: string) {
@@ -187,6 +239,20 @@ function optionalString(value: unknown) {
 function boundedInteger(value: unknown, fallback: number) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 2_000 && parsed <= 120_000 ? parsed : fallback;
+}
+
+function boundedConcurrency(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 5 ? parsed : fallback;
+}
+
+function normalizationKey(input: AddressNormalizationInput) {
+  return JSON.stringify([
+    compactText(input.address),
+    compactText(input.ubicazione),
+    compactText(input.comune),
+    compactText(input.provincia),
+  ]);
 }
 
 function escapeRegExp(value: string) {

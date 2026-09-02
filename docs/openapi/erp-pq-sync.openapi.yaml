@@ -41,7 +41,10 @@ paths:
       description: |
         Importa o aggiorna uno o piu studi di fattibilita. PQ fa upsert su
         `studio_erp_id` e `immobile_erp_id`; reinviare lo stesso payload non
-        crea duplicati.
+        crea duplicati. La risposta non attende la normalizzazione LLM degli
+        indirizzi: PQ salva subito un fallback human-readable e accoda
+        l'affinamento NeuralWatt in background senza sovrascrivere successive
+        modifiche dell'operatore.
       requestBody:
         required: true
         content:
