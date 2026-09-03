@@ -3,6 +3,9 @@
   "main": "src/index.js",
   "compatibility_date": "2026-09-03",
   "workers_dev": false,
+  "vars": {
+    "UPSTREAM_ORIGIN": "http://localhost:8181"
+  },
   "routes": [
     {
       "pattern": "st-pq-soul.rainailab.com",
