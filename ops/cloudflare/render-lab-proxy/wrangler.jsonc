@@ -1,0 +1,19 @@
+{
+  "name": "soul-pq-render-lab-proxy",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-03",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "st-pq-soul.rainailab.com",
+      "custom_domain": true
+    }
+  ],
+  "vpc_networks": [
+    {
+      "binding": "RENDER_LAB_ORIGIN",
+      "tunnel_id": "7670576a-b686-4c90-8cf5-b2158ae3826a",
+      "remote": true
+    }
+  ]
+}
