@@ -66,11 +66,14 @@ const ZOOM_KEYBOARD_STEP = 10;
 const ZOOM_SLIDER_STEP = 1;
 const ZOOM_WHEEL_SENSITIVITY = 0.00045;
 const ZOOM_WHEEL_MAX_DELTA = 240;
-const PDF_DISPLAY_RESOLUTION_MULTIPLIER = 2;
+const PDF_DISPLAY_RENDER_DEBOUNCE_MS = 120;
+const PDF_DISPLAY_MAX_EDGE = 4_096;
+const PDF_DISPLAY_MAX_PIXELS = 16_000_000;
 const SMART_TRACE_DEFAULTS = DEFAULT_EDITOR_PREFERENCES.smartSelection;
 
 type PdfDocument = Awaited<ReturnType<typeof pdfjsLib.getDocument>["promise"]>;
 type PdfPage = Awaited<ReturnType<PdfDocument["getPage"]>>;
+type PdfRenderTask = ReturnType<PdfPage["render"]>;
 
 type SheetSize = "A3" | "A4";
 type UsageId =
@@ -1093,6 +1096,11 @@ function parseNumberInput(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function snapToPhysicalPixel(value: number, devicePixelRatio: number) {
+  const density = Math.max(1, devicePixelRatio);
+  return Math.round(value * density) / density;
+}
+
 function normalizeEditorTool(tool?: LegacyEditorTool): EditorTool {
   return tool === "calibrate" ? "ruler" : tool ?? "smart";
 }
@@ -1478,6 +1486,9 @@ export default function PlanimetriaEditor({
 }: PlanimetriaEditorProps) {
   const editorRootRef = useRef<HTMLElement | null>(null);
   const pdfDisplayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pdfDisplayRenderTaskRef = useRef<PdfRenderTask | null>(null);
+  const pdfDisplayRenderTimerRef = useRef<number | null>(null);
+  const pdfDisplayRenderTokenRef = useRef(0);
   const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const waveCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -2052,6 +2063,19 @@ export default function PlanimetriaEditor({
 
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (runtimeRef.current.pdfDoc) schedulePdfDisplayRender();
+    };
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      cancelPdfDisplayRender();
+    };
+    // The renderer reads the current PDF, page and zoom from refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -3209,13 +3233,118 @@ export default function PlanimetriaEditor({
     canvas.height = height;
   }
 
+  function cancelPdfDisplayRender() {
+    pdfDisplayRenderTokenRef.current += 1;
+    if (pdfDisplayRenderTimerRef.current !== null) {
+      window.clearTimeout(pdfDisplayRenderTimerRef.current);
+      pdfDisplayRenderTimerRef.current = null;
+    }
+    const renderTask = pdfDisplayRenderTaskRef.current;
+    if (renderTask) {
+      try {
+        renderTask.cancel();
+      } catch {
+        // Render cancellation is best effort.
+      }
+      pdfDisplayRenderTaskRef.current = null;
+    }
+  }
+
+  function constrainedPdfDisplayScale(scale: number, width: number, height: number) {
+    const edgeFactor = PDF_DISPLAY_MAX_EDGE / Math.max(width * scale, height * scale);
+    const pixelFactor = Math.sqrt(
+      PDF_DISPLAY_MAX_PIXELS / Math.max(1, width * height * scale * scale),
+    );
+    return Math.max(0.1, scale * Math.min(1, edgeFactor, pixelFactor));
+  }
+
+  async function renderPdfDisplay(
+    page: PdfPage,
+    pageRotation: PageRotation,
+    token = ++pdfDisplayRenderTokenRef.current,
+  ) {
+    if (token !== pdfDisplayRenderTokenRef.current) return false;
+    const canvas = pdfDisplayCanvasRef.current;
+    const context = canvas?.getContext("2d", { alpha: false });
+    if (!canvas || !context) return false;
+
+    const previousTask = pdfDisplayRenderTaskRef.current;
+    if (previousTask) {
+      try {
+        previousTask.cancel();
+      } catch {
+        // Render cancellation is best effort.
+      }
+      pdfDisplayRenderTaskRef.current = null;
+    }
+
+    const runtime = runtimeRef.current;
+    const baseViewport = page.getViewport({ scale: 1, rotation: pageRotation });
+    const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
+    const renderScale = constrainedPdfDisplayScale(
+      runtime.zoom * devicePixelRatio,
+      baseViewport.width,
+      baseViewport.height,
+    );
+    const viewport = page.getViewport({ scale: renderScale, rotation: pageRotation });
+    const width = Math.max(1, Math.round(viewport.width));
+    const height = Math.max(1, Math.round(viewport.height));
+    resizeLayer(canvas, width, height);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+
+    const renderTask = page.render({ canvasContext: context, viewport });
+    pdfDisplayRenderTaskRef.current = renderTask;
+    try {
+      await renderTask.promise;
+      return token === pdfDisplayRenderTokenRef.current;
+    } catch (error) {
+      if ((error as { name?: string })?.name === "RenderingCancelledException") return false;
+      throw error;
+    } finally {
+      if (pdfDisplayRenderTaskRef.current === renderTask) pdfDisplayRenderTaskRef.current = null;
+    }
+  }
+
+  function schedulePdfDisplayRender(delay = PDF_DISPLAY_RENDER_DEBOUNCE_MS) {
+    const runtime = runtimeRef.current;
+    if (!runtime.pdfDoc || runtime.currentPage < 1) return;
+
+    cancelPdfDisplayRender();
+    const token = pdfDisplayRenderTokenRef.current;
+    const document = runtime.pdfDoc;
+    const pageNumber = runtime.currentPage;
+    pdfDisplayRenderTimerRef.current = window.setTimeout(() => {
+      pdfDisplayRenderTimerRef.current = null;
+      void document.getPage(pageNumber).then(async (page) => {
+        if (token !== pdfDisplayRenderTokenRef.current) return;
+        const baseRotation = pageRotationFromValue((page as { rotate?: number }).rotate);
+        const pageRotation = normalizePageRotation(
+          baseRotation + (runtimeRef.current.pageRotations.get(pageNumber) ?? 0),
+        );
+        await renderPdfDisplay(page, pageRotation, token);
+      }).catch((error) => {
+        if (token === pdfDisplayRenderTokenRef.current) {
+          console.warn("Rendering adattivo della planimetria non riuscito", error);
+        }
+      });
+    }, delay);
+  }
+
   function applyStageSize() {
     const runtime = runtimeRef.current;
     const { pdfCanvas } = getCanvases();
     const stage = stageRef.current;
     if (!stage) return;
-    const width = (pdfCanvas.width / runtime.renderScale) * runtime.zoom;
-    const height = (pdfCanvas.height / runtime.renderScale) * runtime.zoom;
+    const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
+    const width = snapToPhysicalPixel(
+      (pdfCanvas.width / runtime.renderScale) * runtime.zoom,
+      devicePixelRatio,
+    );
+    const height = snapToPhysicalPixel(
+      (pdfCanvas.height / runtime.renderScale) * runtime.zoom,
+      devicePixelRatio,
+    );
     stage.style.width = `${width}px`;
     stage.style.height = `${height}px`;
     setCanvasPixels(`${pdfCanvas.width} x ${pdfCanvas.height}`);
@@ -3243,6 +3372,7 @@ export default function PlanimetriaEditor({
     runtimeRef.current.zoom = nextZoom / 100;
     setZoomPercent(nextZoom);
     applyStageSize();
+    schedulePdfDisplayRender();
   }
 
   function getInkFocusPoint() {
@@ -3343,6 +3473,7 @@ export default function PlanimetriaEditor({
     const runtime = runtimeRef.current;
     if (!runtime.pdfDoc) return false;
     const token = ++runtime.renderToken;
+    cancelPdfDisplayRender();
     if (runtime.renderTask) {
       try {
         runtime.renderTask.cancel();
@@ -3368,9 +3499,7 @@ export default function PlanimetriaEditor({
       const width = Math.round(viewport.width);
       const height = Math.round(viewport.height);
       const { pdfCanvas, maskCanvas, waveCanvas, pdf } = getCanvases();
-      const pdfDisplayCanvas = pdfDisplayCanvasRef.current;
-      const pdfDisplay = pdfDisplayCanvas?.getContext("2d");
-      if (!pdfDisplayCanvas || !pdfDisplay) throw new Error("Canvas PDF ad alta risoluzione non disponibile");
+      if (!pdfDisplayCanvasRef.current) throw new Error("Canvas PDF adattivo non disponibile");
 
       resizeLayer(pdfCanvas, width, height);
       resizeLayer(maskCanvas, width, height);
@@ -3389,27 +3518,8 @@ export default function PlanimetriaEditor({
         if (runtime.renderTask === renderTask) runtime.renderTask = null;
       }
 
-      const displayViewport = page.getViewport({
-        scale: runtime.renderScale * PDF_DISPLAY_RESOLUTION_MULTIPLIER,
-        rotation: pageRotation,
-      });
-      const displayWidth = Math.round(displayViewport.width);
-      const displayHeight = Math.round(displayViewport.height);
-      resizeLayer(pdfDisplayCanvas, displayWidth, displayHeight);
-      pdfDisplay.imageSmoothingEnabled = true;
-      pdfDisplay.imageSmoothingQuality = "high";
-      pdfDisplay.fillStyle = "#ffffff";
-      pdfDisplay.fillRect(0, 0, displayWidth, displayHeight);
-      const displayRenderTask = page.render({ canvasContext: pdfDisplay, viewport: displayViewport });
-      runtime.renderTask = displayRenderTask;
-      try {
-        await displayRenderTask.promise;
-      } catch (error) {
-        if ((error as { name?: string })?.name === "RenderingCancelledException") return false;
-        throw error;
-      } finally {
-        if (runtime.renderTask === displayRenderTask) runtime.renderTask = null;
-      }
+      const displayToken = ++pdfDisplayRenderTokenRef.current;
+      await renderPdfDisplay(page, pageRotation, displayToken);
 
       if (token !== runtime.renderToken) return false;
       const structureLayer = await buildStructureLayer(page, viewport, width, height);
@@ -8012,6 +8122,7 @@ export default function PlanimetriaEditor({
     setZoomPercent(clampedZoom);
     if (runtime.pdfDoc) {
       applyStageSize();
+      schedulePdfDisplayRender();
       if (anchorState && shell && stage) {
         const rect = stage.getBoundingClientRect();
         shell.scrollLeft += rect.left + rect.width * anchorState.x - anchorState.clientX;
