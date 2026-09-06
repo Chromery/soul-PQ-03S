@@ -36,6 +36,7 @@ enum VisuraExtractionStatus {
 
 model FeasibilityStudy {
   id              String                   @id
+  isTest          Boolean                  @default(false)
   studyGroupId    String?
   companyErpId    String?
   company         String

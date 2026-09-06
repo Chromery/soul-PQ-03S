@@ -339,6 +339,7 @@ function localDatabaseUrl() {
 async function seed() {
   for (const study of demoStudies) {
     const importedStudyData = {
+      isTest: true,
       company: study.company,
       vat: study.vat,
       comune: study.comune,

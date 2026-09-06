@@ -74,9 +74,10 @@ import {
 } from "./lotValuation";
 import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
+import { EmptyWorkspace, WelcomeModal, TestStudiesToggle, needsWelcome, rememberWelcome } from "./WelcomeExperience";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.63.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.64.0";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -204,6 +205,7 @@ type ValuationGroupPropertyUpdate = {
 
 type FeasibilityStudy = {
   id: string;
+  isTest?: boolean;
   studyGroupId?: string | null;
   studyGroupName?: string | null;
   company: string;
@@ -2663,7 +2665,13 @@ function mergeActivityEvents(current: ActivityEvent[], incoming: ActivityEvent[]
 }
 
 function App() {
-  const [studies, setStudies] = useState<FeasibilityStudy[]>(demoStudies);
+  const [studies, setStudies] = useState<FeasibilityStudy[]>([]);
+  const [studiesLoading, setStudiesLoading] = useState(true);
+  const [studiesError, setStudiesError] = useState("");
+  const [showTestStudies, setShowTestStudies] = useState(false);
+  const [welcomeOpen, setWelcomeOpen] = useState(needsWelcome);
+  const visibleStudies = useMemo(() => studies.filter((study) => showTestStudies || !study.isTest), [studies, showTestStudies]);
+  const testStudyCount = studies.filter((study) => study.isTest).length;
   const [route, setRoute] = useState<AppRoute>(routeFromLocation);
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("importedAt");
@@ -2703,9 +2711,12 @@ function App() {
         const importedStudies = (await response.json()) as FeasibilityStudy[];
         if (!Array.isArray(importedStudies)) throw new Error("Risposta studi non valida");
         setStudies(importedStudies);
+        setStudiesError("");
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        setStudies(demoStudies);
+        setStudiesError("Non riusciamo a caricare gli studi. Riprova tra qualche istante.");
+      } finally {
+        if (!abortController.signal.aborted) setStudiesLoading(false);
       }
     }
 
@@ -2784,14 +2795,19 @@ function App() {
   }
 
   async function refreshStudiesFromApi() {
+    setStudiesLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/studies`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const importedStudies = (await response.json()) as FeasibilityStudy[];
       if (!Array.isArray(importedStudies)) throw new Error("Risposta studi non valida");
       setStudies(importedStudies);
+      setStudiesError("");
     } catch (error) {
       console.error("Aggiornamento studi dopo sync non riuscito", error);
+      setStudiesError("Non riusciamo ad aggiornare gli studi. Riprova tra qualche istante.");
+    } finally {
+      setStudiesLoading(false);
     }
   }
 
@@ -2825,8 +2841,18 @@ function App() {
     setQuery(nextQuery);
   }
 
+  function toggleTestStudies() {
+    setShowTestStudies((shown) => !shown);
+    setSelectedStudyIds([]);
+    setExpandedStudyGroupIds([]);
+    setQuery("");
+    setStatusFilter("Tutti");
+    setRegionFilter("Tutte");
+    setAppointmentOnly(false);
+  }
+
   const filteredStudies = useMemo(() => {
-    return studies
+    return visibleStudies
       .filter((study) => {
         const searchable = `${study.company} ${study.vat} ${study.id} ${study.comune} ${study.commercialOwner} ${study.technicalOwner}`.toLowerCase();
         const matchesText = searchable.includes(query.trim().toLowerCase());
@@ -2836,11 +2862,11 @@ function App() {
         return matchesText && matchesStatus && matchesRegion && matchesAppointment;
       })
       .sort((first, second) => compareStudies(first, second, sortKey, sortDirection));
-  }, [appointmentOnly, query, regionFilter, sortDirection, sortKey, statusFilter, studies]);
+  }, [appointmentOnly, query, regionFilter, sortDirection, sortKey, statusFilter, visibleStudies]);
 
   const regions = useMemo(
-    () => ["Tutte", ...Array.from(new Set(studies.map((study) => study.region)))],
-    [studies],
+    () => ["Tutte", ...Array.from(new Set(visibleStudies.map((study) => study.region)))],
+    [visibleStudies],
   );
 
   const activeStudy = route.view === "study"
@@ -2898,7 +2924,7 @@ function App() {
 
   const studyGroups = useMemo(() => {
     const groups = new Map<string, FeasibilityStudy[]>();
-    studies.forEach((study) => {
+    visibleStudies.forEach((study) => {
       if (!study.studyGroupId) return;
       const members = groups.get(study.studyGroupId) ?? [];
       members.push(study);
@@ -2908,7 +2934,7 @@ function App() {
       (first, second) => compareStudies(first, second, sortKey, sortDirection),
     ));
     return groups;
-  }, [sortDirection, sortKey, studies]);
+  }, [sortDirection, sortKey, visibleStudies]);
   const displayedStudyRows = useMemo<StudyTableRow[]>(() => {
     const renderedGroups = new Set<string>();
     const rows: StudyTableRow[] = [];
@@ -2933,7 +2959,7 @@ function App() {
     )))),
     [displayedStudyRows],
   );
-  const selectedStudies = studies.filter((study) => selectedStudyIds.includes(study.id));
+  const selectedStudies = visibleStudies.filter((study) => selectedStudyIds.includes(study.id));
   const allVisibleSelected =
     visibleStudyIds.length > 0 &&
     visibleStudyIds.every((studyId) => selectedStudyIds.includes(studyId));
@@ -3672,7 +3698,8 @@ function App() {
         activityFeed={activityFeed}
       >
         <PropertiesPage
-          studies={studies}
+          studies={visibleStudies}
+          testStudiesControl={<TestStudiesToggle shown={showTestStudies} count={testStudyCount} onToggle={toggleTestStudies} />}
           query={query}
           onQueryChange={handleGlobalQuery}
           onOpenStudy={(study) => navigate({ view: "study", studyId: study.id })}
@@ -3793,6 +3820,20 @@ function App() {
             </button>
           </div>
 
+          <div className="pq-study-controls">
+            <TestStudiesToggle shown={showTestStudies} count={testStudyCount} onToggle={toggleTestStudies} />
+            {showTestStudies && <span>Stai visualizzando anche i dati di prova, inclusi nei riepiloghi.</span>}
+            <button className="pq-welcome-link" onClick={() => setWelcomeOpen(true)}>Benvenuto in PQ</button>
+          </div>
+          {studiesLoading && <div className="pq-data-state" role="status">Caricamento del tuo spazio di lavoro…</div>}
+          {studiesError && <div className="pq-data-state" role="alert">{studiesError}
+            <button className="button secondary" onClick={() => void refreshStudiesFromApi()}>Riprova</button>
+          </div>}
+          {!studiesLoading && !studiesError && visibleStudies.length === 0 && <EmptyWorkspace
+            onCreate={() => setNewStudyModalOpen(true)} onRefresh={() => void refreshStudiesFromApi()}
+            onWelcome={() => setWelcomeOpen(true)} />}
+
+          {visibleStudies.length > 0 && <>
           <section className="dashboard-summary-strip" aria-label="Riepilogo studi nella vista corrente">
             <MetricCard
               icon={<Clock3 size={22} />}
@@ -3811,7 +3852,7 @@ function App() {
             <MetricCard
               icon={<BarChart3 size={22} />}
               label="Diff. rendita media"
-              value={formatPercent(totals.averageDiff)}
+              value={formatEuro(totals.averageDiff)}
               tone="purple"
               delta="Nella vista corrente"
             />
@@ -4188,9 +4229,11 @@ function App() {
               )}
             </div>
           </section>
+          </>}
         </section>
 
       </main>
+      {welcomeOpen && <WelcomeModal onClose={() => { rememberWelcome(); setWelcomeOpen(false); }} />}
       {newStudyModalOpen && (
         <NewStudyModal
           busy={newStudyBusy}
@@ -4766,11 +4809,10 @@ function Shell({
               <kbd>Ctrl K</kbd>
             </label>
 
-            <button className="date-picker" disabled title="Filtro periodo in preparazione">
+            <span className="date-picker" aria-label="Data di oggi">
               <CalendarDays size={18} />
-              01 Mag 2026 - 31 Mag 2026
-              <ChevronDown size={15} />
-            </button>
+              {new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Rome" }).format(new Date())}
+            </span>
 
             <div className="top-icons">
               <div className="activity-history-menu" ref={activityHistoryRef}>
@@ -4927,6 +4969,7 @@ function SortableHeader({
 
 function PropertiesPage({
   studies,
+  testStudiesControl,
   query,
   onQueryChange,
   onOpenStudy,
@@ -4934,6 +4977,7 @@ function PropertiesPage({
   onOutcomeChange,
 }: {
   studies: FeasibilityStudy[];
+  testStudiesControl: ReactNode;
   query: string;
   onQueryChange: (query: string) => void;
   onOpenStudy: (study: FeasibilityStudy) => void;
@@ -5037,6 +5081,7 @@ function PropertiesPage({
           <h1>Immobili da analizzare</h1>
           <p>{properties.length} immobili associati agli studi importati.</p>
         </div>
+        {testStudiesControl}
       </section>
       <section className="detail-card property-detail-card properties-index">
         <div className="section-title">
@@ -5148,8 +5193,8 @@ function PropertiesPage({
           {filteredProperties.length === 0 && (
             <div className="empty-state">
               <Search size={22} />
-              <strong>Nessun immobile trovato</strong>
-              <span>Modifica la ricerca o i filtri per ampliare i risultati.</span>
+              <strong>{properties.length === 0 ? "Il prossimo immobile arriva da qui" : "Nessun immobile trovato"}</strong>
+              <span>{properties.length === 0 ? "Importa uno studio dall’ERP: planimetrie e documenti saranno disponibili in questo archivio." : "Modifica la ricerca o i filtri per ampliare i risultati."}</span>
             </div>
           )}
         </div>
@@ -6044,6 +6089,7 @@ function StudyGroupRows({
           <td>
             <div className="company-cell study-group-title">
               <strong>{groupName}</strong>
+              {studies.some((study) => study.isTest) && <em className="pq-test-badge">{studies.every((study) => study.isTest) ? "Gruppo di test" : "Include studi di test"}</em>}
               <span title={companyNames.join(", ")}>{companyNames.join(" · ")}</span>
               <button
                 className="study-group-open-button"
@@ -6204,6 +6250,7 @@ function StudyRows({
           <td>
             <div className="company-cell">
               <strong title={study.company}>{study.company}</strong>
+              {study.isTest && <em className="pq-test-badge">Studio di test</em>}
               <span title={`${study.comune} (${study.provincia}) - ${study.vat}`}>
                 {study.comune} ({study.provincia}) - {study.vat}
               </span>
