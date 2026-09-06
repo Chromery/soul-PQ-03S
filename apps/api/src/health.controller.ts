@@ -1,7 +1,9 @@
 import { Controller, Get } from "@nestjs/common";
 import { PrismaService } from "./prisma/prisma.service.js";
+import { ExternalAuthentication } from "./auth/auth.guard.js";
 
 @Controller("health")
+@ExternalAuthentication()
 export class HealthController {
   constructor(private readonly prisma: PrismaService) {}
 
@@ -11,7 +13,7 @@ export class HealthController {
     return {
       status: "ok",
       database: "connected",
-      authentication: "not-configured",
+      authentication: process.env.CLERK_SECRET_KEY ? "clerk" : "configuration-required",
     };
   }
 }

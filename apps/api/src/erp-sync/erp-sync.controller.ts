@@ -13,8 +13,10 @@ import {
 import type { Response } from "express";
 import { PresentationsService } from "../presentations/presentations.service.js";
 import { ErpSyncService } from "./erp-sync.service.js";
+import { ExternalAuthentication } from "../auth/auth.guard.js";
 
 @Controller("integrations/erp/v1")
+@ExternalAuthentication()
 export class ErpSyncController {
   constructor(
     private readonly erpSync: ErpSyncService,

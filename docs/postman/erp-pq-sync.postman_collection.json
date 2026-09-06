@@ -319,7 +319,7 @@
             "modifiche"
           ]
         },
-        "description": "Test negativo: con ERP_SYNC_TOKEN configurato, un bearer token errato deve produrre 401."
+        "description": "Test negativo: un bearer token errato deve produrre 401; se ERP_SYNC_TOKEN manca sul server la richiesta viene rifiutata con 503."
       },
       "response": []
     }

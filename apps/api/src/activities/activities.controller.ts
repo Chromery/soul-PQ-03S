@@ -1,4 +1,5 @@
 import { Controller, Get, Header, Query, Sse } from "@nestjs/common";
+import { takeUntil, timer } from "rxjs";
 import { ActivitiesService } from "./activities.service.js";
 
 @Controller("activities")
@@ -15,6 +16,7 @@ export class ActivitiesController {
   @Header("Cache-Control", "no-cache, no-transform")
   @Header("X-Accel-Buffering", "no")
   stream() {
-    return this.activities.stream();
+    // Force EventSource to reconnect through authentication regularly.
+    return this.activities.stream().pipe(takeUntil(timer(30_000)));
   }
 }

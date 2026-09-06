@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc -b && vite build",
-    "preview": "vite preview --host 0.0.0.0 --port 4173"
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@clerk/localizations": "^4.16.0",
+    "@clerk/react": "^6.15.1",
     "comuni-json": "^1.0.0",
     "lucide-react": "^0.468.0",
     "pdfjs-dist": "^3.11.174",
@@ -16,6 +19,8 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@clerk/testing": "^2.2.33",
+    "@playwright/test": "^1.63.0",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^5.0.4",

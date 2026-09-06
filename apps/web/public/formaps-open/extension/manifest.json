@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "forMaps Open",
-  "version": "0.56.6",
+  "version": "0.65.0",
   "description": "Compila automaticamente la ricerca particelle in forMaps dai dati aperti da Soul PQ.",
   "permissions": [
     "storage"
@@ -13,6 +13,7 @@
     "http://127.0.0.1/*",
     "http://0.0.0.0/*",
     "https://pq-soul.rainailab.com/*",
+    "https://st-pq-soul.rainailab.com/*",
     "http://*/*",
     "https://soul-pq-alpha.rainailab.com/*",
     "https://soul-pq-alpha-2.iggau.com/*",
@@ -27,6 +28,11 @@
   },
   "options_page": "settings.html",
   "content_scripts": [
+    {
+      "matches": ["https://pq-soul.rainailab.com/*", "https://st-pq-soul.rainailab.com/*"],
+      "js": ["pq-auth-relay.js"],
+      "run_at": "document_idle"
+    },
     {
       "matches": [
         "https://www.formaps.it/*",

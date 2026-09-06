@@ -2,17 +2,6 @@ import { useEffect, useRef } from "react";
 import { ArrowRight, Building2, FileDown, Layers3, RefreshCw, X } from "lucide-react";
 import "./welcomeExperience.css";
 
-const WELCOME_KEY = "soul-pq-welcome-v1";
-
-export function needsWelcome() {
-  try { return localStorage.getItem(WELCOME_KEY) !== "seen"; }
-  catch { return true; }
-}
-
-export function rememberWelcome() {
-  try { localStorage.setItem(WELCOME_KEY, "seen"); } catch { /* Storage can be disabled. */ }
-}
-
 const features = [
   { icon: RefreshCw, title: "Dall’ERP alla tua scrivania", text: "Ritrova studi, immobili e documenti in un unico spazio." },
   { icon: Layers3, title: "Dalla planimetria alla valutazione", text: "Misura le aree e confronta rendita catastale e IMU." },

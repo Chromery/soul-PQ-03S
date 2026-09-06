@@ -74,10 +74,11 @@ import {
 } from "./lotValuation";
 import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
-import { EmptyWorkspace, WelcomeModal, TestStudiesToggle, needsWelcome, rememberWelcome } from "./WelcomeExperience";
+import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperience";
+import { CurrentOperator, useIdentity } from "./Auth";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.64.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.65.0";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -2665,11 +2666,12 @@ function mergeActivityEvents(current: ActivityEvent[], incoming: ActivityEvent[]
 }
 
 function App() {
+  const { profile, markWelcomeSeen } = useIdentity();
   const [studies, setStudies] = useState<FeasibilityStudy[]>([]);
   const [studiesLoading, setStudiesLoading] = useState(true);
   const [studiesError, setStudiesError] = useState("");
   const [showTestStudies, setShowTestStudies] = useState(false);
-  const [welcomeOpen, setWelcomeOpen] = useState(needsWelcome);
+  const [welcomeOpen, setWelcomeOpen] = useState(() => !profile.welcomeSeenAt);
   const visibleStudies = useMemo(() => studies.filter((study) => showTestStudies || !study.isTest), [studies, showTestStudies]);
   const testStudyCount = studies.filter((study) => study.isTest).length;
   const [route, setRoute] = useState<AppRoute>(routeFromLocation);
@@ -3185,8 +3187,8 @@ function App() {
           provincia: form.provincia,
           region: form.region,
           deadline: form.deadline,
-          commercialOwner: "Default User",
-          technicalOwner: "Default User",
+          commercialOwner: profile.name,
+          technicalOwner: profile.name,
           notes: form.notes,
         }),
       });
@@ -3722,7 +3724,8 @@ function App() {
         onNavigate={navigate}
         activityFeed={activityFeed}
       >
-        <SettingsPage appVersion={APP_DEPLOY_VERSION} onNotice={flash} />
+        {profile.role === "admin" ? <SettingsPage appVersion={APP_DEPLOY_VERSION} onNotice={flash} />
+          : <div className="empty-state"><h2>Impostazioni riservate</h2><p>Questa sezione è disponibile agli amministratori.</p></div>}
       </Shell>
     );
   }
@@ -4233,7 +4236,10 @@ function App() {
         </section>
 
       </main>
-      {welcomeOpen && <WelcomeModal onClose={() => { rememberWelcome(); setWelcomeOpen(false); }} />}
+      {welcomeOpen && <WelcomeModal onClose={() => {
+        setWelcomeOpen(false);
+        if (!profile.welcomeSeenAt) void markWelcomeSeen().catch(() => setToast("Benvenuto non salvato: verrà riproposto al prossimo accesso."));
+      }} />}
       {newStudyModalOpen && (
         <NewStudyModal
           busy={newStudyBusy}
@@ -4784,14 +4790,7 @@ function Shell({
           />
         </nav>
 
-        <div className="operator-card" aria-label="Operatore corrente">
-          <div className="avatar">DU</div>
-          <div>
-            <strong>Default User</strong>
-            <span>Responsabile Tecnico</span>
-          </div>
-          <ChevronDown size={17} />
-        </div>
+        <CurrentOperator />
       </aside>
 
       <div className={`content-shell ${editorMode ? "editor-layout" : ""}`}>

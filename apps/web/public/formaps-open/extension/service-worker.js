@@ -36,6 +36,7 @@ function allowedQwenEndpoint(value) {
     const localHosts = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
     const pqHosts = new Set([
       "pq-soul.rainailab.com",
+      "st-pq-soul.rainailab.com",
       "soul-pq-alpha.rainailab.com",
       "soul-pq-alpha-2.iggau.com"
     ]);
@@ -120,6 +121,19 @@ async function sendCaptchaToQwen(imageDataUrl, metadata) {
   }
 
   const attempts = [];
+
+  const configured = allowedQwenEndpoint(metadata?.options?.qwenCaptchaEndpoint);
+  if (configured && ["https://pq-soul.rainailab.com", "https://st-pq-soul.rainailab.com"].includes(new URL(configured).origin)) {
+    const origin = new URL(configured).origin;
+    const tabs = await chrome.tabs.query({ url: `${origin}/*` });
+    for (const tab of tabs) {
+      try {
+        const result = await chrome.tabs.sendMessage(tab.id, { type: "pq-authenticated-captcha", imageDataUrl });
+        if (result?.ok) return { ...result, endpoint: configured };
+      } catch { /* The PQ tab might need reloading after extension installation. */ }
+    }
+    return { ok: false, error: "Apri PQ, accedi e mantieni aperta la scheda. Ricaricala dopo aver aggiornato l’estensione." };
+  }
 
   for (const endpoint of qwenEndpointCandidates(metadata)) {
     const startedAt = Date.now();

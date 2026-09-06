@@ -7,6 +7,11 @@ datasource db {
   provider = "postgresql"
 }
 
+model UserPreferences {
+  clerkUserId   String   @id
+  welcomeSeenAt DateTime @default(now())
+}
+
 enum DocumentType {
   PLANIMETRIA
   VISURA

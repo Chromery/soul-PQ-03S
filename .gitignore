@@ -7,6 +7,9 @@ dist
 *.local.md
 credentials/
 secrets/
+playwright/.auth/
+test-results/
+playwright-report/
 mock-documents/
 00_prezzari2026.zip
 00_prezzari2026/

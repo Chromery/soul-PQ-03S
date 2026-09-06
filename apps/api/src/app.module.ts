@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AuthModule } from "./auth/auth.module.js";
 import { ConfigModule } from "@nestjs/config";
 import dotenv from "dotenv";
 import { fileURLToPath } from "node:url";
@@ -24,6 +25,7 @@ process.env.DATABASE_URL ??= localDatabaseUrl();
   imports: [
     ConfigModule.forRoot({ envFilePath: rootEnvFile, isGlobal: true }),
     PrismaModule,
+    AuthModule,
     ActivitiesModule,
     ImuModule,
     StudiesModule,

@@ -7,6 +7,11 @@ Implementare nella piattaforma principale un pulsante che, partendo da una lista
 La piattaforma principale deve generare gli URL forMaps con il payload corretto nel fragment `#formapsOpen=...`.
 Il proxy CAPTCHA/Qwen non vive piu in un servizio Tailscale separato: e incorporato nell'API PQ come `POST /api/qwen-captcha` e usa `NEURALWATT_API_KEY` dal `.env`.
 
+Con Clerk (0.65.0) aggiornare l'estensione dal nuovo ZIP e ricaricare la scheda PQ.
+Il proxy richiede ora la sessione dell'operatore: lasciare aperta una scheda PQ autenticata
+nello stesso ambiente. Il content script isolato esegue la richiesta same-origin, senza
+trasferire token a forMaps. La vecchia estensione senza relay riceve un errore di accesso.
+
 ## Prerequisito Utente
 
 L'utente deve avere installata l'estensione Chrome `forMaps Open`.

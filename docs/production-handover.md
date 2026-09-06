@@ -1,8 +1,9 @@
 # Avvio operativo — 0.64.0
 
 Il benvenuto compare alla prima apertura della dashboard o della lista studi e
-si può riaprire con «Benvenuto in PQ». La chiusura è ricordata nel browser tramite
-`soul-pq-welcome-v1`: non esiste ancora un profilo utente a cui associare la preferenza.
+si può riaprire con «Benvenuto in PQ». Nella 0.64.0 la chiusura è ricordata nel browser tramite
+`soul-pq-welcome-v1`. Dall'integrazione Clerk 0.65.0 viene salvata nel database per
+utente autenticato: vedere [configurazione autenticazione](clerk-authentication.md).
 Il dialogo supporta tastiera, Escape, focus e preferenza di movimento ridotto.
 
 `FeasibilityStudy.isTest` distingue gli studi di prova da quelli operativi ed è

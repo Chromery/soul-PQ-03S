@@ -57,7 +57,7 @@ export class SystemService {
           optionalConfig(this.config.get<string>("NEURALWATT_VISURA_MODEL")) ??
           "qwen3.6-35b-fast",
         pdfEngine: "pdftoppm-jpeg",
-        authentication: "not-configured",
+        authentication: "clerk",
       },
     };
   }
