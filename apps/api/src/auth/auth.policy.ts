@@ -5,6 +5,14 @@ export type PqRole = "admin" | "operator";
 export type PqIdentity = { userId: string; role: PqRole; name: string; email: string; automation: boolean };
 export type AuthenticatedRequest = Request & { pqUser: PqIdentity };
 
+// Clerk invitation metadata is written only by the Backend API and copied to
+// publicMetadata on acceptance. User-editable unsafeMetadata is never consulted.
+// An explicit private grant (including a revocation/null) always takes precedence.
+export function accessMetadata(privateMetadata: Record<string, unknown>, publicMetadata: Record<string, unknown> = {}) {
+  if (Object.hasOwn(privateMetadata, "pq")) return privateMetadata;
+  return { pq: publicMetadata.pqInvitation };
+}
+
 export function sessionToken(request: Pick<Request, "headers">) {
   const authorization = request.headers.authorization;
   if (authorization !== undefined) {

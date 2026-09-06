@@ -2,7 +2,7 @@ import { Injectable, ServiceUnavailableException, UnauthorizedException } from "
 import { ConfigService } from "@nestjs/config";
 import { createClerkClient, verifyToken, type ClerkClient } from "@clerk/backend";
 import type { Request } from "express";
-import { grantedRole, requireTrustedOrigin, sessionToken, type PqIdentity } from "./auth.policy.js";
+import { accessMetadata, grantedRole, requireTrustedOrigin, sessionToken, type PqIdentity } from "./auth.policy.js";
 
 @Injectable()
 export class AuthService {
@@ -28,7 +28,8 @@ export class AuthService {
         jwtKey: this.config.get<string>("CLERK_JWT_KEY")?.replace(/\\n/g, "\n") });
     } catch { throw new UnauthorizedException("Sessione scaduta o non valida"); }
     const issuer = `https://${Buffer.from(publishableKey.slice(`pk_${keyType}_`.length), "base64").toString().replace(/\$$/, "")}`;
-    if (!claims.sub || !claims.sid || !claims.azp || !origins.includes(claims.azp) || claims.iss !== issuer) {
+    if (!claims.sub || !claims.sid || !claims.azp || !origins.includes(claims.azp) || claims.iss !== issuer ||
+        (claims.sts !== undefined && claims.sts !== "active")) {
       throw new UnauthorizedException("Sessione non valida per questo ambiente");
     }
     const cached = this.identities.get(claims.sub);
@@ -38,7 +39,7 @@ export class AuthService {
     try { user = await this.client.users.getUser(claims.sub); }
     catch { throw new ServiceUnavailableException("Verifica account temporaneamente non disponibile"); }
     if (user.banned || user.locked) throw new UnauthorizedException("Account non attivo");
-    const grant = grantedRole(user.privateMetadata, environment!);
+    const grant = grantedRole(accessMetadata(user.privateMetadata, user.publicMetadata), environment!);
     const email = user.emailAddresses.find((address) => address.id === user.primaryEmailAddressId && address.verification?.status === "verified")?.emailAddress;
     if (!email) throw new UnauthorizedException("Email verificata richiesta");
     const identity: PqIdentity = { userId: user.id, ...grant, email,

@@ -10,7 +10,7 @@ import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
 import { AuthService } from "../src/auth/auth.service.js";
 import { AdminOnly, AuthGuard, ExternalAuthentication } from "../src/auth/auth.guard.js";
-import { grantedRole, requireTrustedOrigin, sessionToken } from "../src/auth/auth.policy.js";
+import { accessMetadata, grantedRole, requireTrustedOrigin, sessionToken } from "../src/auth/auth.policy.js";
 import { AuthController } from "../src/auth/auth.controller.js";
 import type { PrismaService } from "../src/prisma/prisma.service.js";
 
@@ -39,7 +39,7 @@ const request = (token = jwt()) => ({ method: "GET", headers: { cookie: `__sessi
 
 test("real signed Clerk session accepted; invalid, expired and other-instance tokens rejected", async () => {
   assert.equal((await service().authenticate(request())).role, "operator");
-  for (const token of ["invalid", jwt({ exp: 1 }), jwt({ azp: "https://pq-soul.rainailab.com" }), jwt({ iss: "https://other.clerk.accounts.dev" }), jwt({ sid: null }), jwt({ azp: null })]) {
+  for (const token of ["invalid", jwt({ exp: 1 }), jwt({ azp: "https://pq-soul.rainailab.com" }), jwt({ iss: "https://other.clerk.accounts.dev" }), jwt({ sid: null }), jwt({ azp: null }), jwt({ sts: "pending" })]) {
     await assert.rejects(() => service().authenticate(request(token)), UnauthorizedException);
   }
 });
@@ -51,6 +51,14 @@ test("signed-in but ungranted accounts cannot enter PQ", async () => {
   assert.throws(() => grantedRole({ pq: { role: "admin", environment: "production" } }, "staging"), ForbiddenException);
   assert.throws(() => grantedRole({ pq: { role: "operator", environment: "production", automation: true } }, "production"), ForbiddenException);
   assert.deepEqual(grantedRole({ pq: { role: "operator", environment: "staging", automation: true } }, "staging"), { role: "operator", automation: true });
+});
+
+test("server-created invitation grants work, but private revocations always win", () => {
+  const invitation = { pqInvitation: { role: "admin", environment: "staging", automation: false } };
+  assert.equal(grantedRole(accessMetadata({}, invitation), "staging").role, "admin");
+  assert.throws(() => grantedRole(accessMetadata({ pq: null }, invitation), "staging"), ForbiddenException);
+  assert.equal(grantedRole(accessMetadata({ pq: { role: "operator", environment: "staging" } }, invitation), "staging").role, "operator");
+  assert.throws(() => grantedRole(accessMetadata({}, { pq: invitation.pqInvitation }), "staging"), ForbiddenException);
 });
 test("cookie handling does not fall back from an invalid bearer or accept ambiguous cookies", () => {
   assert.equal(sessionToken({ headers: { cookie: "other=ok; __session=jwt" } }), "jwt");

@@ -2,8 +2,8 @@
 
 ## Stato della consegna
 
-Integrazione preparata su staging. La pubblicazione dell'app autenticata richiede prima
-le chiavi dell'istanza Clerk e almeno un amministratore abilitato. Nessun accesso
+Integrazione 0.65.0 su staging. La pubblicazione dell'app autenticata richiede prima
+le chiavi dell'istanza Clerk e almeno un amministratore abilitato o invitato con grant. Nessun accesso
 anonimo di emergenza: con configurazione mancante le API utente rispondono 503.
 La correzione ERP (token sempre obbligatorio) puo essere pubblicata indipendentemente.
 
@@ -50,6 +50,11 @@ documenti. `admin` aggiunge impostazioni di sistema e backup. La gestione accoun
 avviene nel dashboard Clerk, non in un nuovo pannello PQ. Account senza assegnazione
 esplicita o senza email primaria verificata ricevono 403/401 anche se autenticati.
 Non esiste promozione automatica del primo utente, né abilitazione per solo dominio email.
+Gli inviti creati dalla Backend API possono assegnare il ruolo all'accettazione usando
+`publicMetadata.pqInvitation` con la stessa struttura di `privateMetadata.pq`.
+I public metadata Clerk non sono modificabili dal client; `unsafeMetadata` viene ignorato.
+Una voce `privateMetadata.pq` esplicita ha sempre precedenza, anche se `null` (revoca),
+per evitare che un vecchio invito ripristini un accesso rimosso.
 Per abilitare un utente esistente tramite script, esportare i segreti e poi:
 
 ```sh
@@ -95,6 +100,9 @@ Chiave segreta e variabili test nel secret store del runner; mai in Git. Esporta
 ```sh
 npm run test:e2e --workspace @soul/web
 ```
+
+In un runner Docker si puo impostare `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`
+per usare il Chromium gia installato nell'immagine API.
 
 La suite è vincolata al dominio staging, rifiuta chiavi live e prova login/logout,
 API anonime, ruolo operatore e benvenuto persistente. Non registra trace/video o cookie
