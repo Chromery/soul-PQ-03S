@@ -7,6 +7,22 @@ le chiavi dell'istanza Clerk e almeno un amministratore abilitato o invitato con
 anonimo di emergenza: con configurazione mancante le API utente rispondono 503.
 La correzione ERP (token sempre obbligatorio) puo essere pubblicata indipendentemente.
 
+### Verifica staging del 6 settembre 2026
+
+0.65.0 pubblicata su `https://st-pq-soul.rainailab.com`. Chiavi development configurate
+nel `.env` non versionato; origine staging distinta dalla produzione. Primo amministratore
+invitato con grant di ruolo all'accettazione; account automazione operatore creato.
+Registrazioni limitate tramite allowlist alle email autorizzate. Al collaudo il dashboard
+Clerk aveva ancora access mode pubblico (con allowlist attiva) e MFA disattivata: rimane
+da impostare Restricted e abilitare TOTP, backup codes e obbligatorietà MFA nel dashboard.
+Non considerare verificato il percorso MFA umano fino a questa configurazione.
+
+108 test backend passati e 2 test end-to-end passati su Chromium con Clerk reale:
+login/logout operatore, API e download anonimi rifiutati, impostazioni/backup vietati
+all'operatore, benvenuto persistente anche dopo pulizia localStorage. Sync ERP con token
+valido verificato 200; richieste senza token 401. Nessuna modifica in produzione.
+Backup DB prima del deploy verificato con `pg_restore --list`.
+
 ## Configurazione Clerk e segreti
 
 1. Creare l'applicazione nel workspace Clerk e usare l'istanza **Development** per staging.
