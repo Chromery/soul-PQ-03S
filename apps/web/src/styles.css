@@ -334,6 +334,19 @@ button:disabled {
   color: #d7e7ff;
 }
 
+.global-search:focus-within {
+  border-color: rgba(132, 191, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(132, 191, 255, 0.1);
+}
+
+.global-search > svg {
+  flex-shrink: 0;
+}
+
+.global-search input {
+  flex: 1;
+}
+
 .search-field input {
   width: 100%;
   min-width: 0;
@@ -348,14 +361,38 @@ button:disabled {
   opacity: 0.72;
 }
 
-kbd {
-  min-width: 45px;
-  padding: 2px 6px;
-  border-radius: 5px;
-  color: #d7e7ff;
-  background: rgba(255, 255, 255, 0.08);
-  text-align: center;
-  font-size: 12px;
+.search-shortcut {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.search-shortcut kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 24px;
+  padding: 0 5px;
+  border: 1px solid rgba(215, 231, 255, 0.16);
+  border-bottom-color: rgba(215, 231, 255, 0.24);
+  border-radius: 6px;
+  color: #b8c9df;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.search-shortcut-plus {
+  color: #8da3bf;
+  font-size: 10px;
+  line-height: 1;
 }
 
 .date-picker {

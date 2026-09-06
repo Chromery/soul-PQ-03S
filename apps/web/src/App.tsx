@@ -78,7 +78,7 @@ import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperi
 import { CurrentOperator, useIdentity } from "./Auth";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.65.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.65.1";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -4801,11 +4801,16 @@ function Shell({
               <input
                 id="global-search"
                 aria-label="Cerca aziende, immobili o studi"
+                aria-keyshortcuts="Control+K Meta+K"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Cerca aziende, immobili, studi..."
               />
-              <kbd>Ctrl K</kbd>
+              <span className="search-shortcut" aria-hidden="true">
+                <kbd>Ctrl</kbd>
+                <span className="search-shortcut-plus">+</span>
+                <kbd>K</kbd>
+              </span>
             </label>
 
             <span className="date-picker" aria-label="Data di oggi">
