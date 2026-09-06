@@ -51,7 +51,7 @@ Autenticazione:
 Authorization: Bearer <erp_sync_token>
 ```
 
-Nel backend attuale il token e obbligatorio solo se viene configurata la variabile `ERP_SYNC_TOKEN`; in sviluppo locale puo restare non configurato.
+Il token e sempre obbligatorio, anche in sviluppo: senza `ERP_SYNC_TOKEN` configurato il server rifiuta le richieste con `503`. Un bearer token mancante o errato restituisce `401`. Questa credenziale tecnica e indipendente dalle sessioni utente Clerk e va distinta fra staging e produzione.
 
 ## Endpoint Necessari
 
@@ -442,7 +442,8 @@ Codici principali:
 | HTTP | Uso |
 | --- | --- |
 | `400` | Payload non valido, campi obbligatori mancanti, base64 non valido, SHA non coerente. |
-| `401` | Token ERP mancante o errato, solo se `ERP_SYNC_TOKEN` e configurato. |
+| `401` | Token ERP mancante o errato. |
+| `503` | Autenticazione ERP non configurata sul server. Nessun dato viene elaborato. |
 | `413` | Payload troppo grande. |
 | `500` | Errore backend non previsto. |
 

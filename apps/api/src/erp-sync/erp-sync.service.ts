@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, Optional, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Injectable, Optional, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { ActivitiesService } from "../activities/activities.service.js";
 import {
   AddressNormalizationService,
@@ -124,8 +124,10 @@ export class ErpSyncService {
 
   assertAuthorized(authorization?: string) {
     const expectedToken = process.env.ERP_SYNC_TOKEN;
-    if (!expectedToken) return;
-    if (authorization !== `Bearer ${expectedToken}`) {
+    if (!expectedToken?.trim()) throw new ServiceUnavailableException("Autenticazione ERP non configurata");
+    const expected = Buffer.from(`Bearer ${expectedToken}`);
+    const supplied = Buffer.from(authorization ?? "");
+    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
       throw new UnauthorizedException("Token ERP non valido");
     }
   }
