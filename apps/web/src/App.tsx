@@ -78,7 +78,7 @@ import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperi
 import { CurrentOperator, useIdentity } from "./Auth";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.0.3";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.0.4";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -6739,7 +6739,7 @@ function presentationPropertyHasIncompleteData(property: PresentationPropertyDra
 }
 
 function presentationDraftTotals(draft: PresentationDraft) {
-  return draft.properties.reduce(
+  const totals = draft.properties.reduce(
     (totals, property) => {
       const payload = presentationPropertyPayload(property);
       if (!payload) {
@@ -6764,6 +6764,7 @@ function presentationDraftTotals(draft: PresentationDraft) {
       invalid: 0,
     },
   );
+  return { ...totals, renditaDifference: totals.renditaAttuale - totals.renditaAttribuibile };
 }
 
 function PresentationAction({
@@ -7148,7 +7149,7 @@ function PresentationDataPreview({
   onReset: () => void;
 }) {
   const totals = presentationDraftTotals(draft);
-  const renditaDifference = totals.renditaAttuale - totals.renditaAttribuibile;
+  const renditaDifference = totals.renditaDifference;
   const imuDifference = totals.imuAttuale - totals.imuOttenibile;
 
   function moneyInput(
@@ -7516,6 +7517,7 @@ function StudyDetail({
   const [presentationDraft, setPresentationDraft] = useState<PresentationDraft>(() => presentationBaseline);
   const [presentationTouchedFields, setPresentationTouchedFields] = useState<Set<string>>(() => new Set());
   const propertyTableColumns = useTableColumns("soul-table-study-properties-v1", PROPERTY_TABLE_COLUMNS);
+  const presentationTotals = useMemo(() => presentationDraftTotals(presentationDraft), [presentationDraft]);
   const visiblePropertyColumnIds = useMemo(
     () => new Set<PropertyTableColumnId>(propertyTableColumns.visibleColumns.map((column) => column.id)),
     [propertyTableColumns.visibleColumns],
@@ -8415,6 +8417,14 @@ function StudyDetail({
           label="Differenza IMU totale"
           value={formatEuro(study.diffImu)}
           positive={study.diffImu >= 0}
+        />
+        <DetailMetric
+          icon={<CircleDollarSign size={22} />}
+          label="Valore ottimizzazione"
+          value={presentationTotals.invalid > 0 ? "n.d." : formatEuro(presentationTotals.renditaDifference)}
+          positive={presentationTotals.renditaDifference >= 0}
+          supplementaryLabel="Dati presentazione"
+          supplementaryValue={presentationTotals.invalid > 0 ? "Da completare" : "R.C. attuale − attribuibile"}
         />
       </section>
 
