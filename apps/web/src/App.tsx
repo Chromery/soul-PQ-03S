@@ -78,7 +78,7 @@ import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperi
 import { CurrentOperator, useIdentity } from "./Auth";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.65.1";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.0.0";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
