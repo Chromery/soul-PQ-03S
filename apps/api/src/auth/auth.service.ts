@@ -2,7 +2,7 @@ import { Injectable, ServiceUnavailableException, UnauthorizedException } from "
 import { ConfigService } from "@nestjs/config";
 import { createClerkClient, verifyToken, type ClerkClient } from "@clerk/backend";
 import type { Request } from "express";
-import { accessMetadata, grantedRole, requireTrustedOrigin, sessionToken, type PqIdentity } from "./auth.policy.js";
+import { accessMetadata, displayProfile, grantedRole, requireTrustedOrigin, sessionToken, type PqIdentity } from "./auth.policy.js";
 
 @Injectable()
 export class AuthService {
@@ -42,8 +42,7 @@ export class AuthService {
     const grant = grantedRole(accessMetadata(user.privateMetadata, user.publicMetadata), environment!);
     const email = user.emailAddresses.find((address) => address.id === user.primaryEmailAddressId && address.verification?.status === "verified")?.emailAddress;
     if (!email) throw new UnauthorizedException("Email verificata richiesta");
-    const identity: PqIdentity = { userId: user.id, ...grant, email,
-      name: [user.firstName, user.lastName].filter(Boolean).join(" ") || email };
+    const identity: PqIdentity = { userId: user.id, ...grant, email, ...displayProfile(user, email) };
     // Small bounded cache: role changes and account blocks apply within 15 seconds.
     if (this.identities.size >= 500) this.identities.clear();
     this.identities.set(user.id, { expires: Date.now() + 15_000, identity });

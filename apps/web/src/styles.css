@@ -252,7 +252,7 @@ button:disabled {
   margin-top: auto;
   min-height: 72px;
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 18px;
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   padding: 12px;
@@ -276,6 +276,19 @@ button:disabled {
 .operator-card span {
   color: #c3d4ee;
   font-size: 13px;
+}
+
+.operator-card .operator-name,
+.operator-card .operator-job-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
+.operator-card .operator-access-role {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #a9bdd8;
 }
 
 .avatar {

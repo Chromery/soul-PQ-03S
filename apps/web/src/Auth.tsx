@@ -3,7 +3,7 @@ import { itIT } from "@clerk/localizations";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import "./auth.css";
 
-type Profile = { userId: string; name: string; email: string; role: "admin" | "operator"; automation: boolean; welcomeSeenAt: string | null };
+type Profile = { userId: string; name: string; firstName: string; lastName: string; jobTitle: string | null; email: string; role: "admin" | "operator"; automation: boolean; welcomeSeenAt: string | null };
 const IdentityContext = createContext<{ profile: Profile; markWelcomeSeen: () => Promise<void> } | null>(null);
 export function useIdentity() {
   const identity = useContext(IdentityContext);
@@ -13,8 +13,14 @@ export function useIdentity() {
 
 export function CurrentOperator() {
   const { profile } = useIdentity();
-  return <div className="operator-card" aria-label="Operatore corrente">
-    <UserButton /><div><strong>{profile.name}</strong><span>{profile.role === "admin" ? "Amministratore" : "Operatore"}{profile.automation ? " · Test" : ""}</span></div>
+  const accessRole = profile.role === "admin" ? "Amministratore" : "Operatore";
+  const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ") || profile.name;
+  return <div className="operator-card" aria-label="Operatore corrente" title={[fullName, profile.jobTitle, `Accesso ${accessRole.toLowerCase()}`].filter(Boolean).join(" · ")}>
+    <UserButton /><div>
+      <strong className="operator-name">{fullName}</strong>
+      {profile.jobTitle && <span className="operator-job-title">{profile.jobTitle}</span>}
+      <span className="operator-access-role">{profile.jobTitle ? "Accesso " : ""}{accessRole}{profile.automation ? " · Test" : ""}</span>
+    </div>
   </div>;
 }
 

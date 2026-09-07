@@ -75,6 +75,26 @@ in produzione e quelle live in staging. Non copiare credenziali/sessioni fra amb
 
 ## Utenti e ruoli
 
+### Profilo aziendale (1.0.1)
+
+La scheda operatore mostra nome e cognome, qualifica aziendale e permessi di accesso
+separati. `GET /api/auth/me` mantiene `name` e `role` e aggiunge `firstName`, `lastName`
+e `jobTitle` (null in assenza di qualifica). La qualifica non assegna mai permessi.
+Il 7 settembre 2026 e stato inviato l'invito produzione al responsabile tecnico
+con grant `operator`, non amministratore.
+
+Per il profilo aziendale impostare nei private metadata Clerk (o nei public metadata
+dell'invito, copiati all'accettazione) un oggetto separato dal grant:
+
+```json
+{"pqProfile":{"firstName":"Daniele","lastName":"Recchia","jobTitle":"Responsabile Tecnico"}}
+```
+
+Un `privateMetadata.pqProfile` esplicito prevale sul profilo pubblico dell'invito;
+`null` lo rimuove. I nomi mancanti usano quelli dell'account Clerk, poi l'email.
+`unsafeMetadata` non viene letto. Il grant resta in `privateMetadata.pq` oppure
+`publicMetadata.pqInvitation`, con ambiente e ruolo espliciti come descritto sotto.
+
 Invitare/creare account nominativi dal dashboard Clerk. Dopo l'accettazione assegnare
 nei **Private metadata** (non Unsafe metadata) dell'utente:
 

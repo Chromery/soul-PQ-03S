@@ -10,7 +10,7 @@ import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
 import { AuthService } from "../src/auth/auth.service.js";
 import { AdminOnly, AuthGuard, ExternalAuthentication } from "../src/auth/auth.guard.js";
-import { accessMetadata, grantedRole, requireTrustedOrigin, sessionToken } from "../src/auth/auth.policy.js";
+import { accessMetadata, displayProfile, grantedRole, requireTrustedOrigin, sessionToken } from "../src/auth/auth.policy.js";
 import { AuthController } from "../src/auth/auth.controller.js";
 import type { PrismaService } from "../src/prisma/prisma.service.js";
 
@@ -59,6 +59,45 @@ test("server-created invitation grants work, but private revocations always win"
   assert.throws(() => grantedRole(accessMetadata({ pq: null }, invitation), "staging"), ForbiddenException);
   assert.equal(grantedRole(accessMetadata({ pq: { role: "operator", environment: "staging" } }, invitation), "staging").role, "operator");
   assert.throws(() => grantedRole(accessMetadata({}, { pq: invitation.pqInvitation }), "staging"), ForbiddenException);
+});
+test("business profile from invitation exposes full name and job title without granting permissions", () => {
+  const user = { privateMetadata: {}, publicMetadata: { pqProfile: {
+    firstName: " Daniele ", lastName: "Recchia", jobTitle: "Responsabile Tecnico", role: "admin",
+  } } };
+  assert.deepEqual(displayProfile(user, "daniele@example.com"), {
+    firstName: "Daniele", lastName: "Recchia", name: "Daniele Recchia", jobTitle: "Responsabile Tecnico",
+  });
+  assert.throws(() => grantedRole(accessMetadata(user.privateMetadata, user.publicMetadata), "production"), ForbiddenException);
+});
+test("private business profile overrides invitation; null clears it and missing names fall back to Clerk", () => {
+  const user = { firstName: "Clerk", lastName: "User", publicMetadata: { pqProfile: { firstName: "Old", jobTitle: "Old title" } },
+    privateMetadata: { pqProfile: { firstName: "New", jobTitle: "Technical lead" } } };
+  assert.deepEqual(displayProfile(user, "user@example.com"), {
+    firstName: "New", lastName: "User", name: "New User", jobTitle: "Technical lead",
+  });
+  assert.deepEqual(displayProfile({ ...user, privateMetadata: { pqProfile: null } }, "user@example.com"), {
+    firstName: "Clerk", lastName: "User", name: "Clerk User", jobTitle: null,
+  });
+});
+test("malformed profile values are ignored, text is bounded and unnamed accounts fall back to email", () => {
+  for (const raw of [null, [], "invalid", { firstName: 42, lastName: {}, jobTitle: false }]) {
+    assert.deepEqual(displayProfile({ privateMetadata: { pqProfile: raw } }, "user@example.com"), {
+      firstName: "", lastName: "", name: "user@example.com", jobTitle: null,
+    });
+  }
+  const profile = displayProfile({ privateMetadata: { pqProfile: { firstName: "a".repeat(200), jobTitle: "b".repeat(300) } } }, "user@example.com");
+  assert.equal(profile.firstName.length, 100);
+  assert.equal(profile.jobTitle?.length, 160);
+});
+test("authenticated profile returns business identity while retaining operator authorization", async () => {
+  const identity = await service({ pq: { role: "operator", environment: "staging" },
+    pqProfile: { firstName: "Daniele", lastName: "Recchia", jobTitle: "Responsabile Tecnico" },
+  }).authenticate(request());
+  assert.equal(identity.name, "Daniele Recchia");
+  assert.equal(identity.firstName, "Daniele");
+  assert.equal(identity.lastName, "Recchia");
+  assert.equal(identity.jobTitle, "Responsabile Tecnico");
+  assert.equal(identity.role, "operator");
 });
 test("cookie handling does not fall back from an invalid bearer or accept ambiguous cookies", () => {
   assert.equal(sessionToken({ headers: { cookie: "other=ok; __session=jwt" } }), "jwt");

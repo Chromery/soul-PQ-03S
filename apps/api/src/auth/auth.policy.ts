@@ -2,8 +2,22 @@ import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import type { Request } from "express";
 
 export type PqRole = "admin" | "operator";
-export type PqIdentity = { userId: string; role: PqRole; name: string; email: string; automation: boolean };
+export type PqIdentity = { userId: string; role: PqRole; name: string; firstName: string; lastName: string; jobTitle: string | null; email: string; automation: boolean };
 export type AuthenticatedRequest = Request & { pqUser: PqIdentity };
+
+// Business profile is display-only, never a permission grant. Invitation public
+// metadata is server-managed; an explicit private profile overrides it.
+export function displayProfile(user: { firstName?: string | null; lastName?: string | null;
+  privateMetadata: Record<string, unknown>; publicMetadata?: Record<string, unknown> }, email: string) {
+  const raw = Object.hasOwn(user.privateMetadata, "pqProfile")
+    ? user.privateMetadata.pqProfile : user.publicMetadata?.pqProfile;
+  const profile = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  const text = (value: unknown, limit: number) => typeof value === "string" ? value.trim().slice(0, limit) : "";
+  const firstName = text(profile.firstName, 100) || text(user.firstName, 100);
+  const lastName = text(profile.lastName, 100) || text(user.lastName, 100);
+  return { firstName, lastName, name: [firstName, lastName].filter(Boolean).join(" ") || email,
+    jobTitle: text(profile.jobTitle, 160) || null };
+}
 
 // Clerk invitation metadata is written only by the Backend API and copied to
 // publicMetadata on acceptance. User-editable unsafeMetadata is never consulted.

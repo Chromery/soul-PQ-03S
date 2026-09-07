@@ -15,6 +15,10 @@ test("staging operator signs in, retains welcome preference and cannot administe
   const profile = await page.evaluate(async () => (await fetch("/api/auth/me")).json());
   expect(profile.role).toBe("operator");
   expect(profile.automation).toBe(true);
+  expect(typeof profile.firstName).toBe("string");
+  expect(typeof profile.lastName).toBe("string");
+  expect(profile).toHaveProperty("jobTitle");
+  await expect(page.getByLabel("Operatore corrente").locator(".operator-name")).toHaveText(profile.name);
   const welcome = page.getByRole("dialog", { name: /Benvenuto in PQ/ });
   if (!profile.welcomeSeenAt) {
     await expect(welcome).toBeVisible();
@@ -31,4 +35,28 @@ test("staging operator signs in, retains welcome preference and cannot administe
   await clerk.signOut({ page });
   await expect(page.getByLabel("Operatore corrente")).not.toBeVisible();
   expect(await page.evaluate(async () => (await fetch("/api/studies")).status)).toBe(401);
+});
+
+test("business profile UI shows full name and title separately from access permissions", async ({ page }) => {
+  // Only presentation data is stubbed: sign-in still uses the real staging operator.
+  await page.route("**/api/auth/me", async (route) => {
+    const response = await route.fetch();
+    if (!response.ok()) return route.fulfill({ response });
+    const profile = await response.json();
+    await route.fulfill({ response, json: { ...profile, firstName: "Daniele", lastName: "Recchia",
+      name: "Daniele Recchia", jobTitle: "Responsabile Tecnico" } });
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/");
+  await clerk.signIn({ page, emailAddress: process.env.E2E_CLERK_USER_EMAIL! });
+  const card = page.getByLabel("Operatore corrente");
+  await expect(card.locator(".operator-name")).toHaveText("Daniele Recchia");
+  await expect(card.locator(".operator-job-title")).toHaveText("Responsabile Tecnico");
+  await expect(card.locator(".operator-access-role")).toHaveText("Accesso Operatore · Test");
+  for (const selector of [".operator-name", ".operator-job-title"]) {
+    await expect(card.locator(selector)).toBeVisible();
+    expect(await card.locator(selector).evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  }
+  expect(await page.evaluate(async () => (await fetch("/api/system/status")).status)).toBe(403);
+  await clerk.signOut({ page });
 });
