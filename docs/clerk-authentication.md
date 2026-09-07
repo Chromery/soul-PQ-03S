@@ -2,9 +2,16 @@
 
 ## Stato della consegna
 
-Versione **1.0.0 pubblicata su staging e produzione** il 7 settembre 2026.
+Versione **1.0.1 pubblicata su staging e produzione** il 7 settembre 2026.
 Produzione usa un'istanza Clerk Production separata, chiavi live e accesso solo su invito.
 Nessun accesso anonimo di emergenza: con configurazione mancante le API utente rispondono 503.
+
+La 1.0.1 aggiunge il profilo aziendale nella scheda operatore. Verificati 112 test
+backend e 4 E2E su staging (login reale dell'operatore, profilo aziendale con dati UI
+di esempio, permessi, benvenuto e shortcut). In produzione: login Clerk caricato,
+health 200, API utente e ERP anonime 401, GET ERP con token valido 200.
+Nessuna nuova migrazione DB. Invito del responsabile tecnico inviato; primo accesso
+del destinatario non ancora collaudato al momento della pubblicazione.
 
 ### Verifica produzione del 7 settembre 2026
 
