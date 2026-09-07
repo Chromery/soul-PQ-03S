@@ -2,10 +2,31 @@
 
 ## Stato della consegna
 
-Integrazione 0.65.0 su staging. La pubblicazione dell'app autenticata richiede prima
-le chiavi dell'istanza Clerk e almeno un amministratore abilitato o invitato con grant. Nessun accesso
-anonimo di emergenza: con configurazione mancante le API utente rispondono 503.
-La correzione ERP (token sempre obbligatorio) puo essere pubblicata indipendentemente.
+Versione **1.0.0 pubblicata su staging e produzione** il 7 settembre 2026.
+Produzione usa un'istanza Clerk Production separata, chiavi live e accesso solo su invito.
+Nessun accesso anonimo di emergenza: con configurazione mancante le API utente rispondono 503.
+
+### Verifica produzione del 7 settembre 2026
+
+- Dominio applicativo: `https://pq-soul.rainailab.com`; Clerk Frontend API:
+  `https://clerk.rainailab.com`. Tutti e cinque i record DNS verificati tramite Domain Connect.
+  Frontend API e portale account raggiungibili in HTTPS nel browser; il dashboard Clerk
+  mostrava ancora `Issuing` per i certificati al momento della verifica.
+- `.env` produzione separato fisicamente da staging (non piu un symlink), permessi 0600;
+  chiavi live e sole origini produzione. Nessun account di automazione in produzione.
+- Primo amministratore invitato con grant `pqInvitation` per produzione. L'accettazione
+  dell'invito e il primo login umano completo restano da collaudare: non confondere questo
+  invito con quello dell'istanza Development/staging.
+- Schermata login italiana verificata nel browser, SDK Clerk caricato dal dominio live.
+  Health 200; profilo e studi anonimi 401; API ERP senza token 401 e con token valido 200
+  (verifica GET delle modifiche, senza importare dati). Token ERP di produzione invariato.
+- Backup pre-deploy `pq-before-1.0.0-20260907.dump` verificato con `pg_restore --list`;
+  immagini precedenti conservate con tag `rollback-pre-1.0.0-20260907`.
+  Applicate le migrazioni `mark_existing_studies_as_test` e `user_welcome_preferences`:
+  conservati 79 studi e 7.240 immobili; i 79 studi preesistenti sono ora di test.
+- MFA **non attivata**: i metodi TOTP/backup codes nel dashboard richiedono il piano Pro.
+  Nessun upgrade a pagamento effettuato. MFA non va considerata parte del collaudo completato.
+  La pubblicazione non risolve automaticamente gli altri findings della review di sicurezza.
 
 ### Verifica staging del 6 settembre 2026
 
