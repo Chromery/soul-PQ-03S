@@ -2,7 +2,7 @@
 
 ## Stato della consegna
 
-Versione **1.0.1 pubblicata su staging e produzione** il 7 settembre 2026.
+Versione **1.0.1**; hotfix UI **1.0.1 patch 1** per il requisito password.
 Produzione usa un'istanza Clerk Production separata, chiavi live e accesso solo su invito.
 Nessun accesso anonimo di emergenza: con configurazione mancante le API utente rispondono 503.
 
@@ -52,6 +52,26 @@ valido verificato 200; richieste senza token 401. Nessuna modifica in produzione
 Backup DB prima del deploy verificato con `pg_restore --list`.
 
 ## Configurazione Clerk e segreti
+
+### Password: patch 1
+
+Le istanze staging e produzione richiedono **almeno 15 caratteri** e mantengono
+attivo il controllo delle password compromesse. Il pacchetto upstream di localizzazione
+Clerk riportava erroneamente 8 caratteri nell'errore `form_password_length_too_short`.
+L'override italiano in `apps/web/src/clerk-localization.ts` corregge il messaggio,
+il placeholder e le indicazioni di complessita; il signup mostra anche una guida
+prima dell'invio. Non sono state abbassate le regole di sicurezza, ne modificate
+password o inviti degli utenti esistenti.
+
+`PASSWORD_MIN_LENGTH` e il contratto di visualizzazione: in caso di modifica della
+policy Clerk va aggiornato insieme alle impostazioni di entrambe le istanze.
+Il test E2E controlla la policy effettiva, prova l'invito con password di 8/14/15
+caratteri e rimuove il solo account temporaneo di test al termine. Nessuna password
+reale deve essere chiesta all'utente, registrata nei log o salvata in repository.
+
+Collaudo patch: 5 E2E passati su staging, incluso signup reale da invito con
+password conforme di 15 caratteri e verifica `passwordEnabled`. Account, inviti
+pendenti e voci allowlist temporanei di test rimossi; nessun invito cliente modificato.
 
 1. Creare l'applicazione nel workspace Clerk e usare l'istanza **Development** per staging.
 2. Impostare **Restricted / invite-only**, disabilitando la registrazione pubblica.

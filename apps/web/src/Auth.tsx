@@ -1,5 +1,5 @@
 import { ClerkProvider, SignIn, SignUp, UserButton, useAuth } from "@clerk/react";
-import { itIT } from "@clerk/localizations";
+import { passwordLengthMessage, pqClerkLocalization } from "./clerk-localization";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import "./auth.css";
 
@@ -40,7 +40,7 @@ export function Authentication({ children }: { children: ReactNode }) {
   if (!key?.startsWith(expectedPrefix) || !["staging", "production"].includes(environment)) {
     return <AccessPage><h2>Stiamo preparando il tuo accesso.</h2><p>La configurazione dell’accesso sicuro è in corso. Contatta l’amministratore per maggiori informazioni.</p></AccessPage>;
   }
-  return <ClerkProvider publishableKey={key} localization={itIT} signInFallbackRedirectUrl="/" signUpFallbackRedirectUrl="/"
+  return <ClerkProvider publishableKey={key} localization={pqClerkLocalization} signInFallbackRedirectUrl="/" signUpFallbackRedirectUrl="/"
     appearance={{ variables: { colorPrimary: "#006B94", borderRadius: "12px" } }}>
     <AuthenticatedWorkspace>{children}</AuthenticatedWorkspace>
   </ClerkProvider>;
@@ -68,7 +68,7 @@ function AuthenticatedWorkspace({ children }: { children: ReactNode }) {
 
   if (!isLoaded) return <AccessPage><p role="status">Preparazione dell’accesso…</p></AccessPage>;
   if (!isSignedIn) return <AccessPage>{window.location.pathname === "/sign-up"
-    ? <SignUp routing="hash" forceRedirectUrl="/" />
+    ? <><SignUp routing="hash" forceRedirectUrl="/" /><p className="pq-access-help">{passwordLengthMessage} Puoi usare una frase lunga e facile da ricordare. Non riutilizzare password di altri servizi.</p></>
     : <SignIn routing="hash" forceRedirectUrl="/" />}<p className="pq-access-help">Accesso riservato agli utenti invitati. Hai bisogno di un account? Contatta l’amministratore.</p></AccessPage>;
   if (error) return <AccessPage><h2>Accesso da verificare</h2><p role="alert">{error}</p><div className="pq-access-actions">
     <button onClick={() => setRetry((value) => value + 1)}>Riprova</button><button onClick={() => void signOut()}>Esci</button></div></AccessPage>;
