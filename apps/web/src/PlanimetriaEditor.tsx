@@ -86,6 +86,13 @@ type UsageId =
   | "interrato"
   | "parcheggio-interrato"
   | "parcheggio-esterno"
+  | "negozio"
+  | "commerciale"
+  | "laboratorio"
+  | "casa-di-cura"
+  | "hotel"
+  | "locali-tecnici"
+  | "parcheggio-multipiano"
   | "custom";
 type UsageDefinition = {
   id: UsageId;
@@ -588,6 +595,7 @@ type Runtime = {
 };
 
 type EditorSnapshot = {
+  currentPage: number;
   selectionsByPage: Map<number, AreaSelection[]>;
   lotBoundariesByPage: Map<number, LotBoundary[]>;
   selectedIds: string[];
@@ -715,6 +723,14 @@ const USAGES: UsageDefinition[] = [
     color: "#0284c7",
     rate: 1.2,
   },
+  // No assumed tariff: the operator must enter the appropriate unit value.
+  { id: "negozio", label: "Negozio", shortLabel: "Negozio", color: "#db2777", rate: 0 },
+  { id: "commerciale", label: "Commerciale", shortLabel: "Commerciale", color: "#c026d3", rate: 0 },
+  { id: "laboratorio", label: "Laboratorio", shortLabel: "Laboratorio", color: "#4f46e5", rate: 0 },
+  { id: "casa-di-cura", label: "Casa di cura", shortLabel: "Casa di cura", color: "#e11d48", rate: 0 },
+  { id: "hotel", label: "Hotel", shortLabel: "Hotel", color: "#b45309", rate: 0 },
+  { id: "locali-tecnici", label: "Loc. tecnici", shortLabel: "Loc. tecnici", color: "#6b7280", rate: 0 },
+  { id: "parcheggio-multipiano", label: "Parcheggio multipiano", shortLabel: "P. multipiano", color: "#0369a1", rate: 0 },
   { id: "custom", label: "Custom", shortLabel: "Custom", color: "#0891b2", rate: 1 },
 ];
 
@@ -1543,6 +1559,8 @@ export default function PlanimetriaEditor({
   const [knownSegmentMeters, setKnownSegmentMeters] = useState(50);
   const [knownSegmentInputValue, setKnownSegmentInputValue] = useState("50");
   const [calibration, setCalibration] = useState<SavedCalibration | null>(null);
+  const [calibrationScopeOpen, setCalibrationScopeOpen] = useState(false);
+  const [calibrateAllPages, setCalibrateAllPages] = useState(false);
   const [rulerSegment, setRulerSegment] = useState<MeasureSegment | null>(null);
   const [rulerSegmentSelected, setRulerSegmentSelected] = useState(false);
   const [zoomPercent, setZoomPercent] = useState(100);
@@ -1617,6 +1635,11 @@ export default function PlanimetriaEditor({
     ? `${API_BASE_URL}/${valuationGroup.kind === "study" ? "study-groups" : "property-valuation-groups"}/${encodeURIComponent(valuationGroup.id)}/analysis-draft`
     : `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/analysis-draft`;
   const scaleExtractionPropertyId = valuationGroup?.properties[0]?.id ?? property.id;
+
+  useEffect(() => {
+    setCalibrationScopeOpen(false);
+    setCalibrateAllPages(false);
+  }, [currentPage, pageCount, analysisTargetId]);
 
   function pageScaleFor(page: number): PageScaleState {
     if (page > 0 && page === currentPage) {
@@ -4697,6 +4720,7 @@ export default function PlanimetriaEditor({
 
   function takeEditorSnapshot(): EditorSnapshot {
     return {
+      currentPage: runtimeRef.current.currentPage,
       selectionsByPage: cloneSelectionsByPage(runtimeRef.current.selectionsByPage),
       lotBoundariesByPage: cloneLotBoundariesByPage(runtimeRef.current.lotBoundariesByPage),
       selectedIds: [...selectedSelectionIds],
@@ -4821,6 +4845,9 @@ export default function PlanimetriaEditor({
     setKnownSegmentMeters(snapshot.knownSegmentMeters);
     setLotValuation({ ...snapshot.lotValuation });
     setDefaultOneri(snapshot.defaultOneri);
+    if (snapshot.currentPage !== runtimeRef.current.currentPage) {
+      activatePageScale(runtimeRef.current.currentPage);
+    }
     runtimeRef.current.wallMap = null;
     runtimeRef.current.wallKey = "";
     if (currentRotation !== restoredRotation && runtimeRef.current.pdfDoc && runtimeRef.current.currentPage) {
@@ -7342,7 +7369,7 @@ export default function PlanimetriaEditor({
     return Math.min(20000, Math.max(20, Math.round((knownMeters * 1000) / segmentMmOnSheet)));
   }
 
-  function applyCalibrationFromRuler() {
+  function applyCalibrationFromRuler(allPages = false) {
     if (!rulerSegment) {
       setStatus("Disegna prima un segmento con il righello");
       return;
@@ -7362,11 +7389,30 @@ export default function PlanimetriaEditor({
       start: rulerSegment.start,
       end: rulerSegment.end,
     };
+    const sourcePage = runtimeRef.current.currentPage;
+    const targets = allPages
+      ? Array.from({ length: pageCount }, (_, index) => index + 1)
+      : [sourcePage];
+    for (const page of targets) {
+      putPageScale(page, {
+        ...pageScaleFor(page),
+        sheetSize,
+        scaleDenominator: clampedScale,
+        scaleSource: "CALIBRATION",
+        // Transfer the physical scale, not pixel coordinates from another page.
+        // Keep each page's AI metadata and rotation independent.
+        calibration: page === sourcePage ? nextCalibration : null,
+      });
+    }
     setScaleDenominator(clampedScale);
     setScaleSource("CALIBRATION");
     setCalibration(nextCalibration);
     setRulerSegment(rulerSegment);
-    setStatus(`Scala tarata a 1:${clampedScale}`);
+    setCalibrationScopeOpen(false);
+    setCalibrateAllPages(false);
+    setStatus(allPages
+      ? `Taratura manuale 1:${clampedScale} (${sheetSize}) applicata a tutte le ${pageCount} pagine`
+      : `Scala tarata a 1:${clampedScale} sulla pagina ${sourcePage}`);
     markDirty();
     bumpRevision();
   }
@@ -8798,7 +8844,7 @@ export default function PlanimetriaEditor({
                       key={usage.id}
                       className={`usage-button ${activeUsage === usage.id ? "active" : ""}`}
                       style={{ "--usage-color": usage.color } as CSSProperties}
-                      title={`${index + 1} - ${usage.label}`}
+                      title={index < 9 ? `${index + 1} - ${usage.label}` : usage.label}
                       onClick={() => changeActiveUsage(usage.id)}
                     >
                       <span />
@@ -8806,6 +8852,9 @@ export default function PlanimetriaEditor({
                     </button>
                   ))}
                 </div>
+                {activeUsageOption.rate === 0 && activeUsage !== CUSTOM_USAGE_ID && (
+                  <p className="usage-value-note">Valore unitario da impostare nelle aree: nessuna tariffa predefinita per {activeUsageOption.label}.</p>
+                )}
                 <div className="custom-usage-manager">
                   <div className="custom-usage-head">
                     <span>Destinazioni custom</span>
@@ -9023,6 +9072,7 @@ export default function PlanimetriaEditor({
                       type="text"
                       inputMode="decimal"
                       value={knownSegmentInputValue}
+                      aria-label="Distanza reale del segmento (metri)"
                       onChange={(event) => setKnownSegmentInputValue(event.target.value)}
                       onBlur={() => {
                         if (knownSegmentInputValue === "") restoreKnownSegmentInput();
@@ -9037,7 +9087,12 @@ export default function PlanimetriaEditor({
                     type="button"
                     className="mini-tool-button"
                     disabled={!hasPdf || !rulerSegment}
-                    onClick={applyCalibrationFromRuler}
+                    onClick={() => {
+                      if (pageCount > 1) {
+                        setCalibrateAllPages(false);
+                        setCalibrationScopeOpen(true);
+                      } else applyCalibrationFromRuler();
+                    }}
                   >
                     Taratura
                   </button>
@@ -10758,6 +10813,35 @@ export default function PlanimetriaEditor({
         )}
       </section>
 
+      {calibrationScopeOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setCalibrationScopeOpen(false)}>
+          <div className="editor-modal scale-modal" role="dialog" aria-modal="true" aria-labelledby="calibration-scope-title"
+            onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => {
+              if (event.key === "Escape") { event.stopPropagation(); setCalibrationScopeOpen(false); }
+            }}>
+            <div className="modal-head">
+              <h2 id="calibration-scope-title">Applica taratura manuale</h2>
+              <button className="icon-button" type="button" onClick={() => setCalibrationScopeOpen(false)} aria-label="Chiudi taratura"><X size={18} /></button>
+            </div>
+            <p className="modal-note">Usa il segmento e la distanza nota della pagina {currentPage}. Dove vuoi applicare la taratura?</p>
+            <fieldset className="calibration-scope-options">
+              <legend>Pagine da tarare</legend>
+              <label><input autoFocus type="radio" name="calibration-scope" checked={!calibrateAllPages} onChange={() => setCalibrateAllPages(false)} />Solo pagina {currentPage}</label>
+              <label><input type="radio" name="calibration-scope" checked={calibrateAllPages} onChange={() => setCalibrateAllPages(true)} />Tutte le {pageCount} pagine</label>
+            </fieldset>
+            <p className="modal-note">
+              {calibrateAllPages
+                ? `La scala ricavata e il formato ${sheetSize} sostituiranno le scale e le tarature esistenti di tutte le pagine. Scegli questa opzione solo se le pagine hanno la stessa scala e lo stesso formato di stampa. Potrai modificarle singolarmente o annullare con Indietro.`
+                : "Le altre pagine mantengono scala, formato e taratura attuali."}
+            </p>
+            <div className="modal-actions">
+              <button className="button secondary" type="button" onClick={() => setCalibrationScopeOpen(false)}>Annulla</button>
+              <button className="button primary" type="button" disabled={!rulerSegment || busy} onClick={() => applyCalibrationFromRuler(calibrateAllPages)}>Applica taratura</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {scaleModalOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setScaleModalOpen(false)}>
           <div className="editor-modal scale-modal" role="dialog" aria-modal="true" aria-labelledby="scale-modal-title" onMouseDown={(event) => event.stopPropagation()}>
@@ -10813,7 +10897,7 @@ export default function PlanimetriaEditor({
             )}
             <p className="modal-note">
               Formato, scala e taratura si applicano soltanto alla pagina {currentPage}. Le altre pagine
-              mantengono i propri valori.
+              mantengono i propri valori. Per estendere una taratura manuale, usa il Righello e scegli Taratura → Tutte le pagine.
             </p>
             <div className="modal-actions">
               <button
