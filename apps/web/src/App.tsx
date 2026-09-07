@@ -78,7 +78,7 @@ import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperi
 import { CurrentOperator, useIdentity } from "./Auth";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.0.2";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.0.3";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -558,7 +558,7 @@ const PROPERTY_TABLE_COLUMNS = [
   { id: "sheet", label: "Foglio", defaultWidth: 48, minWidth: 40 },
   { id: "parcel", label: "Part.", defaultWidth: 50, minWidth: 40 },
   { id: "sub", label: "Sub", defaultWidth: 44, minWidth: 38 },
-  { id: "category", label: "Cat.", defaultWidth: 48, minWidth: 40 },
+  { id: "category", label: "Cat.", defaultWidth: 100, minWidth: 90 },
   { id: "currentRendita", label: "Rendita attuale", defaultWidth: 82, minWidth: 64 },
   { id: "estimatedRendita", label: "Rendita proposta", defaultWidth: 86, minWidth: 66 },
   { id: "renditaDiff", label: "Diff. rendita", defaultWidth: 80, minWidth: 64 },
@@ -575,7 +575,7 @@ const ARCHIVE_PROPERTY_TABLE_COLUMNS = [
   { id: "sheet", label: "Foglio", defaultWidth: 48, minWidth: 40 },
   { id: "parcel", label: "Part.", defaultWidth: 50, minWidth: 40 },
   { id: "sub", label: "Sub", defaultWidth: 44, minWidth: 38 },
-  { id: "category", label: "Cat.", defaultWidth: 48, minWidth: 40 },
+  { id: "category", label: "Cat.", defaultWidth: 100, minWidth: 90 },
   { id: "company", label: "Azienda", defaultWidth: 180, minWidth: 110 },
   { id: "currentRendita", label: "Rendita attuale", defaultWidth: 100, minWidth: 72 },
   { id: "outcome", label: "Esito", defaultWidth: 96, minWidth: 72 },
@@ -589,7 +589,7 @@ const STUDY_GROUP_PROPERTY_TABLE_COLUMNS = [
   { id: "sheet", label: "Foglio", defaultWidth: 54, minWidth: 42 },
   { id: "parcel", label: "Part.", defaultWidth: 58, minWidth: 42 },
   { id: "sub", label: "Sub", defaultWidth: 50, minWidth: 40 },
-  { id: "category", label: "Cat.", defaultWidth: 52, minWidth: 42 },
+  { id: "category", label: "Cat.", defaultWidth: 100, minWidth: 90 },
   { id: "currentRendita", label: "Rendita attuale", defaultWidth: 92, minWidth: 72 },
   { id: "estimatedRendita", label: "Rendita prevista", defaultWidth: 94, minWidth: 72 },
   { id: "renditaDiff", label: "Diff. rendita", defaultWidth: 90, minWidth: 70 },
@@ -3676,6 +3676,7 @@ function App() {
           onGroupProperties={(propertyIds) => groupPropertiesForStudy(activeStudy.id, propertyIds)}
           onUngroupProperties={(groupId) => ungroupPropertiesForStudy(activeStudy.id, groupId)}
           onPropertyEstimateChange={updatePropertyEstimatedValue}
+          onNotesSave={savePropertyNotes}
           onImuOverridesSave={savePropertyImuOverrides}
           onOutcomeChange={updatePropertyOutcome}
           onOpenEditor={(property) =>
@@ -5169,7 +5170,7 @@ function PropertiesPage({
                   {visibleColumnIds.has("sheet") && <td className="table-cell-ellipsis" title={property.foglio || "In attesa ERP"}>{property.foglio || "—"}</td>}
                   {visibleColumnIds.has("parcel") && <td className="table-cell-ellipsis" title={property.particella || "In attesa ERP"}>{property.particella || "—"}</td>}
                   {visibleColumnIds.has("sub") && <td className="table-cell-ellipsis" title={property.subalterno || "In attesa ERP"}>{property.subalterno || "—"}</td>}
-                  {visibleColumnIds.has("category") && <td className="table-cell-ellipsis" title={property.categoria}>{property.categoria || "—"}</td>}
+                  {visibleColumnIds.has("category") && <td className="table-category-cell" title={property.categoria}>{property.categoria || "—"}</td>}
                   {visibleColumnIds.has("company") && <td className="table-cell-ellipsis" title={study.company}>{study.company}</td>}
                   {visibleColumnIds.has("currentRendita") && <td>{formatEuro(property.currentRendita)}</td>}
                   {visibleColumnIds.has("outcome") && <td>
@@ -5331,10 +5332,10 @@ function SettingsPage({ appVersion, onNotice }: { appVersion: string; onNotice: 
             </a>
             <a className="button secondary compact-button" href="/formaps-open/formaps-open-extension.zip" download>
               <Download size={15} />
-              Scarica estensione
+              Scarica estensione 0.65.0
             </a>
           </div>
-          <p className="settings-note">L'estensione usa l'endpoint PQ della stessa origine per leggere il CAPTCHA con Neuralwatt/Qwen.</p>
+          <p className="settings-note">Con il login PQ serve forMaps Open 0.65.0. Aggiorna l’estensione da chrome://extensions, poi ricarica le schede PQ e forMaps. Mantieni aperta una scheda PQ con accesso effettuato nello stesso ambiente: la vecchia estensione non può leggere il CAPTCHA tramite il servizio protetto.</p>
         </div>
 
         <div className="detail-card settings-card">
@@ -5963,7 +5964,7 @@ function StudyGroupDetail({
                   {visibleColumns.has("sheet") && <td>{property.foglio || "—"}</td>}
                   {visibleColumns.has("parcel") && <td>{property.particella || "—"}</td>}
                   {visibleColumns.has("sub") && <td>{property.subalterno || "—"}</td>}
-                  {visibleColumns.has("category") && <td>{property.categoria || "—"}</td>}
+                  {visibleColumns.has("category") && <td className="table-category-cell" title={property.categoria}>{property.categoria || "—"}</td>}
                   {visibleColumns.has("currentRendita") && <td>{formatEuro(property.currentRendita)}</td>}
                   {visibleColumns.has("estimatedRendita") && <td>{formatEstimatedValue(property.estimatedRendita)}</td>}
                   {visibleColumns.has("renditaDiff") && <td><MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} favorableDirection="down" /></td>}
@@ -7308,13 +7309,16 @@ async function copyText(value: string) {
   if (!copied) throw new Error("Clipboard non disponibile");
 }
 
-function StudyNotesPanel({
+function NotesPanel({
   notes,
   onSave,
+  scope = "study",
 }: {
   notes: string;
   onSave: (notes: string) => Promise<boolean>;
+  scope?: "study" | "property";
 }) {
+  const titleId = `${scope}-notes-title`;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -7364,16 +7368,16 @@ function StudyNotesPanel({
   }
 
   return (
-    <section className={`study-notes-panel${editing ? " editing" : ""}`} aria-labelledby="study-notes-title">
+    <section className={`study-notes-panel${editing ? " editing" : ""}`} aria-labelledby={titleId}>
       <div className="study-notes-header">
         <div className="study-notes-heading">
           <span className="study-notes-icon" aria-hidden="true"><FileText size={17} /></span>
           <div>
             <div className="study-notes-title-row">
-              <h2 id="study-notes-title">Note studio</h2>
-              <span>Studio</span>
+              <h2 id={titleId}>{scope === "property" ? "Note immobile" : "Note studio"}</h2>
+              <span>{scope === "property" ? "Immobile" : "Studio"}</span>
             </div>
-            <p>Promemoria operativo associato all’intero studio.</p>
+            <p>{scope === "property" ? "Le stesse note tecniche e operative dell’editor planimetrie, salvate sul singolo immobile." : "Promemoria operativo associato all’intero studio."}</p>
           </div>
         </div>
         {!editing && noteValue && (
@@ -7391,7 +7395,8 @@ function StudyNotesPanel({
             value={draft}
             maxLength={4000}
             rows={4}
-            aria-label="Note dello studio"
+            aria-label={scope === "property" ? "Note del singolo immobile" : "Note dello studio"}
+            disabled={saving}
             placeholder="Inserisci informazioni utili per chi proseguirà l’analisi…"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
@@ -7463,6 +7468,7 @@ function StudyDetail({
   onGroupProperties,
   onUngroupProperties,
   onPropertyEstimateChange,
+  onNotesSave,
   onImuOverridesSave,
   onOutcomeChange,
 }: {
@@ -7489,6 +7495,7 @@ function StudyDetail({
     patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
   ) => Promise<PropertyImuOverrideUpdate>;
   onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
+  onNotesSave: (propertyId: string, notes: string) => Promise<boolean>;
 }) {
   const counts = getCounts(study);
   const positiveShare = Math.round((counts.positive / Math.max(counts.total, 1)) * 100);
@@ -8284,7 +8291,7 @@ function StudyDetail({
                     {visiblePropertyColumnIds.has("sheet") && <td className="table-cell-ellipsis" title={property.foglio || "In attesa ERP"}>{property.foglio || "—"}</td>}
                     {visiblePropertyColumnIds.has("parcel") && <td className="table-cell-ellipsis" title={property.particella || "In attesa ERP"}>{property.particella || "—"}</td>}
                     {visiblePropertyColumnIds.has("sub") && <td className="table-cell-ellipsis" title={property.subalterno || "In attesa ERP"}>{property.subalterno || "—"}</td>}
-                    {visiblePropertyColumnIds.has("category") && <td className="table-cell-ellipsis" title={property.categoria}>{property.categoria || "—"}</td>}
+                    {visiblePropertyColumnIds.has("category") && <td className="table-category-cell" title={property.categoria}>{property.categoria || "—"}</td>}
                     {visiblePropertyColumnIds.has("currentRendita") && <td>{formatEuro(property.currentRendita)}</td>}
                     {visiblePropertyColumnIds.has("estimatedRendita") && <td>{formatEstimatedValue(property.estimatedRendita)}</td>}
                     {visiblePropertyColumnIds.has("renditaDiff") && (
@@ -8321,7 +8328,7 @@ function StudyDetail({
           )}
         </div>
       </section>
-      <StudyNotesPanel
+      <NotesPanel
         notes={study.notes}
         onSave={(notes) => onUpdate({ notes })}
       />
@@ -8353,7 +8360,9 @@ function StudyDetail({
       )}
       {activeProperty && (
         <PropertyAreaDetail
+          key={activeProperty.id}
           property={activeProperty}
+          onNotesSave={onNotesSave}
           draftState={activeAreaDraftState}
           onDraftSaved={(draft, source, error) => {
             setActiveAreaDraft(draft, source, error);
@@ -8457,6 +8466,7 @@ function StudyDetail({
 
 function PropertyAreaDetail({
   property,
+  onNotesSave,
   draftState,
   onDraftSaved,
   onOpenEditor,
@@ -8468,6 +8478,7 @@ function PropertyAreaDetail({
   onClose,
 }: {
   property: PropertyItem;
+  onNotesSave: (propertyId: string, notes: string) => Promise<boolean>;
   draftState: PlanAreaDraftState;
   onDraftSaved: (draft: PlanAreaDraft, source?: PlanAreaDraftState["source"], error?: boolean) => void;
   onOpenEditor: () => void;
@@ -8926,6 +8937,12 @@ function PropertyAreaDetail({
             </div>
           </details>
         )}
+
+        <NotesPanel
+          scope="property"
+          notes={property.notes ?? ""}
+          onSave={(notes) => onNotesSave(property.id, notes)}
+        />
 
         <ImuCalculationBreakdown property={property} onImuOverridesSave={onImuOverridesSave} />
 

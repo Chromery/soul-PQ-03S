@@ -12,6 +12,30 @@ Il proxy richiede ora la sessione dell'operatore: lasciare aperta una scheda PQ 
 nello stesso ambiente. Il content script isolato esegue la richiesta same-origin, senza
 trasferire token a forMaps. La vecchia estensione senza relay riceve un errore di accesso.
 
+### Aggiornamento su PC già configurati (PQ 1.0.3)
+
+La versione corrente dell'estensione resta **0.65.0**, indipendentemente dalla versione
+della piattaforma. Il pacchetto distribuito contiene già `pq-auth-relay.js` e i permessi
+per produzione e staging. Non basta aggiornare la pagina web per aggiornare un'estensione
+installata con “Carica estensione non pacchettizzata”.
+
+1. Scaricare `/formaps-open/formaps-open-extension.zip` e decomprimerlo.
+2. Sostituire i file nella cartella `extension` già caricata in Chrome.
+3. In `chrome://extensions`, premere **Ricarica** su forMaps Open e verificare **0.65.0**.
+   Se si sceglie una nuova cartella, rimuovere/disabilitare la vecchia copia prima di
+   caricare quella nuova; non lasciare attive due copie.
+4. Ricaricare sia PQ sia forMaps. Accedere a PQ e lasciare aperta la dashboard.
+5. Avviare forMaps dal medesimo ambiente PQ: una sessione staging non autorizza la produzione.
+
+Il servizio `POST /api/qwen-captcha` resta autenticato. Non distribuire token tecnici ERP
+o chiavi NeuralWatt nell'estensione. In assenza della scheda PQ autenticata, completare
+il CAPTCHA manualmente oppure riaprire PQ ed effettuare l'accesso.
+
+Il test `apps/web/e2e/formaps-auth.spec.ts` carica l'estensione reale in Chromium con
+un profilo temporaneo e login staging: verifica il rifiuto anonimo, il passaggio del
+cookie same-origin e l'assenza di fallback verso produzione. La risposta AI è simulata:
+non invia CAPTCHA reali a NeuralWatt né interagisce con il portale forMaps del cliente.
+
 ## Prerequisito Utente
 
 L'utente deve avere installata l'estensione Chrome `forMaps Open`.

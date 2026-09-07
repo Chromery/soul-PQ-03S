@@ -1440,6 +1440,14 @@ body.is-resizing-columns {
   white-space: nowrap;
 }
 
+/* Categories can contain ERP zone labels, not just short codes such as D/7. */
+.resizable-data-table td.table-category-cell {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .table-column-menu {
   position: relative;
 }
