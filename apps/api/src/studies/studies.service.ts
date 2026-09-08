@@ -731,6 +731,7 @@ function propertyOrderBy() {
 function normalizePropertyOutcome(value: string | null | undefined) {
   if (value === "Positivo" || value?.toLowerCase() === "positivo") return "Positivo";
   if (value === "Negativo" || value?.toLowerCase() === "negativo") return "Negativo";
+  if (value?.toLowerCase() === "sospeso") return "Sospeso";
   return "Neutro";
 }
 

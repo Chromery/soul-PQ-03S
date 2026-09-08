@@ -78,7 +78,7 @@ import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperi
 import { CurrentOperator, useIdentity } from "./Auth";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.0.5";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.0.6";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -110,7 +110,7 @@ const ACTIVITY_SEEN_STORAGE_KEY = "soul-activity-seen-at";
 
 type StudyStatus = "Aperta" | "Annullata" | "Negativa" | "Positiva" | "Sospesa";
 
-type PropertyOutcome = "Positivo" | "Negativo" | "Neutro";
+type PropertyOutcome = "Positivo" | "Negativo" | "Neutro" | "Sospeso";
 
 type PriceListItem = {
   id: string;
@@ -1725,7 +1725,7 @@ const editableStatusOptions: StudyStatus[] = [
   "Sospesa",
 ];
 
-const propertyOutcomeOptions: PropertyOutcome[] = ["Positivo", "Negativo", "Neutro"];
+const propertyOutcomeOptions: PropertyOutcome[] = ["Positivo", "Negativo", "Neutro", "Sospeso"];
 
 const titolaritaOptions = [
   "Proprietà per 1/1",
@@ -2490,10 +2490,11 @@ function getCounts(study: FeasibilityStudy) {
       if (property.outcome === "Positivo") acc.positive += 1;
       if (property.outcome === "Negativo") acc.negative += 1;
       if (property.outcome === "Neutro") acc.pending += 1;
+      if (property.outcome === "Sospeso") acc.suspended += 1;
       if (property.categoria.startsWith("D/")) acc.catD += 1;
       return acc;
     },
-    { total: 0, performed: 0, positive: 0, negative: 0, pending: 0, catD: 0 },
+    { total: 0, performed: 0, positive: 0, negative: 0, pending: 0, suspended: 0, catD: 0 },
   );
 }
 
@@ -2501,6 +2502,7 @@ function normalizePropertyOutcome(value: string): PropertyOutcome {
   const normalized = value.toLowerCase();
   if (normalized === "positivo") return "Positivo";
   if (normalized === "negativo") return "Negativo";
+  if (normalized === "sospeso") return "Sospeso";
   return "Neutro";
 }
 
@@ -3885,6 +3887,7 @@ function App() {
                 <span>
                   <i className="dot pending" /> Neutro
                 </span>
+                <span><i className="dot suspended" /> Sospeso</span>
               </div>
             </div>
 
@@ -6392,6 +6395,7 @@ function StudyRows({
                           <i className="dot pending" />
                           {counts.pending} neutri
                         </span>
+                        <span><i className="dot suspended" />{counts.suspended} sospesi</span>
                       </div>
                     </div>
                   </div>
@@ -8442,6 +8446,7 @@ function StudyDetail({
             <SummaryStat label="Positivi" value={counts.positive.toString()} />
             <SummaryStat label="Negativi" value={counts.negative.toString()} />
             <SummaryStat label="Neutri" value={counts.pending.toString()} />
+            <SummaryStat label="Sospesi" value={counts.suspended.toString()} />
           </div>
         </div>
 
@@ -10131,6 +10136,7 @@ function statusClass(status: StudyStatus) {
 function outcomeClass(outcome: PropertyOutcome) {
   if (outcome === "Positivo") return "positive";
   if (outcome === "Negativo") return "negative";
+  if (outcome === "Sospeso") return "suspended";
   return "pending";
 }
 

@@ -189,6 +189,7 @@ Response `200 OK`:
 
 Regole:
 
+- Dalla 1.0.6 l'esito del singolo immobile ammette anche `Sospeso`: in import `immobili[].esito: "sospeso"` (accettato anche `"Sospeso"`), in export `"Sospeso"`. Rimane distinto dallo stato dello studio `Sospesa`; non modifica rendite, IMU o il flag `in_studio`.
 - `studi` contiene da 1 a 200 elementi.
 - Gli immobili non presenti in un sync non vengono cancellati automaticamente.
 - `responsabile_tecnico` e facoltativo; se assente PQ usa il default backend.

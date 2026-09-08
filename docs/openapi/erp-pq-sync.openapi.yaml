@@ -652,10 +652,13 @@ components:
         - type: number
     EsitoImmobileInput:
       type: string
+      description: Esito del singolo immobile; il backend accetta anche la grafia con iniziale maiuscola. Distinto dallo stato studio Sospesa.
       enum:
         - non_analizzato
         - positivo
         - negativo
+        - neutro
+        - sospeso
         - non_in_studio
     TipoDocumentoInput:
       type: string
@@ -931,6 +934,7 @@ components:
           type: boolean
         esito:
           type: string
+          enum: [Positivo, Negativo, Neutro, Sospeso]
         note_immobile:
           type: string
           maxLength: 4000

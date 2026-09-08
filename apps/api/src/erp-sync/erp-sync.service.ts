@@ -822,6 +822,7 @@ function mapPropertyOutcome(value: string | undefined, hasStudy: boolean) {
   if (normalized === "positivo") return "Positivo";
   if (normalized === "negativo") return "Negativo";
   if (normalized === "neutro") return "Neutro";
+  if (normalized === "sospeso") return "Sospeso";
   if (!hasStudy || normalized === "non_in_studio") return "Neutro";
   return "Neutro";
 }

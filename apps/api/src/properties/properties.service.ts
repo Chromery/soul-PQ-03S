@@ -921,7 +921,7 @@ function normalizeScaleSource(value: unknown): ScaleSource {
 }
 
 function validatePropertyOutcome(value: unknown) {
-  if (value === "Positivo" || value === "Negativo" || value === "Neutro") return value;
+  if (value === "Positivo" || value === "Negativo" || value === "Neutro" || value === "Sospeso") return value;
   throw new BadRequestException("Esito immobile non valido");
 }
 

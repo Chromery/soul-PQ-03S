@@ -1765,6 +1765,16 @@ body.is-resizing-columns {
   cursor: pointer;
 }
 
+.outcome-badge.suspended,
+.outcome-select.suspended {
+  color: #8a5700;
+  background: #fff3d6;
+}
+
+.dot.suspended {
+  background: #c17b00;
+}
+
 .outcome-select:disabled {
   cursor: wait;
   opacity: 0.72;
@@ -3907,6 +3917,7 @@ button.activity-item {
 
 .outcome-grid {
   margin-top: 18px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .responsibility-list {

@@ -99,14 +99,16 @@ function studyFixture(withPresentation: boolean) {
   };
 }
 
-function serviceFixture(withPresentation: boolean) {
+function serviceFixture(withPresentation: boolean, outcome = "Positivo") {
   let findManyInput: Record<string, any> | null = null;
   const service = new ErpSyncService(
     {
       feasibilityStudy: {
         findMany: async (input: Record<string, any>) => {
           findManyInput = input;
-          return [studyFixture(withPresentation)];
+          const study = studyFixture(withPresentation);
+          study.properties[0].outcome = outcome;
+          return [study];
         },
       },
     } as never,
@@ -122,6 +124,19 @@ function serviceFixture(withPresentation: boolean) {
   );
   return { service, findManyInput: () => findManyInput };
 }
+
+test("il sync ERP riconosce e riesporta Sospeso senza confonderlo con Neutro", async () => {
+  const fixture = serviceFixture(false, "Sospeso");
+  for (const esito of ["sospeso", "Sospeso", "SOSPESO"]) {
+    const normalized = (fixture.service as any).normalizeProperty({
+      immobile_erp_id: "IMM-1", ubicazione: "Via Test 1", esito, in_studio: false, documenti: [],
+    }, 0);
+    assert.equal(normalized.outcome, "Sospeso");
+    assert.equal(normalized.hasStudy, false);
+  }
+  const result = await fixture.service.listModifiedStudies();
+  assert.equal(result.studi[0].immobili[0].esito, "Sospeso");
+});
 
 test("il pull ERP include note immobile e l'ultima presentazione v3 manuale di gruppo", async () => {
   const fixture = serviceFixture(true);
