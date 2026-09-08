@@ -11,6 +11,7 @@ import { AddressNormalizationService } from "../address-normalization/address-no
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { StudiesService } from "../studies/studies.service.js";
+import { personalizeV3Cover } from "./v3-cover.js";
 import type {
   PresentationPropertyInput,
   PresentationSnapshot,
@@ -315,7 +316,7 @@ export class PresentationsService implements OnModuleDestroy {
       const exportConfig = exportConfigFor(snapshot.version);
       const captures = await captureHybridSlides(browser, htmlPath, temporaryDirectory, exportConfig);
       const pdf = snapshot.version === 3
-        ? await composeV3Pdf(captures, snapshot)
+        ? await composeV3Pdf(captures, snapshot, browser)
         : await createHybridPdf(
             browser,
             htmlPath,
@@ -555,11 +556,13 @@ async function composeHybridPdf(
 async function composeV3Pdf(
   captures: Map<number, HybridCapture>,
   snapshot: PresentationSnapshot,
+  browser: Browser,
 ) {
   const templatePdf = await PDFDocument.load(await readFile(fileURLToPath(V3_BASE_PDF_URL)));
   if (templatePdf.getPageCount() < 5) {
     throw new Error("Il template PDF v3 non contiene la pagina 5 da sostituire");
   }
+  await personalizeV3Cover(templatePdf, browser, snapshot.studio.company);
 
   const economicsCapture = captures.get(5);
   if (!economicsCapture) {
