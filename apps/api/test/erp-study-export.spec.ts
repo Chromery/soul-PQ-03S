@@ -158,6 +158,8 @@ test("il pull ERP include note immobile e l'ultima presentazione v3 manuale di g
     download_url: "/api/integrations/erp/v1/presentazioni/PRESENTAZIONE-V3-GRUPPO/pdf",
   });
   assert.equal(response.studi[0]?.modificato_il, presentationCreatedAt.toISOString());
+  assert.equal(fixture.findManyInput()?.include.presentations.where.deletedAt, null);
+  assert.equal(fixture.findManyInput()?.include.studyGroup.include.presentations.where.deletedAt, null);
   assert.deepEqual(
     fixture.findManyInput()?.include.presentations.where.snapshot,
     { path: ["version"], equals: 3 },

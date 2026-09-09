@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException, OnModuleDestroy } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PDFDocument } from "pdf-lib";
 import type { Browser, Page } from "playwright-core";
@@ -12,6 +12,7 @@ import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { StudiesService } from "../studies/studies.service.js";
 import { personalizeV3Cover } from "./v3-cover.js";
+import { mergeDraftChanges, validateDraftChanges } from "./presentation-draft.js";
 import type {
   PresentationPropertyInput,
   PresentationSnapshot,
@@ -272,20 +273,63 @@ export class PresentationsService implements OnModuleDestroy {
 
   async list(studyId: string) {
     const decks = await this.prisma.presentationDeck.findMany({
-      where: { studyId },
+      where: { studyId, deletedAt: null },
       orderBy: { createdAt: "desc" },
-      take: 20,
     });
     return decks.map(toSummary);
   }
 
   async listStudyGroup(studyGroupId: string) {
     const decks = await this.prisma.presentationDeck.findMany({
-      where: { studyGroupId },
+      where: { studyGroupId, deletedAt: null },
       orderBy: { createdAt: "desc" },
-      take: 20,
     });
     return decks.map(toSummary);
+  }
+
+  private async draftOwner(owner: PresentationOwner) {
+    if (owner.studyId !== undefined) {
+      const study = await this.prisma.feasibilityStudy.findUnique({ where: { id: owner.studyId }, select: { properties: { select: { id: true } } } });
+      if (!study) throw new NotFoundException("Studio non trovato");
+      return { id: `study:${owner.studyId}`, properties: study.properties };
+    }
+    const group = await this.prisma.studyGroup.findUnique({ where: { id: owner.studyGroupId }, select: { studies: { select: { properties: { select: { id: true } } } } } });
+    if (!group) throw new NotFoundException("Gruppo non trovato");
+    return { id: `group:${owner.studyGroupId}`, properties: group.studies.flatMap(study => study.properties) };
+  }
+
+  async getDraft(owner: PresentationOwner) {
+    const scope = await this.draftOwner(owner);
+    const draft = await this.prisma.presentationDraft.findUnique({ where: { id: scope.id } });
+    return { overrides: draft?.overrides ?? {}, revision: draft?.revision ?? 0 };
+  }
+
+  async patchDraft(owner: PresentationOwner, input: unknown) {
+    const scope = await this.draftOwner(owner);
+    const changes = validateDraftChanges(input, new Set(scope.properties.map(property => property.id)));
+    await this.prisma.presentationDraft.upsert({ where: { id: scope.id },
+      create: { id: scope.id, ...owner, overrides: {} }, update: {} });
+    // Field-level patches + compare-and-swap preserve edits to other fields/tabs.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const current = await this.prisma.presentationDraft.findUniqueOrThrow({ where: { id: scope.id } });
+      const overrides = mergeDraftChanges(current.overrides as Record<string, string>, changes);
+      const saved = await this.prisma.presentationDraft.updateMany({ where: { id: scope.id, revision: current.revision },
+        data: { overrides, revision: { increment: 1 } } });
+      if (saved.count) return { overrides, revision: current.revision + 1 };
+    }
+    throw new ConflictException("Bozza modificata contemporaneamente: riprova il salvataggio");
+  }
+
+  async remove(id: string) {
+    const deck = await this.findDeck(id);
+    // Soft-delete keeps recovery possible, but excludes this snapshot from UI, downloads and ERP.
+    await this.prisma.$transaction(async tx => {
+      await tx.presentationDeck.update({ where: { id }, data: { deletedAt: new Date() } });
+      if (deck.studyId || deck.studyGroupId) await tx.feasibilityStudy.updateMany({
+        where: deck.studyId ? { id: deck.studyId } : { studyGroupId: deck.studyGroupId }, data: { updatedAt: new Date() } });
+    });
+    this.pdfCache.delete(id);
+    return { deleted: true };
   }
 
   async renderHtml(id: string) {
@@ -346,7 +390,7 @@ export class PresentationsService implements OnModuleDestroy {
 
   private async findDeck(id: string) {
     const deck = await this.prisma.presentationDeck.findUnique({ where: { id } });
-    if (!deck) throw new NotFoundException("Presentazione non trovata");
+    if (!deck || deck.deletedAt) throw new NotFoundException("Presentazione non trovata");
     return deck;
   }
 

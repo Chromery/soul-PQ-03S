@@ -73,6 +73,7 @@ model FeasibilityStudy {
   valuationGroups PropertyValuationGroup[]
   versions        StudyVersion[]
   presentations   PresentationDeck[]
+  presentationDraft PresentationDraft?
 
   @@index([studyGroupId])
 }
@@ -85,6 +86,7 @@ model StudyGroup {
   studies       FeasibilityStudy[]
   analysisDraft StudyGroupAnalysisDraft?
   presentations PresentationDeck[]
+  presentationDraft PresentationDraft?
 }
 
 model StudyGroupAnalysisDraft {
@@ -162,11 +164,23 @@ model PresentationDeck {
   snapshot    Json
   fileName    String
   createdAt    DateTime          @default(now())
+  deletedAt    DateTime?
   study        FeasibilityStudy? @relation(fields: [studyId], references: [id], onDelete: Cascade)
   studyGroup   StudyGroup?       @relation(fields: [studyGroupId], references: [id], onDelete: Cascade)
 
   @@index([studyId, createdAt])
   @@index([studyGroupId, createdAt])
+}
+
+model PresentationDraft {
+  id           String @id
+  studyId      String? @unique
+  studyGroupId String? @unique
+  overrides    Json
+  revision     Int @default(0)
+  updatedAt    DateTime @updatedAt
+  study        FeasibilityStudy? @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  studyGroup   StudyGroup? @relation(fields: [studyGroupId], references: [id], onDelete: Cascade)
 }
 
 model StudyVersion {

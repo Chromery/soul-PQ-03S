@@ -12,9 +12,19 @@ test("study optimization matches presentation totals, signs, edits and responsiv
     diffImu: 0, originalRendita: 1500.45, totalRendita: 1350.50, catDRendita: 1500.45, commercialOwner: "", technicalOwner: "Test",
     notes: "", erpUrl: "", properties };
   const unexpectedWrites: string[] = [];
+  const overrides: Record<string, string> = {};
+  page.on("dialog", dialog => dialog.accept());
   await page.route("**/api/**", async route => {
     const { pathname } = new URL(route.request().url());
     if (pathname.startsWith("/api/auth/")) return route.fallback();
+    if (pathname.endsWith("/presentations/draft")) {
+      if (route.request().method() === "PATCH") {
+        for (const [key, value] of Object.entries(route.request().postDataJSON().changes)) {
+          if (value === null) delete overrides[key]; else overrides[key] = value as string;
+        }
+      }
+      return route.fulfill({ json: { overrides, revision: 1 } });
+    }
     if (pathname === "/api/studies") return route.fulfill({ json: [study] });
     if (!["GET", "HEAD", "OPTIONS"].includes(route.request().method())) unexpectedWrites.push(pathname);
     return route.fulfill({ json: pathname.includes("activities") ? [] : null });

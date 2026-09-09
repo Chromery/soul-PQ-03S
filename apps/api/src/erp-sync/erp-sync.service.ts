@@ -186,7 +186,7 @@ export class ErpSyncService {
         },
         versions: { orderBy: { versionNumber: "desc" } },
         presentations: {
-          where: { snapshot: { path: ["version"], equals: 3 } },
+          where: { deletedAt: null, snapshot: { path: ["version"], equals: 3 } },
           orderBy: { createdAt: "desc" },
           take: 1,
         },
@@ -194,7 +194,7 @@ export class ErpSyncService {
           include: {
             analysisDraft: true,
             presentations: {
-              where: { snapshot: { path: ["version"], equals: 3 } },
+              where: { deletedAt: null, snapshot: { path: ["version"], equals: 3 } },
               orderBy: { createdAt: "desc" },
               take: 1,
             },

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Res, StreamableFile } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import { CreatePresentationDto } from "./dto/create-presentation.dto.js";
 import { PresentationsService } from "./presentations.service.js";
@@ -6,6 +6,14 @@ import { PresentationsService } from "./presentations.service.js";
 @Controller("studies/:studyId/presentations")
 export class StudyPresentationsController {
   constructor(private readonly presentations: PresentationsService) {}
+
+  @Get("draft")
+  draft(@Param("studyId") studyId: string) { return this.presentations.getDraft({ studyId }); }
+
+  @Patch("draft")
+  patchDraft(@Param("studyId") studyId: string, @Body() input: unknown) {
+    return this.presentations.patchDraft({ studyId }, input);
+  }
 
   @Get()
   list(@Param("studyId") studyId: string) {
@@ -32,6 +40,14 @@ export class StudyPresentationsController {
 export class StudyGroupPresentationsController {
   constructor(private readonly presentations: PresentationsService) {}
 
+  @Get("draft")
+  draft(@Param("studyGroupId") studyGroupId: string) { return this.presentations.getDraft({ studyGroupId }); }
+
+  @Patch("draft")
+  patchDraft(@Param("studyGroupId") studyGroupId: string, @Body() input: unknown) {
+    return this.presentations.patchDraft({ studyGroupId }, input);
+  }
+
   @Get()
   list(@Param("studyGroupId") studyGroupId: string) {
     return this.presentations.listStudyGroup(studyGroupId);
@@ -51,6 +67,9 @@ export class StudyGroupPresentationsController {
 @Controller("presentations")
 export class PresentationsController {
   constructor(private readonly presentations: PresentationsService) {}
+
+  @Delete(":id")
+  remove(@Param("id") id: string) { return this.presentations.remove(id); }
 
   @Get(":id/html")
   async downloadHtml(

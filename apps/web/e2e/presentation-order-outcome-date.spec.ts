@@ -14,9 +14,18 @@ test("presentation rows sort by outcome and columns without mixing edits; study 
     deadline: "2026-12-31", diffRendita: 0, diffImu: 0, originalRendita: 137, totalRendita: 5,
     catDRendita: 137, commercialOwner: "", technicalOwner: "Test", notes: "", erpUrl: "", properties };
   const writes: unknown[] = [];
+  const overrides: Record<string, string> = {};
   await page.route("**/api/**", async route => {
     const { pathname } = new URL(route.request().url());
     if (pathname.startsWith("/api/auth/")) return route.fallback();
+    if (pathname.endsWith("/presentations/draft")) {
+      if (route.request().method() === "PATCH") {
+        for (const [key, value] of Object.entries(route.request().postDataJSON().changes)) {
+          if (value === null) delete overrides[key]; else overrides[key] = value as string;
+        }
+      }
+      return route.fulfill({ json: { overrides, revision: 1 } });
+    }
     if (pathname === "/api/studies") return route.fulfill({ json: [study, { ...study, id: "ORDER-SECOND-STUDY", company: "Seconda società", properties: [] }] });
     if (pathname === `/api/studies/${study.id}` && route.request().method() === "PATCH") {
       const patch = route.request().postDataJSON(); writes.push(patch);

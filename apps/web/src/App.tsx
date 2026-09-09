@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { usePresentationDraftStore } from "./presentation-draft-store";
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -78,7 +79,7 @@ import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperi
 import { CurrentOperator, useIdentity } from "./Auth";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.0.8";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.0.9";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -5652,8 +5653,9 @@ function StudyGroupDetail({
     () => presentationDraftFromStudyGroup(groupName, studies),
     [groupName, studies],
   );
-  const [presentationDraft, setPresentationDraft] = useState<PresentationDraft>(() => presentationBaseline);
-  const [presentationTouchedFields, setPresentationTouchedFields] = useState<Set<string>>(() => new Set());
+  const { presentationDraft, presentationTouchedFields, presentationPersistence, updatePresentationClientName,
+    updatePresentationPropertyField, resetPresentationPropertyField, resetPresentationDraft } = usePersistentPresentationDraft(
+    `/study-groups/${encodeURIComponent(groupId)}/presentations`, presentationBaseline, properties.map(({ property }) => property), onNotice);
   const presentationSource = useMemo<PresentationSource>(() => ({
     id: groupId,
     company: groupName,
@@ -5665,27 +5667,6 @@ function StudyGroupDetail({
     setRenaming(false);
   }, [groupId, groupName]);
 
-  useEffect(() => {
-    setPresentationDraft((current) => {
-      const currentById = new Map(current.properties.map((property) => [property.id, property]));
-      return {
-        clientName: presentationTouchedFields.has("clientName") ? current.clientName : presentationBaseline.clientName,
-        properties: presentationBaseline.properties.map((baselineProperty) => {
-          const currentProperty = currentById.get(baselineProperty.id);
-          if (!currentProperty) return baselineProperty;
-          return PRESENTATION_PROPERTY_FIELDS.reduce(
-            (merged, field) => ({
-              ...merged,
-              [field]: presentationTouchedFields.has(`${baselineProperty.id}:${field}`)
-                ? currentProperty[field]
-                : baselineProperty[field],
-            }),
-            { ...baselineProperty },
-          );
-        }),
-      };
-    });
-  }, [presentationBaseline, presentationTouchedFields]);
 
   const sortedProperties = useMemo(() => [...properties].sort((first, second) => {
     const documentCount = (property: PropertyItem) => Object.values(property.documentUrls ?? {}).filter(Boolean).length;
@@ -5751,71 +5732,6 @@ function StudyGroupDetail({
     );
   }
 
-  function updatePresentationTouchedField(key: string, manual: boolean) {
-    setPresentationTouchedFields((current) => {
-      const next = new Set(current);
-      if (manual) next.add(key);
-      else next.delete(key);
-      return next;
-    });
-  }
-
-  function updatePresentationClientName(value: string) {
-    updatePresentationTouchedField("clientName", value !== presentationBaseline.clientName);
-    setPresentationDraft((current) => ({ ...current, clientName: value }));
-  }
-
-  function updatePresentationPropertyField(propertyId: string, field: PresentationPropertyField, value: string) {
-    const baselineProperty = presentationBaseline.properties.find((property) => property.id === propertyId);
-    const sourceProperty = properties.find(({ property }) => property.id === propertyId)?.property;
-    const linkedImuField = field === "renditaAttuale"
-      ? "imuAttuale"
-      : field === "renditaAttribuibile" ? "imuOttenibile" : null;
-    const linkedCalculation = field === "renditaAttuale"
-      ? sourceProperty?.currentImuCalculation
-      : field === "renditaAttribuibile" ? sourceProperty?.imuCalculation : null;
-    const recalculatedImu = linkedImuField ? presentationImuFromRendita(value, linkedCalculation) : null;
-    const updates: Partial<PresentationPropertyDraft> = { [field]: value };
-    if (linkedImuField && recalculatedImu !== null) updates[linkedImuField] = recalculatedImu;
-    Object.entries(updates).forEach(([updatedField, updatedValue]) => {
-      const typedField = updatedField as PresentationPropertyField;
-      updatePresentationTouchedField(
-        `${propertyId}:${typedField}`,
-        !baselineProperty || updatedValue !== baselineProperty[typedField],
-      );
-    });
-    setPresentationDraft((current) => ({
-      ...current,
-      properties: current.properties.map((property) => (
-        property.id === propertyId ? { ...property, ...updates } : property
-      )),
-    }));
-  }
-
-  function resetPresentationPropertyField(propertyId: string, field: PresentationPropertyField) {
-    const baselineProperty = presentationBaseline.properties.find((property) => property.id === propertyId);
-    if (!baselineProperty) return;
-    const linkedImuField = field === "renditaAttuale"
-      ? "imuAttuale"
-      : field === "renditaAttribuibile" ? "imuOttenibile" : null;
-    const fields: PresentationPropertyField[] = linkedImuField ? [field, linkedImuField] : [field];
-    fields.forEach((resetField) => updatePresentationTouchedField(`${propertyId}:${resetField}`, false));
-    setPresentationDraft((current) => ({
-      ...current,
-      properties: current.properties.map((property) => property.id === propertyId
-        ? fields.reduce(
-          (next, resetField) => ({ ...next, [resetField]: baselineProperty[resetField] }),
-          property,
-        )
-        : property),
-    }));
-  }
-
-  function resetPresentationDraft() {
-    setPresentationDraft(presentationBaseline);
-    setPresentationTouchedFields(new Set());
-    onNotice("Dati presentazione ripristinati dalla stima.");
-  }
 
   async function submitRename() {
     const name = nameDraft.trim();
@@ -5987,6 +5903,7 @@ function StudyGroupDetail({
       </section>
       <PresentationDataPreview
         sourceProperties={presentationSource.properties}
+        persistence={presentationPersistence}
         draft={presentationDraft}
         baseline={presentationBaseline}
         manualFields={presentationTouchedFields}
@@ -6772,9 +6689,55 @@ function presentationDraftTotals(draft: PresentationDraft) {
   return { ...totals, renditaDifference: totals.renditaAttuale - totals.renditaAttribuibile };
 }
 
+function mergePresentationDraft(baseline: PresentationDraft, overrides: Record<string, string>): PresentationDraft {
+  return { clientName: overrides.clientName ?? baseline.clientName, properties: baseline.properties.map(property =>
+    PRESENTATION_PROPERTY_FIELDS.reduce((result, field) => ({ ...result,
+      [field]: overrides[`${property.id}:${field}`] ?? property[field] }), { ...property })) };
+}
+
+function usePersistentPresentationDraft(endpoint: string, baseline: PresentationDraft, properties: PropertyItem[], onNotice: (message: string) => void) {
+  const persistence = usePresentationDraftStore(`${API_BASE_URL}${endpoint}/draft`);
+  const draft = useMemo(() => mergePresentationDraft(baseline, persistence.overrides), [baseline, persistence.overrides]);
+  const touched = new Set(Object.keys(persistence.overrides).filter(key => key === "clientName"
+    || baseline.properties.some(property => key.startsWith(`${property.id}:`))));
+  function updateProperty(propertyId: string, field: PresentationPropertyField, value: string) {
+    const source = properties.find(property => property.id === propertyId);
+    const updates: Record<string, string> = { [`${propertyId}:${field}`]: value };
+    const linkedField = field === "renditaAttuale" ? "imuAttuale" : field === "renditaAttribuibile" ? "imuOttenibile" : null;
+    const calculation = field === "renditaAttuale" ? source?.currentImuCalculation : source?.imuCalculation;
+    const recalculated = linkedField ? presentationImuFromRendita(value, calculation) : null;
+    if (linkedField && recalculated !== null) updates[`${propertyId}:${linkedField}`] = recalculated;
+    persistence.change(updates);
+  }
+  function resetProperty(propertyId: string, field: PresentationPropertyField) {
+    const changes: Record<string, null> = { [`${propertyId}:${field}`]: null };
+    if (field === "renditaAttuale") changes[`${propertyId}:imuAttuale`] = null;
+    if (field === "renditaAttribuibile") changes[`${propertyId}:imuOttenibile`] = null;
+    persistence.change(changes);
+  }
+  function reset() {
+    if (!window.confirm("Ripristinare tutti i dati della presentazione dai valori attuali della stima? Le presentazioni già generate non saranno modificate.")) return;
+    persistence.change(Object.fromEntries(Object.keys(persistence.overrides).map(key => [key, null])));
+    onNotice("Ripristino dei dati della stima in salvataggio.");
+  }
+  return { presentationDraft: draft, presentationTouchedFields: touched, presentationPersistence: persistence,
+    updatePresentationClientName: (value: string) => persistence.change({ clientName: value }),
+    updatePresentationPropertyField: updateProperty, resetPresentationPropertyField: resetProperty, resetPresentationDraft: reset };
+}
+
+function PresentationSaveStatus({ persistence }: { persistence: ReturnType<typeof usePresentationDraftStore> }) {
+  return <p className={`presentation-save-status ${persistence.status}`} role="status">
+    {persistence.status === "loading" ? "Caricamento modifiche salvate…"
+      : persistence.status === "saving" ? "Salvataggio modifiche…"
+      : persistence.status === "error" ? "Modifiche non salvate: verifica la connessione."
+      : "Modifiche salvate · mantenute fino al ripristino esplicito"}
+    {persistence.status === "error" && <button type="button" onClick={() => void persistence.flush()}>Riprova</button>}
+  </p>;
+}
+
 function PresentationAction({
   study,
-  draft,
+  draft: sourceDraft,
   onNotice,
   version = 1,
   endpointBase,
@@ -6798,8 +6761,17 @@ function PresentationAction({
   const [latestDeck, setLatestDeck] = useState<PresentationDeck | null>(null);
   const [generatedDeck, setGeneratedDeck] = useState<PresentationDeck | null>(null);
   const [busy, setBusy] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<PresentationDeck[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(false);
+  const [historyLimit, setHistoryLimit] = useState(20);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectionSort, setSelectionSort] = useState<{ key: PresentationPropertyField | "outcome"; direction: "asc" | "desc" }>({ key: "outcome", direction: "asc" });
   const presentationsEndpoint = endpointBase
     ?? `/studies/${encodeURIComponent(study.id)}/presentations`;
+  const persistence = usePresentationDraftStore(`${API_BASE_URL}${presentationsEndpoint}/draft`);
+  const draft = useMemo(() => mergePresentationDraft(sourceDraft, persistence.overrides), [sourceDraft, persistence.overrides]);
   const propertyDraftById = useMemo(
     () => new Map(draft.properties.map((property) => [property.id, property])),
     [draft.properties],
@@ -6811,6 +6783,53 @@ function PresentationAction({
     .map(presentationPropertyPayload)
     .filter((property): property is PresentationPropertyPayload => Boolean(property));
   const selectionHasInvalidData = selectedPayloads.length !== selectedPropertyIds.length || !draft.clientName.trim();
+  const selectionColumns: Array<{ key: PresentationPropertyField | "outcome"; label: string }> = [
+    { key: "outcome", label: "Esito" }, { key: "societa", label: "Società" }, { key: "comune", label: "Comune" },
+    { key: "indirizzo", label: "Indirizzo" }, { key: "foglioParticellaSub", label: "Foglio - Part. - Sub" },
+    { key: "categoria", label: "Cat." }, { key: "renditaAttuale", label: "R.C. attuale (€)" },
+    { key: "renditaAttribuibile", label: "R.C. attribuibile (€)" },
+    { key: "imuAttuale", label: "IMU attuale (€)" }, { key: "imuOttenibile", label: "IMU ottenibile (€)" },
+  ];
+  const orderedSelection = [...study.properties].sort((a, b) => {
+    const { key, direction } = selectionSort;
+    const rank = { Positivo: 0, Negativo: 1, Sospeso: 2, Neutro: 3 };
+    let comparison = 0;
+    if (key === "outcome") comparison = rank[a.outcome] - rank[b.outcome];
+    else {
+      const left = propertyDraftById.get(a.id)?.[key] ?? "", right = propertyDraftById.get(b.id)?.[key] ?? "";
+      if (["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(key)) {
+        const l = presentationMoneyToCents(left, false), r = presentationMoneyToCents(right, false);
+        if (l == null || r == null) return l == null ? (r == null ? 0 : 1) : -1;
+        comparison = l - r;
+      } else comparison = left.localeCompare(right, "it", { numeric: true, sensitivity: "base" });
+    }
+    return direction === "asc" ? comparison : -comparison;
+  });
+
+  async function loadHistory() {
+    setHistoryLoading(true); setHistoryError(false);
+    try {
+      const response = await fetch(`${API_BASE_URL}${presentationsEndpoint}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const decks: PresentationDeck[] = await response.json();
+      setHistory(Array.isArray(decks) ? decks : []);
+      setLatestDeck(decks?.find(deck => (deck.version ?? 1) === version) ?? null);
+    } catch { setHistoryError(true); }
+    finally { setHistoryLoading(false); }
+  }
+
+  async function removeDeck(deck: PresentationDeck) {
+    if (!window.confirm(`Eliminare la presentazione “${deck.fileName}” del ${formatDateTime(deck.createdAt)}? Non sarà più disponibile nello storico o nei prossimi sync ERP. Le copie già scaricate o inviate non verranno eliminate.`)) return;
+    setDeletingId(deck.id);
+    try {
+      const response = await fetch(`${API_BASE_URL}/presentations/${encodeURIComponent(deck.id)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (generatedDeck?.id === deck.id) setGeneratedDeck(null);
+      await loadHistory();
+      onNotice("Presentazione rimossa dallo storico e dai prossimi invii ERP.");
+    } catch { onNotice("Impossibile eliminare la presentazione. Riprova."); }
+    finally { setDeletingId(null); }
+  }
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -6845,6 +6864,7 @@ function PresentationAction({
     setMenuOpen(false);
     setSelectedPropertyIds(defaultPresentationPropertyIds(study));
     setGeneratedDeck(null);
+    setSelectionSort({ key: "outcome", direction: "asc" });
     setModalOpen(true);
   }
 
@@ -6862,12 +6882,13 @@ function PresentationAction({
     }
     setBusy(true);
     try {
+      if (!await persistence.flush()) throw new Error("Salva le modifiche alla bozza prima di generare la presentazione.");
       const endpoint = `${API_BASE_URL}${presentationsEndpoint}${version === 1 ? "" : `/v${version}`}`;
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          propertyIds: selectedPropertyIds,
+          propertyIds: orderedSelection.filter(property => selectedPropertyIds.includes(property.id)).map(property => property.id),
           clientName: draft.clientName.trim(),
           properties: selectedPayloads,
         }),
@@ -6880,6 +6901,7 @@ function PresentationAction({
       const deck = (await response.json()) as PresentationDeck;
       setGeneratedDeck(deck);
       setLatestDeck(deck);
+      setHistory(current => [deck, ...current]);
       onNotice(isV3
         ? "PDF v3 generato e salvato."
         : isV2
@@ -6976,6 +6998,27 @@ function PresentationAction({
         )}
       </div>
 
+      <button className="button secondary" type="button" onClick={() => {
+        setHistoryOpen(true); setHistoryLimit(20); void loadHistory();
+      }}><History size={16} /> Storico presentazioni{version !== 3 ? ` · v${version}` : ""}</button>
+
+      {historyOpen && <div className="modal-backdrop" onMouseDown={event => {
+        if (event.target === event.currentTarget && !deletingId) setHistoryOpen(false);
+      }}><section className="editor-modal presentation-history-modal" role="dialog" aria-modal="true" aria-label="Storico presentazioni"
+        onKeyDown={event => { if (event.key === "Escape" && !deletingId) setHistoryOpen(false); }}>
+        <div className="modal-head"><div><h2>Storico presentazioni</h2><p>{study.company} · tutte le versioni</p></div>
+          <button type="button" className="icon-button" disabled={!!deletingId} aria-label="Chiudi storico" onClick={() => setHistoryOpen(false)}><X size={16} /></button></div>
+        <p className="modal-note">Ogni generazione conserva i dati di quel momento. Le modifiche alla bozza non cambiano le presentazioni già generate.</p>
+        {historyLoading ? <p role="status">Caricamento storico…</p> : historyError ? <p role="alert">Impossibile caricare lo storico. <button type="button" onClick={() => void loadHistory()}>Riprova</button></p>
+          : history.length === 0 ? <p className="presentation-history-empty">Nessuna presentazione generata. Il primo PDF comparirà qui.</p>
+          : <><div className="presentation-history-list">{history.slice(0, historyLimit).map(deck => <article key={deck.id}>
+            <div><strong>{deck.fileName}</strong><span>v{deck.version ?? 1} · {formatDateTime(deck.createdAt)} · {deck.propertyCount} immobili</span></div>
+            <div><button type="button" className="button secondary compact-button" onClick={() => downloadPdf(deck)}><Download size={14} /> PDF</button>
+              {deck.htmlDownloadUrl && <button type="button" className="button secondary compact-button" onClick={() => downloadHtml(deck)}>HTML</button>}
+              <button type="button" className="button secondary compact-button" disabled={!!deletingId || historyLoading} aria-label={`Elimina ${deck.fileName}`} onClick={() => void removeDeck(deck)}><Trash2 size={14} /> {deletingId === deck.id ? "Eliminazione…" : "Elimina"}</button></div>
+          </article>)}</div>{historyLimit < history.length && <button className="button secondary" type="button" onClick={() => setHistoryLimit(value => value + 20)}>Mostra altre ({history.length - historyLimit})</button>}</>}
+      </section></div>}
+
       {modalOpen && (
         <div
           className="modal-backdrop"
@@ -7006,6 +7049,7 @@ function PresentationAction({
             <p className="modal-note">
               Seleziona gli immobili da includere. I contenuti e gli importi arrivano dall’anteprima editabile presente nella pagina corrente.
             </p>
+            <PresentationSaveStatus persistence={persistence} />
 
             <div className="presentation-selection-toolbar">
               <strong>{selectedPropertyIds.length}/{study.properties.length} selezionati</strong>
@@ -7021,32 +7065,32 @@ function PresentationAction({
               </p>
             )}
 
-            <div className="presentation-property-list">
-              {study.properties.map((property) => {
+            <div className="presentation-generator-table-wrap">
+              <table className="presentation-preview-table presentation-generator-table"><thead><tr>
+                <th>Includi</th>{selectionColumns.map(({ key, label }) => <th key={key} aria-sort={ariaSortState(selectionSort.key === key, selectionSort.direction)}>
+                  <button type="button" className="sort-header" onClick={() => setSelectionSort(current => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }))}>
+                    {label}{selectionSort.key === key ? (selectionSort.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : <ArrowDownUp size={13} />}
+                  </button></th>)}
+              </tr></thead><tbody>{orderedSelection.map((property) => {
                 const propertyDraft = propertyDraftById.get(property.id);
                 const incomplete = !propertyDraft || presentationPropertyHasIncompleteData(propertyDraft);
                 return (
-                  <label key={property.id} className={selectedPropertyIds.includes(property.id) ? "selected" : ""}>
+                  <tr key={property.id} data-property-id={property.id} className={selectedPropertyIds.includes(property.id) ? "selected" : ""}>
+                    <td>
                     <input
                       type="checkbox"
+                      aria-label={`Includi ${propertyDraft?.indirizzo || property.id}`}
                       checked={selectedPropertyIds.includes(property.id)}
                       onChange={() => toggleProperty(property.id)}
                     />
-                    <div>
-                      <strong>{propertyDraft?.indirizzo || propertyLocation(property)}</strong>
-                      <span>
-                        {property.id} · {propertyDraft?.categoria || property.categoria} · {propertyDraft?.foglioParticellaSub || cadastralPropertyReference(property)}
-                      </span>
-                      <small>
-                        Rendita {formatPresentationDraftAmount(propertyDraft?.renditaAttuale)} → {formatPresentationDraftAmount(propertyDraft?.renditaAttribuibile)} · IMU {formatPresentationDraftAmount(propertyDraft?.imuAttuale, "n.d.")} → {formatPresentationDraftAmount(propertyDraft?.imuOttenibile, "n.d.")}
-                      </small>
-                    </div>
-                    <span className={`presentation-data-state ${incomplete ? "warning" : "ready"}`}>
-                      {incomplete ? "Dati incompleti" : property.outcome}
-                    </span>
-                  </label>
+                    </td>
+                    {selectionColumns.map(({ key }) => <td key={key}>{key === "outcome"
+                      ? <><OutcomeBadge outcome={property.outcome} />{incomplete && <small className="presentation-incomplete">Dati incompleti</small>}</>
+                      : ["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(key)
+                        ? formatPresentationDraftAmount(propertyDraft?.[key], "n.d.") : propertyDraft?.[key] || "—"}</td>)}
+                  </tr>
                 );
-              })}
+              })}</tbody></table>
             </div>
 
             {generatedDeck && (
@@ -7089,7 +7133,7 @@ function PresentationAction({
               <button className="button secondary" type="button" onClick={() => setModalOpen(false)} disabled={busy}>
                 Chiudi
               </button>
-              <button className="button primary" type="button" disabled={busy || selectedPropertyIds.length === 0 || selectionHasInvalidData} onClick={() => void generatePresentation()}>
+              <button className="button primary" type="button" disabled={busy || !persistence.loaded || persistence.status === "error" || selectedPropertyIds.length === 0 || selectionHasInvalidData} onClick={() => void generatePresentation()}>
                 <Presentation size={15} />
                 {busy
                   ? "Generazione..."
@@ -7132,6 +7176,7 @@ function presentationMoneyInputInvalid(value: string, required: boolean) {
 
 function PresentationDataPreview({
   sourceProperties,
+  persistence,
   draft,
   baseline,
   manualFields,
@@ -7142,6 +7187,7 @@ function PresentationDataPreview({
   onReset,
 }: {
   sourceProperties: readonly Pick<PropertyItem, "id" | "outcome">[];
+  persistence: ReturnType<typeof usePresentationDraftStore>;
   draft: PresentationDraft;
   baseline: PresentationDraft;
   manualFields: ReadonlySet<string>;
@@ -7203,11 +7249,12 @@ function PresentationDataPreview({
           value={property[field]}
           placeholder={required ? "0,00" : "n.d."}
           aria-label={`${label} per ${property.indirizzo}`}
+          disabled={!persistence.loaded}
           aria-invalid={invalid}
           onChange={(event) => onPropertyFieldChange(property.id, field, event.target.value)}
           onBlur={() => {
             const parsed = presentationMoneyToCents(property[field], required as false);
-            if (parsed !== undefined && parsed !== null) {
+            if (parsed !== undefined && parsed !== null && formatPresentationMoneyInput(parsed) !== property[field]) {
               onPropertyFieldChange(property.id, field, formatPresentationMoneyInput(parsed));
             }
           }}
@@ -7241,7 +7288,7 @@ function PresentationDataPreview({
               {manualChanges} {manualChanges === 1 ? "modifica manuale" : "modifiche manuali"}
             </span>
           )}
-          <button className="button secondary compact-button" type="button" disabled={manualChanges === 0} onClick={onReset}>
+          <button className="button secondary compact-button" type="button" disabled={!persistence.loaded || manualChanges === 0} onClick={onReset}>
             <RefreshCw size={14} />
             Ripristina dati stima
           </button>
@@ -7253,10 +7300,13 @@ function PresentationDataPreview({
         <input
           className={!draft.clientName.trim() ? "invalid" : ""}
           value={draft.clientName}
+          disabled={!persistence.loaded}
           aria-invalid={!draft.clientName.trim()}
           onChange={(event) => onClientNameChange(event.target.value)}
         />
       </label>
+
+      <PresentationSaveStatus persistence={persistence} />
 
       <p className="presentation-preview-info">
         Se modifichi una rendita, la relativa IMU viene ricalcolata soltanto per la presentazione con
@@ -7288,6 +7338,7 @@ function PresentationDataPreview({
                       className={!property[field].trim() ? "invalid" : ""}
                       value={property[field]}
                       aria-label={`${field} per ${property.id}`}
+                      disabled={!persistence.loaded}
                       aria-invalid={!property[field].trim()}
                       onChange={(event) => onPropertyFieldChange(property.id, field, event.target.value)}
                     />
@@ -7548,8 +7599,9 @@ function StudyDetail({
   const [valuationGroupBusy, setValuationGroupBusy] = useState(false);
   const [expandedValuationGroupIds, setExpandedValuationGroupIds] = useState<string[]>([]);
   const presentationBaseline = useMemo(() => presentationDraftFromStudy(study), [study]);
-  const [presentationDraft, setPresentationDraft] = useState<PresentationDraft>(() => presentationBaseline);
-  const [presentationTouchedFields, setPresentationTouchedFields] = useState<Set<string>>(() => new Set());
+  const { presentationDraft, presentationTouchedFields, presentationPersistence, updatePresentationClientName,
+    updatePresentationPropertyField, resetPresentationPropertyField, resetPresentationDraft } = usePersistentPresentationDraft(
+    `/studies/${encodeURIComponent(study.id)}/presentations`, presentationBaseline, study.properties, onNotice);
   const propertyTableColumns = useTableColumns("soul-table-study-properties-v1", PROPERTY_TABLE_COLUMNS);
   const presentationTotals = useMemo(() => presentationDraftTotals(presentationDraft), [presentationDraft]);
   const visiblePropertyColumnIds = useMemo(
@@ -7566,33 +7618,8 @@ function StudyDetail({
     setNewPropertyModalOpen(false);
     setDeleteConfirmIds([]);
     setExpandedValuationGroupIds([]);
-    setPresentationDraft(presentationDraftFromStudy(study));
-    setPresentationTouchedFields(new Set());
   }, [study.id]);
 
-  useEffect(() => {
-    setPresentationDraft((current) => {
-      const currentById = new Map(current.properties.map((property) => [property.id, property]));
-      return {
-        clientName: presentationTouchedFields.has("clientName")
-          ? current.clientName
-          : presentationBaseline.clientName,
-        properties: presentationBaseline.properties.map((baselineProperty) => {
-          const currentProperty = currentById.get(baselineProperty.id);
-          if (!currentProperty) return baselineProperty;
-          return PRESENTATION_PROPERTY_FIELDS.reduce(
-            (merged, field) => ({
-              ...merged,
-              [field]: presentationTouchedFields.has(`${baselineProperty.id}:${field}`)
-                ? currentProperty[field]
-                : baselineProperty[field],
-            }),
-            { ...baselineProperty },
-          );
-        }),
-      };
-    });
-  }, [presentationBaseline, presentationTouchedFields]);
 
   useEffect(() => {
     setManualOrder((current) => {
@@ -7726,83 +7753,6 @@ function StudyDetail({
     setSavingStatus(false);
   }
 
-  function updatePresentationTouchedField(key: string, manual: boolean) {
-    setPresentationTouchedFields((current) => {
-      const next = new Set(current);
-      if (manual) next.add(key);
-      else next.delete(key);
-      return next;
-    });
-  }
-
-  function updatePresentationClientName(value: string) {
-    updatePresentationTouchedField("clientName", value !== presentationBaseline.clientName);
-    setPresentationDraft((current) => ({ ...current, clientName: value }));
-  }
-
-  function updatePresentationPropertyField(
-    propertyId: string,
-    field: PresentationPropertyField,
-    value: string,
-  ) {
-    const baselineProperty = presentationBaseline.properties.find((property) => property.id === propertyId);
-    const sourceProperty = study.properties.find((property) => property.id === propertyId);
-    const linkedImuField = field === "renditaAttuale"
-      ? "imuAttuale"
-      : field === "renditaAttribuibile"
-        ? "imuOttenibile"
-        : null;
-    const linkedCalculation = field === "renditaAttuale"
-      ? sourceProperty?.currentImuCalculation
-      : field === "renditaAttribuibile"
-        ? sourceProperty?.imuCalculation
-        : null;
-    const recalculatedImu = linkedImuField
-      ? presentationImuFromRendita(value, linkedCalculation)
-      : null;
-    const updates: Partial<PresentationPropertyDraft> = { [field]: value };
-    if (linkedImuField && recalculatedImu !== null) updates[linkedImuField] = recalculatedImu;
-    Object.entries(updates).forEach(([updatedField, updatedValue]) => {
-      const typedField = updatedField as PresentationPropertyField;
-      updatePresentationTouchedField(
-        `${propertyId}:${typedField}`,
-        !baselineProperty || updatedValue !== baselineProperty[typedField],
-      );
-    });
-    setPresentationDraft((current) => ({
-      ...current,
-      properties: current.properties.map((property) =>
-        property.id === propertyId ? { ...property, ...updates } : property
-      ),
-    }));
-  }
-
-  function resetPresentationPropertyField(propertyId: string, field: PresentationPropertyField) {
-    const baselineProperty = presentationBaseline.properties.find((property) => property.id === propertyId);
-    if (!baselineProperty) return;
-    const linkedImuField = field === "renditaAttuale"
-      ? "imuAttuale"
-      : field === "renditaAttribuibile"
-        ? "imuOttenibile"
-        : null;
-    const fields: PresentationPropertyField[] = linkedImuField ? [field, linkedImuField] : [field];
-    fields.forEach((resetField) => updatePresentationTouchedField(`${propertyId}:${resetField}`, false));
-    setPresentationDraft((current) => ({
-      ...current,
-      properties: current.properties.map((property) => property.id === propertyId
-        ? fields.reduce(
-          (next, resetField) => ({ ...next, [resetField]: baselineProperty[resetField] }),
-          property,
-        )
-        : property),
-    }));
-  }
-
-  function resetPresentationDraft() {
-    setPresentationDraft(presentationBaseline);
-    setPresentationTouchedFields(new Set());
-    onNotice("Dati presentazione ripristinati dalla stima.");
-  }
 
   function handlePropertySort(sortKey: Exclude<PropertySortKey, "manual">) {
     if (propertySortKey === sortKey) {
@@ -8373,6 +8323,7 @@ function StudyDetail({
       />
       <PresentationDataPreview
         sourceProperties={study.properties}
+        persistence={presentationPersistence}
         draft={presentationDraft}
         baseline={presentationBaseline}
         manualFields={presentationTouchedFields}
