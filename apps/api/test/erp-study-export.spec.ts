@@ -144,6 +144,7 @@ test("il pull ERP include note immobile e l'ultima presentazione v3 manuale di g
 
   assert.equal(response.totale, 1);
   assert.equal(response.studi[0]?.stato_studio, "Positiva");
+  assert.equal(response.studi[0]?.data_esito, dayBefore.toISOString());
   assert.equal(response.studi[0]?.immobili[0]?.note_immobile, "Nota specifica dell'immobile");
   assert.deepEqual(response.studi[0]?.presentazione, {
     presentazione_id: "PRESENTAZIONE-V3-GRUPPO",

@@ -3422,7 +3422,7 @@ button.activity-item {
 
 .presentation-preview-table {
   width: 100%;
-  min-width: 1320px;
+  min-width: 1440px;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -3449,12 +3449,15 @@ button.activity-item {
   letter-spacing: 0.025em;
 }
 
-.presentation-preview-table th:nth-child(1) { width: 12%; }
-.presentation-preview-table th:nth-child(2) { width: 8%; }
-.presentation-preview-table th:nth-child(3) { width: 16%; }
-.presentation-preview-table th:nth-child(4) { width: 13%; }
-.presentation-preview-table th:nth-child(5) { width: 5%; }
-.presentation-preview-table th:nth-child(n + 6) { width: 11.5%; }
+.presentation-preview-table th:nth-child(1) { width: 7%; }
+.presentation-preview-table th:nth-child(2) { width: 12%; }
+.presentation-preview-table th:nth-child(3) { width: 8%; }
+.presentation-preview-table th:nth-child(4) { width: 15%; }
+.presentation-preview-table th:nth-child(5) { width: 13%; }
+.presentation-preview-table th:nth-child(6) { width: 6%; }
+.presentation-preview-table th:nth-child(n + 7) { width: 9.75%; }
+.presentation-preview-table .sort-header { font: inherit; letter-spacing: inherit; text-transform: inherit; }
+.study-outcome-date { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 
 .presentation-preview-table tr:last-child td {
   border-bottom: 0;

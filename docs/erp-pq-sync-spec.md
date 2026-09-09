@@ -204,7 +204,11 @@ Regole:
 - `note_immobile` e facoltativo, ha un limite di 4.000 caratteri e, se assente in un aggiornamento ERP, conserva le note gia presenti in PQ.
 - Se `stato_studio` cambia, PQ salva in `data_esito` il valore non nullo ricevuto dall'ERP oppure,
   quando il valore e assente o null, la data corrente. Se lo stato non cambia e `data_esito` e
-  assente, la data gia salvata viene conservata.
+  assente o null, la data gia salvata viene conservata (da PQ 1.0.7); un valore non nullo
+  esplicito puo aggiornarla. Anche un nuovo studio importato con esito diverso da Aperta
+  riceve automaticamente la data corrente se l'ERP non fornisce una data.
+  Il cambio esito dall'interfaccia PQ registra automaticamente la data, visibile nel dettaglio
+  dello studio e restituita nel sync come `data_esito`.
 
 ### 2. Lettura modifiche PQ da ERP
 

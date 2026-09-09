@@ -58,7 +58,8 @@ export function resolveStudyOutcomeDate(input: ResolveStudyOutcomeDateInput): Da
   const changed = previousStatus !== null && previousStatus !== nextStatus;
 
   if (changed) return input.suppliedDate ?? input.now ?? new Date();
-  if (input.suppliedDateProvided) return input.suppliedDate ?? null;
+  // An empty ERP date must not erase the timestamp recorded when PQ changed the outcome.
+  if (input.suppliedDateProvided && input.suppliedDate) return input.suppliedDate;
   if (previousStatus === null && nextStatus !== "Aperta") return input.now ?? new Date();
   return input.currentDate ?? null;
 }

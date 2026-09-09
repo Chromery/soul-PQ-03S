@@ -461,7 +461,9 @@ components:
           description: |
             Data dell'ultimo cambio di esito. Se `stato_studio` cambia e il campo
             e assente o null, PQ salva automaticamente la data corrente. Se lo
-            stato non cambia, l'assenza del campo conserva la data esistente.
+            stato non cambia, il campo assente o null conserva la data esistente
+            (da PQ 1.0.7). Un nuovo studio non Aperta senza data riceve la data corrente.
+            Anche i cambi esito eseguiti in PQ registrano automaticamente questa data.
         data_prossimo_appuntamento:
           type:
             - string

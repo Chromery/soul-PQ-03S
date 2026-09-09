@@ -7,6 +7,24 @@ import {
   STUDY_OUTCOMES,
 } from "../src/studies/study-outcome.js";
 
+test("tutti gli esiti registrano la data al cambio, inclusi sospensione e riapertura", () => {
+  const now = new Date("2026-09-09T10:30:00Z");
+  for (const nextStatus of STUDY_OUTCOMES) {
+    const previousStatus = nextStatus === "Aperta" ? "Positiva" : "Aperta";
+    assert.equal(resolveStudyOutcomeDate({ previousStatus, nextStatus, now }), now);
+  }
+});
+
+test("una data ERP null non cancella il promemoria PQ e un nuovo esito riceve la data", () => {
+  const recorded = new Date("2026-09-08T10:30:00Z"), now = new Date("2026-09-09T10:30:00Z");
+  for (const nextStatus of STUDY_OUTCOMES) {
+    assert.equal(resolveStudyOutcomeDate({ previousStatus: nextStatus, nextStatus,
+      currentDate: recorded, suppliedDate: null, suppliedDateProvided: true, now }), recorded);
+    assert.equal(resolveStudyOutcomeDate({ nextStatus, suppliedDate: null, suppliedDateProvided: true, now }),
+      nextStatus === "Aperta" ? null : now);
+  }
+});
+
 test("gli esiti studio canonici coincidono con quelli ERP", () => {
   assert.deepEqual(STUDY_OUTCOMES, ["Aperta", "Annullata", "Negativa", "Positiva", "Sospesa"]);
   assert.equal(normalizeStudyOutcome("aperta"), "Aperta");

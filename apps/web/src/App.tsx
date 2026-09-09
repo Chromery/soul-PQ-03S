@@ -78,7 +78,7 @@ import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperi
 import { CurrentOperator, useIdentity } from "./Auth";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.0.6";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.0.7";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -5986,6 +5986,7 @@ function StudyGroupDetail({
         </div>
       </section>
       <PresentationDataPreview
+        sourceProperties={presentationSource.properties}
         draft={presentationDraft}
         baseline={presentationBaseline}
         manualFields={presentationTouchedFields}
@@ -7130,6 +7131,7 @@ function presentationMoneyInputInvalid(value: string, required: boolean) {
 }
 
 function PresentationDataPreview({
+  sourceProperties,
   draft,
   baseline,
   manualFields,
@@ -7139,6 +7141,7 @@ function PresentationDataPreview({
   onPropertyFieldReset,
   onReset,
 }: {
+  sourceProperties: readonly Pick<PropertyItem, "id" | "outcome">[];
   draft: PresentationDraft;
   baseline: PresentationDraft;
   manualFields: ReadonlySet<string>;
@@ -7152,6 +7155,32 @@ function PresentationDataPreview({
   onPropertyFieldReset: (propertyId: string, field: PresentationPropertyField) => void;
   onReset: () => void;
 }) {
+  const [sort, setSort] = useState<{ key: PresentationPropertyField | "outcome"; direction: "asc" | "desc" }>({ key: "outcome", direction: "asc" });
+  const outcomes = new Map(sourceProperties.map(property => [property.id, property.outcome]));
+  const outcomeRank = { Positivo: 0, Negativo: 1, Sospeso: 2, Neutro: 3 };
+  const columns: Array<{ key: PresentationPropertyField | "outcome"; label: string }> = [
+    { key: "outcome", label: "Esito" },
+    { key: "societa", label: "Società" }, { key: "comune", label: "Comune" },
+    { key: "indirizzo", label: "Indirizzo" }, { key: "foglioParticellaSub", label: "Foglio - Part. - Sub" },
+    { key: "categoria", label: "Cat." }, { key: "renditaAttuale", label: "R.C. attuale (€)" },
+    { key: "renditaAttribuibile", label: "R.C. attribuibile (€)" },
+    { key: "imuAttuale", label: "IMU attuale (€)" }, { key: "imuOttenibile", label: "IMU ottenibile (€)" },
+  ];
+  const orderedProperties = [...draft.properties].sort((a, b) => {
+    const key = sort.key;
+    let comparison: number;
+    if (key === "outcome") {
+      comparison = outcomeRank[outcomes.get(a.id) ?? "Neutro"] - outcomeRank[outcomes.get(b.id) ?? "Neutro"];
+    } else if (["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(key)) {
+      const left = presentationMoneyToCents(a[key], false), right = presentationMoneyToCents(b[key], false);
+      // Missing/invalid amounts stay at the end in either direction.
+      if (left == null || right == null) return left == null ? (right == null ? 0 : 1) : -1;
+      comparison = left - right;
+    } else {
+      comparison = a[key].localeCompare(b[key], "it", { numeric: true, sensitivity: "base" });
+    }
+    return sort.direction === "asc" ? comparison : -comparison;
+  });
   const totals = presentationDraftTotals(draft);
   const renditaDifference = totals.renditaDifference;
   const imuDifference = totals.imuAttuale - totals.imuOttenibile;
@@ -7238,20 +7267,21 @@ function PresentationDataPreview({
         <table className="presentation-preview-table">
           <thead>
             <tr>
-              <th>Società</th>
-              <th>Comune</th>
-              <th>Indirizzo</th>
-              <th>Foglio - Part. - Sub</th>
-              <th>Cat.</th>
-              <th>R.C. attuale (€)</th>
-              <th>R.C. attribuibile (€)</th>
-              <th>IMU attuale (€)</th>
-              <th>IMU ottenibile (€)</th>
+              {columns.map(({ key, label }) => (
+                <th key={key} aria-sort={ariaSortState(sort.key === key, sort.direction)}>
+                  <button type="button" className={`sort-header ${sort.key === key ? "active" : ""}`}
+                    onClick={() => setSort(current => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }))}>
+                    {label}
+                    {sort.key === key ? (sort.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : <ArrowDownUp size={13} />}
+                  </button>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {draft.properties.map((property) => (
+            {orderedProperties.map((property) => (
               <tr key={property.id}>
+                <td><OutcomeBadge outcome={outcomes.get(property.id) ?? "Neutro"} /></td>
                 {(["societa", "comune", "indirizzo", "foglioParticellaSub", "categoria"] as const).map((field) => (
                   <td key={field}>
                     <input
@@ -7947,6 +7977,9 @@ function StudyDetail({
               saving={savingStatus}
               onChange={(status) => void handleStatusChange(status)}
             />
+            <span className="study-outcome-date" aria-label="Data esito studio">
+              <CalendarDays size={14} aria-hidden="true" /> Data esito: {formatDate(study.concludedAt)}
+            </span>
           </div>
           <h1>{study.company}</h1>
           <p>
@@ -8339,6 +8372,7 @@ function StudyDetail({
         onSave={(notes) => onUpdate({ notes })}
       />
       <PresentationDataPreview
+        sourceProperties={study.properties}
         draft={presentationDraft}
         baseline={presentationBaseline}
         manualFields={presentationTouchedFields}
