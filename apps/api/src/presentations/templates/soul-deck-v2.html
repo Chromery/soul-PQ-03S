@@ -365,6 +365,14 @@
     document.getElementById("total-current-rent").textContent = euro.format(currentRent);
     document.getElementById("total-estimated-rent").textContent = euro.format(estimatedRent);
     document.getElementById("rent-difference").textContent = euro.format(totalRentDifference);
+    if (data.version === 3) {
+      // Summary uses the same variation convention as IMU: a reduction is negative/green.
+      const rentVariation = estimatedRent - currentRent;
+      const rentVariationElement = document.getElementById("rent-difference");
+      rentVariationElement.textContent = `${rentVariation > 0 ? "+" : rentVariation < 0 ? "−" : ""}${euro.format(Math.abs(rentVariation))}`;
+      if (rentVariation !== 0) rentVariationElement.classList.add(rentVariation < 0 ? "good" : "bad");
+      document.querySelector(".ten-year-head > span").textContent = "VALORIZZAZIONE ASSET";
+    }
     document.getElementById("total-current-imu").textContent = euro.format(currentImu);
     document.getElementById("total-estimated-imu").textContent = euro.format(estimatedImu);
     const variation = document.getElementById("imu-variation");
