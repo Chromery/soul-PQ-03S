@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { ScaleExtractionStatus } from "../generated/prisma/enums.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { detectOcrOrientation } from "./pdf-ocr-orientation.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -22,6 +23,7 @@ type CreateScaleExtractionInput = {
   document_id?: string;
   sha256?: string;
   apply_active_scale?: boolean;
+  orientation_only?: boolean;
 };
 
 type EnqueueDocumentPdfInput = {
@@ -158,7 +160,7 @@ export class ScaleExtractionService {
         propertyId,
         documentId: input.document_id,
         status: ScaleExtractionStatus.PENDING,
-        model: this.model,
+        model: input.orientation_only ? "tesseract-ocr-ita-4-orientations" : this.model,
         sourceFileName: input.file_name,
         sourceSha256: sha256,
       },
@@ -171,7 +173,7 @@ export class ScaleExtractionService {
         fileBuffer: buffer,
         sizeBytes: buffer.byteLength,
       },
-      { forceActiveScale: input.apply_active_scale === true },
+      { forceActiveScale: input.apply_active_scale === true, orientationOnly: input.orientation_only === true },
     );
     if (wait) await process;
     else void process.catch((error) => console.error("Scale extraction job failed", error));
@@ -208,7 +210,7 @@ export class ScaleExtractionService {
   private async runJob(
     jobId: string,
     source: PdfScaleSource,
-    options: { forceActiveScale?: boolean } = {},
+    options: { forceActiveScale?: boolean; orientationOnly?: boolean } = {},
   ) {
     const startedAt = new Date();
     await this.prisma.scaleExtractionJob.update({
@@ -221,7 +223,7 @@ export class ScaleExtractionService {
     });
 
     try {
-      const result = await this.extractScale(source);
+      const result = await this.extractScale(source, options.orientationOnly);
       const completedAt = new Date();
       const updatedJob = await this.prisma.scaleExtractionJob.update({
         where: { id: jobId },
@@ -255,10 +257,18 @@ export class ScaleExtractionService {
     }
   }
 
-  private async extractScale(source: PdfScaleSource): Promise<ScaleExtractionResult> {
-    const renderedPages = await renderPdfPages(source, this.renderDpi, this.maxPages);
+  private async extractScale(source: PdfScaleSource, orientationOnly = false): Promise<ScaleExtractionResult> {
+    const renderedPages = await renderPdfPages(source, this.renderDpi, this.maxPages, orientationOnly);
     const pages: PageScaleExtractionResult[] = [];
     for (const page of renderedPages) {
+      if (orientationOnly) {
+        pages.push(validatePageExtractionResult({ page_number: page.pageNumber, found: false,
+          orientation_rotation: page.orientation?.rotation ?? null, orientation_confidence: page.orientation?.confidence ?? 0,
+          orientation_evidence: page.orientation?.evidence ?? null,
+          warnings: page.orientation ? [] : ["Orientamento non determinato con sufficiente affidabilità; pagina invariata"],
+        }, "", page.pageNumber));
+        continue;
+      }
       let primary: PageScaleExtractionResult;
       try {
         primary = parseNeuralwattPageExtraction(
@@ -498,7 +508,7 @@ export class ScaleExtractionService {
     if (detected.length === 0) return;
     const draft = await this.prisma.planAnalysisDraft.findUnique({
       where: { propertyId },
-      select: { payload: true },
+      select: { payload: true, updatedAt: true },
     });
     if (!draft) return;
     const payload =
@@ -513,10 +523,14 @@ export class ScaleExtractionService {
     detected.forEach((page) => {
       const key = String(page.page_number);
       if (Object.prototype.hasOwnProperty.call(existing, key)) return;
+      const geometry = [payload.selections, payload.lotBoundaries].some(items =>
+        Array.isArray(items) && items.some(item => item?.page === page.page_number));
+      const scales = payload.pageScales as Record<string, { calibration?: unknown }> | undefined;
+      if (geometry || scales?.[key]?.calibration || (payload.calibration as { page?: number } | undefined)?.page === page.page_number) return;
       if (page.orientation_rotation !== 0) existing[key] = page.orientation_rotation;
     });
-    await this.prisma.planAnalysisDraft.update({
-      where: { propertyId },
+    await this.prisma.planAnalysisDraft.updateMany({
+      where: { propertyId, updatedAt: draft.updatedAt },
       data: {
         payload: {
           ...payload,
@@ -539,6 +553,7 @@ export class ScaleExtractionService {
       document_id: optionalString(input.document_id),
       sha256: optionalString(input.sha256),
       apply_active_scale: optionalBoolean(input.apply_active_scale),
+      orientation_only: optionalBoolean(input.orientation_only),
     };
   }
 
@@ -596,6 +611,7 @@ async function renderPdfPages(
   source: PdfScaleSource,
   dpi: number,
   maxPages: number,
+  orientationOnly = false,
 ): Promise<RenderedPdfPage[]> {
   if (source.sizeBytes <= 0 || source.fileBuffer.byteLength === 0) {
     throw new Error(`PDF vuoto: ${source.fileName}`);
@@ -668,7 +684,7 @@ async function renderPdfPages(
       const imagePath = path.join(temporaryDirectory, fileName);
       const image = await fs.readFile(imagePath);
       const metadata = pageMetadata.get(pageNumber);
-      const detailImages = metadata
+      const detailImages = metadata && !orientationOnly
         ? await renderJpegMarginCrops(
             imagePath,
             temporaryDirectory,
@@ -683,7 +699,7 @@ async function renderPdfPages(
         imageDataUrl: `data:image/jpeg;base64,${image.toString("base64")}`,
         detailImages,
         sheetSize: metadata?.sheetSize ?? null,
-        orientation: pageOrientations.get(pageNumber) ?? null,
+        orientation: orientationOnly ? await detectOcrOrientation(imagePath, temporaryDirectory, pageNumber) : pageOrientations.get(pageNumber) ?? null,
       });
     }
     return pages;
@@ -974,7 +990,7 @@ function decodePdfBase64(value: string, fileName: string) {
   };
 }
 
-function parseNeuralwattPageExtraction(rawBody: string, page: RenderedPdfPage) {
+export function parseNeuralwattPageExtraction(rawBody: string, page: RenderedPdfPage) {
   const data = parseJsonRecord(rawBody, "risposta NeuralWatt");
   if (!Array.isArray(data.choices)) {
     const message = providerErrorMessage(data);
@@ -1193,7 +1209,7 @@ function apiPageScalesFromRaw(rawResponse: unknown) {
             rotation: page.orientation_rotation,
             confidence: page.orientation_confidence,
             evidence: page.orientation_evidence,
-            source: "pdf-text-geometry",
+            source: page.orientation_evidence?.startsWith("OCR:") ? "ocr" : "pdf-text-geometry",
           },
     };
   });

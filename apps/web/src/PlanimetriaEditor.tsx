@@ -28,7 +28,6 @@ import {
   PencilLine,
   Plus,
   Redo2,
-  RotateCcw,
   RotateCw,
   Ruler,
   Save,
@@ -56,6 +55,7 @@ import {
   resolveLotValuation,
 } from "./lotValuation";
 import type { LotValuation, LotValuationMode } from "./lotValuation";
+import { textOrientation } from "./pdf-orientation";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
@@ -248,7 +248,7 @@ type ScaleExtractionJob = {
       rotation: PageRotation;
       confidence: number;
       evidence: string | null;
-      source: "pdf-text-geometry";
+      source: "pdf-text-geometry" | "ocr";
     } | null;
   }>;
   confidence: number | null;
@@ -1373,7 +1373,7 @@ function parsePageRotations(value: unknown) {
     const pageNumber = Number(page);
     if (!Number.isInteger(pageNumber) || pageNumber < 1) return;
     const normalized = pageRotationFromValue(rotation);
-    if (normalized !== 0) rotations.set(pageNumber, normalized);
+    if ([0, 90, 180, 270].includes(rotation as number)) rotations.set(pageNumber, normalized);
   });
   return rotations;
 }
@@ -1381,7 +1381,7 @@ function parsePageRotations(value: unknown) {
 function serializePageRotations(rotations: Map<number, PageRotation>) {
   const serialized: Record<string, PageRotation> = {};
   rotations.forEach((rotation, page) => {
-    if (rotation !== 0) serialized[String(page)] = rotation;
+    serialized[String(page)] = rotation;
   });
   return Object.keys(serialized).length > 0 ? serialized : undefined;
 }
@@ -1523,6 +1523,8 @@ export default function PlanimetriaEditor({
   });
   const pageScalesRef = useRef<Map<number, PageScaleState>>(new Map());
   const detectedPageRotationsRef = useRef<Map<number, PageRotation>>(new Map());
+  const rasterOrientationPagesRef = useRef<Set<number>>(new Set());
+  const rotationBusyRef = useRef(false);
   const pendingDraftRef = useRef<SavedDraft | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const marqueeDragRef = useRef<MarqueeDragState | null>(null);
@@ -1587,6 +1589,7 @@ export default function PlanimetriaEditor({
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
   const [clearPageConfirmOpen, setClearPageConfirmOpen] = useState(false);
   const [opacityDockOpen, setOpacityDockOpen] = useState(false);
+  const [rotationMenuOpen, setRotationMenuOpen] = useState(false);
   const [areaTableCollapsed, setAreaTableCollapsed] = useState(false);
   const [areaTableView, setAreaTableView] = useState<AreaTableViewMode>("individual");
   const [areaTableHeight, setAreaTableHeight] = useState(310);
@@ -2014,7 +2017,11 @@ export default function PlanimetriaEditor({
       ? currentPageExtractionEntry.scale
       : currentPage === 1 ? scaleExtractionJob?.scale : null;
   const scaleExtractionLabel =
-    scaleExtractionJob?.status === "SUCCEEDED" && currentPageExtractedScale
+    scaleExtractionJob?.model?.startsWith("tesseract")
+      ? scaleExtractionJob.status === "SUCCEEDED"
+        ? currentPageExtractionEntry?.orientation ? "Orientamento OCR verificato" : "Orientamento OCR incerto"
+        : scaleExtractionJob.status === "FAILED" ? "Orientamento OCR non disponibile" : "Orientamento OCR in corso"
+      : scaleExtractionJob?.status === "SUCCEEDED" && currentPageExtractedScale
       ? `Scala AI ${currentPageExtractedScale.label} · pag. ${currentPage}`
       : scaleExtractionJob?.status === "SUCCEEDED"
         ? "Scala AI non rilevata"
@@ -2260,6 +2267,8 @@ export default function PlanimetriaEditor({
     };
     pageScalesRef.current = new Map();
     detectedPageRotationsRef.current = new Map();
+    rasterOrientationPagesRef.current = new Set();
+    setRotationMenuOpen(false);
     setCurrentPage(0);
     setPageCount(0);
     setFileName("");
@@ -2318,7 +2327,7 @@ export default function PlanimetriaEditor({
     setRevision((value) => value + 1);
     setStatus("Recupero bozza e planimetria");
 
-    function openInitialDocument(draft: SavedDraft | null) {
+    async function openInitialDocument(draft: SavedDraft | null) {
       pendingDraftRef.current = draft;
       setDocumentSource(draft?.document ?? null);
       setSavedAt(draft?.savedAt ?? "");
@@ -2327,7 +2336,7 @@ export default function PlanimetriaEditor({
         setDefaultOneri(property.oneri === true);
         applyPropertyScaleFallback();
         if (linkedRemotePlan) {
-          void loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName, undefined, true);
+          await loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName, undefined, true);
         } else {
           setStatus("Carica una planimetria o apri il documento ERP");
         }
@@ -2382,18 +2391,18 @@ export default function PlanimetriaEditor({
       );
       setActiveTool(normalizeEditorTool(draft.activeTool));
       if (!draft.document) {
-        void restoreDraftSelections(draft);
+        await restoreDraftSelections(draft);
         setStatus("Bozza manuale ripristinata");
       } else if (draft.document.kind === "sample") {
         if (linkedRemotePlan) {
-          void loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName, draft, true);
+          await loadRemotePlan(linkedRemotePlan.url, linkedRemotePlan.fileName, draft, true);
         } else {
           setDocumentSource(null);
-          void restoreDraftSelections(draft);
+          await restoreDraftSelections(draft);
           setStatus("Bozza salvata con documento mock rimosso: carica la planimetria ERP");
         }
       } else if (draft.document.kind === "remote") {
-        void loadRemotePlan(draft.document.url, draft.document.fileName, draft, true);
+        await loadRemotePlan(draft.document.url, draft.document.fileName, draft, true);
       } else {
         setStatus(`Bozza salvata: ricarica ${draft.document.fileName}`);
       }
@@ -2423,19 +2432,38 @@ export default function PlanimetriaEditor({
 
       if (!draft) draft = readSavedDraft(analysisTargetId);
       if (disposed) return;
-      openInitialDocument(draft);
-      if (valuationGroup) return;
+      await openInitialDocument(draft);
+      if (disposed || valuationGroup) return;
       try {
         const scaleResponse = await fetch(
           `${API_BASE_URL}/properties/${encodeURIComponent(property.id)}/scale-extraction-jobs/latest`,
           { signal: abortController.signal },
         );
         if (!scaleResponse.ok || disposed) return;
-        const latestJob = (await scaleResponse.json()) as ScaleExtractionJob | null;
-        if (!latestJob || disposed) return;
+        let latestJob = (await scaleResponse.json()) as ScaleExtractionJob | null;
+        if (disposed) return;
+        const data = runtimeRef.current.pdfData;
+        if (!data) return;
+        const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", data.slice(0))))
+          .map(value => value.toString(16).padStart(2, "0")).join("");
+        if (disposed) return;
+        if (latestJob?.sourceSha256 && latestJob.sourceSha256 !== hash) latestJob = null;
         setScaleExtractionJob(latestJob);
-        if (latestJob.status === "SUCCEEDED") {
+        if (latestJob?.status === "SUCCEEDED") {
           await applyScaleExtractionJob(latestJob, { silent: true });
+        }
+        if (latestJob?.status === "PENDING" || latestJob?.status === "RUNNING") {
+          setScaleExtractionBusy(true);
+          void pollScaleExtractionJob(latestJob.id, false);
+        } else if (rasterOrientationPagesRef.current.size > 0 && runtimeRef.current.pdfData) {
+          const unresolved = [...rasterOrientationPagesRef.current].some(page =>
+            !runtimeRef.current.pageRotations.has(page) && !pageHasProtectedGeometry(page));
+          const retryKey = `pq-orientation-ocr-v1:${analysisTargetId}:${hash}`;
+          // At most one automatic OCR retry per file/browser; a manual retry remains available.
+          if (unresolved && !window.localStorage.getItem(retryKey) && !disposed) {
+            window.localStorage.setItem(retryKey, "requested");
+            void triggerScaleExtraction(data.slice(0), runtimeRef.current.fileName, false, true);
+          }
         }
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -2731,14 +2759,14 @@ export default function PlanimetriaEditor({
     void saveImuOverride("multiplier", Math.round(parsed * 10_000) / 10_000);
   }
 
-  async function triggerScaleExtraction(data: ArrayBuffer, name: string) {
+  async function triggerScaleExtraction(data: ArrayBuffer, name: string, forceActiveScale = true, orientationOnly = false) {
     setScaleExtractionBusy(true);
     setScaleExtractionJob({
       id: "pending",
       propertyId: scaleExtractionPropertyId,
       documentId: null,
       status: "PENDING",
-      model: "",
+      model: orientationOnly ? "tesseract-ocr-ita-4-orientations" : "",
       sourceFileName: name,
       sourceSha256: null,
       scale: null,
@@ -2751,7 +2779,7 @@ export default function PlanimetriaEditor({
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    setStatus("Analisi AI della scala planimetria");
+    setStatus(orientationOnly ? "Riconoscimento OCR orientamento pagine" : "Analisi AI della scala planimetria");
 
     try {
       const response = await fetch(
@@ -2763,14 +2791,15 @@ export default function PlanimetriaEditor({
             file_name: name,
             mime_type: "application/pdf",
             file_base64: arrayBufferToBase64(data),
-            apply_active_scale: !valuationGroup,
+            apply_active_scale: forceActiveScale && !valuationGroup,
+            orientation_only: orientationOnly,
           }),
         },
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const createdJob = (await response.json()) as ScaleExtractionJob;
       setScaleExtractionJob(createdJob);
-      await pollScaleExtractionJob(createdJob.id);
+      await pollScaleExtractionJob(createdJob.id, forceActiveScale);
     } catch (error) {
       console.error(error);
       setScaleExtractionBusy(false);
@@ -2797,18 +2826,26 @@ export default function PlanimetriaEditor({
     await triggerScaleExtraction(data.slice(0), fileName);
   }
 
-  async function pollScaleExtractionJob(jobId: string) {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+  async function pollScaleExtractionJob(jobId: string, forceActiveScale = true) {
+    const targetRuntime = runtimeRef.current;
+    for (let attempt = 0; attempt < 240; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, attempt < 4 ? 1200 : 2500));
+      if (runtimeRef.current !== targetRuntime) return;
       const response = await fetch(
         `${API_BASE_URL}/properties/${encodeURIComponent(scaleExtractionPropertyId)}/scale-extraction-jobs/${encodeURIComponent(jobId)}`,
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const job = (await response.json()) as ScaleExtractionJob;
+      if (runtimeRef.current !== targetRuntime) return;
       setScaleExtractionJob(job);
       if (job.status === "SUCCEEDED" || job.status === "FAILED") {
         setScaleExtractionBusy(false);
-        await applyScaleExtractionJob(job, { forceActiveScale: true });
+        await applyScaleExtractionJob(job, { forceActiveScale });
+        if (runtimeRef.current === targetRuntime && !job.model?.startsWith("tesseract") && targetRuntime.pdfData
+          && [...rasterOrientationPagesRef.current].some(page => !targetRuntime.pageRotations.has(page) && !pageHasProtectedGeometry(page))) {
+          // A scale job (including a failed provider call) must not leave a scan without the local OCR check.
+          void triggerScaleExtraction(targetRuntime.pdfData.slice(0), targetRuntime.fileName, false, true);
+        }
         return;
       }
     }
@@ -2842,7 +2879,7 @@ export default function PlanimetriaEditor({
       (item) => item.orientation && item.orientation.confidence >= 0.65,
     );
     if (detectedPages.length === 0 && detectedOrientations.length === 0) {
-      setStatus("Scala non rilevata nella planimetria");
+      setStatus(job.model?.startsWith("tesseract") ? "Orientamento incerto: pagine lasciate invariate" : "Scala non rilevata nella planimetria");
       return;
     }
     if (!options.silent) recordUndoState();
@@ -2866,9 +2903,9 @@ export default function PlanimetriaEditor({
         || (runtimeRef.current.selectionsByPage.get(result.page)?.length ?? 0) > 0
         || (runtimeRef.current.lotBoundariesByPage.get(result.page)?.length ?? 0) > 0;
       const runtimeHasRotation = runtimeRef.current.pageRotations.has(result.page);
-      if (draftHasRotation || pageHasGeometry || runtimeHasRotation) return;
-      if (orientation.rotation === 0) return;
+      if (draftHasRotation || pageHasGeometry || pageHasProtectedGeometry(result.page) || runtimeHasRotation) return;
       runtimeRef.current.pageRotations.set(result.page, orientation.rotation);
+      if (orientation.rotation === 0) return;
       orientationAppliedCount += 1;
       if (runtimeRef.current.pdfDoc && runtimeRef.current.currentPage === result.page) {
         rerenderCurrentPage = true;
@@ -2910,7 +2947,7 @@ export default function PlanimetriaEditor({
       await renderPage(runtimeRef.current.currentPage);
       redrawMasks();
     }
-    if (!options.silent) markDirty();
+    if (!options.silent || orientationAppliedCount > 0) markDirty();
     bumpRevision();
     if (appliedCount > 0) {
       setStatus(
@@ -2925,11 +2962,23 @@ export default function PlanimetriaEditor({
       setStatus(
         `Orientamento corretto su ${orientationAppliedCount} ${orientationAppliedCount === 1 ? "pagina" : "pagine"}`,
       );
+    } else if (job.model?.startsWith("tesseract")) {
+      setStatus("Orientamento verificato; impostazioni esistenti mantenute");
     } else if (preservedCount > 0) {
       setStatus("Scale AI rilevate; scale manuali delle pagine mantenute");
     } else {
       setStatus("Scale AI rilevate con confidenza bassa");
     }
+  }
+
+  function pageHasProtectedGeometry(page: number) {
+    const pending = pendingDraftRef.current;
+    return (runtimeRef.current.selectionsByPage.get(page)?.length ?? 0) > 0
+      || (runtimeRef.current.lotBoundariesByPage.get(page)?.length ?? 0) > 0
+      || pending?.selections.some(item => item.page === page) === true
+      || pending?.lotBoundaries?.some(item => item.page === page) === true
+      || Boolean(pageScaleFor(page).calibration)
+      || pending?.calibration?.page === page;
   }
 
   async function loadPdfFromData(data: ArrayBuffer, name: string) {
@@ -2960,6 +3009,22 @@ export default function PlanimetriaEditor({
         }
       });
       runtimeRef.current = runtime;
+      rasterOrientationPagesRef.current = new Set();
+      for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber++) {
+        if (runtimeRef.current !== runtime) return;
+        if (runtime.pageRotations.has(pageNumber) || pageHasProtectedGeometry(pageNumber)) continue;
+        try {
+          const page = await pdfDoc.getPage(pageNumber);
+          const content = await page.getTextContent();
+          const orientation = textOrientation(content.items, page.getViewport({ scale: 1 }).transform);
+          if (orientation) runtime.pageRotations.set(pageNumber, orientation.rotation);
+          else {
+            const ops = await page.getOperatorList();
+            if (ops.fnArray.some(op => [pdfjsLib.OPS.paintImageXObject, pdfjsLib.OPS.paintInlineImageXObject,
+              pdfjsLib.OPS.paintImageXObjectRepeat].includes(op))) rasterOrientationPagesRef.current.add(pageNumber);
+          }
+        } catch { /* A missing text layer must never prevent editing the PDF. */ }
+      }
       setZoomPercent(100);
       setFileName(name);
       setPageCount(pdfDoc.numPages);
@@ -8268,6 +8333,13 @@ export default function PlanimetriaEditor({
       );
     });
 
+    const scale = clonePageScale(pageScaleFor(pageNumber));
+    if (scale.calibration) {
+      scale.calibration = rotateCalibration(scale.calibration, pageNumber, oldWidth, oldHeight, newWidth, newHeight, delta);
+      putPageScale(pageNumber, scale);
+    }
+    if (pageNumber !== runtimeRef.current.currentPage) return;
+
     setRulerSegment((segment) =>
       segment ? rotateSegment(segment, pageNumber, oldWidth, oldHeight, newWidth, newHeight, delta) : segment,
     );
@@ -8295,35 +8367,45 @@ export default function PlanimetriaEditor({
     outlinePathCacheRef.current = new WeakMap();
   }
 
-  async function rotateCurrentPage(delta: -90 | 90) {
+  async function rotateCurrentPage(delta: -90 | 90, allPages = false) {
     const runtime = runtimeRef.current;
-    if (!runtime.pdfDoc || !currentPage || busy) return;
-    const pdfCanvas = pdfCanvasRef.current;
-    const oldWidth = pdfCanvas?.width ?? 0;
-    const oldHeight = pdfCanvas?.height ?? 0;
-    const previousRotation = runtime.pageRotations.get(currentPage) ?? 0;
-    const nextRotation = normalizePageRotation(previousRotation + delta);
-    const deltaRotation = normalizePageRotation(nextRotation - previousRotation);
-
-    recordUndoState();
-    runtime.pageRotations.set(currentPage, nextRotation);
-    if (nextRotation === 0) runtime.pageRotations.delete(currentPage);
-
-    const rendered = await renderPage(currentPage);
-    if (!rendered) {
-      if (previousRotation === 0) runtime.pageRotations.delete(currentPage);
-      else runtime.pageRotations.set(currentPage, previousRotation);
+    if (!runtime.pdfDoc || !currentPage || busy || rotationBusyRef.current) return;
+    rotationBusyRef.current = true;
+    setBusy(true);
+    setRotationMenuOpen(false);
+    const snapshot = takeEditorSnapshot();
+    const pages = allPages ? Array.from({ length: runtime.pageCount }, (_, i) => i + 1) : [currentPage];
+    try {
+      // Resolve all dimensions before changing anything; /Rotate and mixed page sizes are respected.
+      const dimensions = [];
+      for (const number of pages) {
+        const page = await runtime.pdfDoc.getPage(number);
+        const rotation = normalizePageRotation(page.rotate + (runtime.pageRotations.get(number) ?? 0));
+        const viewport = page.getViewport({ scale: 1, rotation });
+        const scale = Math.max(1.4, Math.min(3.2, 3800 / Math.max(viewport.width, viewport.height)));
+        dimensions.push({ number, width: Math.round(viewport.width * scale), height: Math.round(viewport.height * scale) });
+      }
+      if (runtimeRef.current !== runtime) return;
+      for (const { number, width, height } of dimensions) {
+        runtime.pageRotations.set(number, normalizePageRotation((runtime.pageRotations.get(number) ?? 0) + delta));
+        rotateCurrentPageGeometry(number, width, height, height, width, normalizePageRotation(delta));
+      }
+      if (!await renderPage(currentPage)) throw new Error("Rendering rotazione non riuscito");
+      runtime.undoStack.push(snapshot);
+      if (runtime.undoStack.length > 40) runtime.undoStack.shift();
+      runtime.redoStack = [];
+      redrawMasks();
+      markDirty();
+      setStatus(allPages ? `Ruotate ${pages.length} pagine a destra` : delta > 0 ? "Pagina ruotata a destra" : "Pagina ruotata a sinistra");
+      bumpRevision();
+    } catch (error) {
+      console.error(error);
+      if (runtimeRef.current === runtime) restoreEditorSnapshot(snapshot);
       setStatus("Rotazione non riuscita");
-      return;
+    } finally {
+      rotationBusyRef.current = false;
+      setBusy(false);
     }
-
-    const newWidth = pdfCanvasRef.current?.width ?? 0;
-    const newHeight = pdfCanvasRef.current?.height ?? 0;
-    rotateCurrentPageGeometry(currentPage, oldWidth, oldHeight, newWidth, newHeight, deltaRotation);
-    redrawMasks();
-    markDirty();
-    setStatus(delta > 0 ? "Pagina ruotata a destra" : "Pagina ruotata a sinistra");
-    bumpRevision();
   }
 
   function toggleToolSection(section: ToolSectionId) {
@@ -9143,11 +9225,33 @@ export default function PlanimetriaEditor({
                   <button className="icon-button" title="Adatta alla vista" disabled={!hasPdf} onClick={fitPageToViewport}>
                     <Maximize2 size={17} />
                   </button>
+                  <div className="canvas-rotation-control" onBlur={event => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) setRotationMenuOpen(false);
+                  }} onKeyDown={event => { if (event.key === "Escape") setRotationMenuOpen(false); }}>
+                    <button type="button" className="rotation-main" disabled={!hasPdf || busy}
+                      aria-label="Ruota pagina a destra" title={withShortcut("Ruota pagina di 90° a destra", SHORTCUTS.rotateRight)}
+                      onClick={() => void rotateCurrentPage(90)}>
+                      <RotateCw size={17} /><span>Ruota</span><small>{currentPageRotation}°</small>
+                    </button>
+                    <button type="button" className="rotation-options" disabled={!hasPdf || busy}
+                      aria-label="Opzioni rotazione" aria-haspopup="menu" aria-expanded={rotationMenuOpen}
+                      onClick={() => setRotationMenuOpen(open => !open)}><ChevronDown size={14} /></button>
+                    {rotationMenuOpen && <div className="rotation-menu" role="menu" aria-label="Rotazione PDF">
+                      <button type="button" role="menuitem" disabled={pageCount < 2}
+                        onClick={() => void rotateCurrentPage(90, true)}>Ruota tutto il file di 90° a destra ({pageCount} pagine)</button>
+                      <button type="button" role="menuitem" onClick={() => void rotateCurrentPage(-90)}>Ruota solo questa pagina a sinistra</button>
+                      {!valuationGroup && <button type="button" role="menuitem" disabled={scaleExtractionBusy}
+                        onClick={() => { setRotationMenuOpen(false); const data = runtimeRef.current.pdfData;
+                          if (data) void triggerScaleExtraction(data.slice(0), runtimeRef.current.fileName, false, true); }}>
+                        Riprova orientamento automatico OCR
+                      </button>}
+                    </div>}
+                  </div>
                   <div className="canvas-view-menu">
                     <button
                       className={`icon-button ${opacityDockOpen ? "active" : ""}`}
-                      title="Rotazione e opacità"
-                      aria-label="Rotazione e opacità"
+                      title="Opacità aree"
+                      aria-label="Opacità aree"
                       aria-expanded={opacityDockOpen}
                       onClick={() => setOpacityDockOpen((open) => !open)}
                     >
@@ -9155,25 +9259,6 @@ export default function PlanimetriaEditor({
                     </button>
                     {opacityDockOpen && (
                       <div className="canvas-view-popover">
-                        <div>
-                          <button
-                            className="icon-button"
-                            title={withShortcut(`Ruota a sinistra (${currentPageRotation} gradi)`, SHORTCUTS.rotateLeft)}
-                            disabled={!hasPdf || busy}
-                            onClick={() => void rotateCurrentPage(-90)}
-                          >
-                            <RotateCcw size={17} />
-                          </button>
-                          <button
-                            className="icon-button"
-                            title={withShortcut(`Ruota a destra (${currentPageRotation} gradi)`, SHORTCUTS.rotateRight)}
-                            disabled={!hasPdf || busy}
-                            onClick={() => void rotateCurrentPage(90)}
-                          >
-                            <RotateCw size={17} />
-                          </button>
-                          <span>Rotazione {currentPageRotation}°</span>
-                        </div>
                         <label>
                           <span>Opacità {opacityPercent}%</span>
                           <input

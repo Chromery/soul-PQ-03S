@@ -33,7 +33,7 @@ test("search shortcut stays on one line and focuses search across viewport sizes
       await page.keyboard.press("Meta+k");
       await expect(search).toBeFocused();
     }
-  await expect(page.getByLabel("Versione deploy 1.0.7")).toBeVisible();
+  await expect(page.getByLabel("Versione deploy 1.0.8")).toBeVisible();
   } finally {
     await clerk.signOut({ page });
   }

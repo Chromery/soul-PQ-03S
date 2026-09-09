@@ -6391,6 +6391,17 @@ button.activity-item {
   position: relative;
 }
 
+.canvas-rotation-control { position: relative; display: inline-flex; flex-shrink: 0; border: 1px solid #d4e1ee; border-radius: 8px; background: #fff; }
+.canvas-rotation-control > button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 9px; border: 0; background: transparent; color: #254866; cursor: pointer; }
+.canvas-rotation-control .rotation-options { border-left: 1px solid #d4e1ee; padding: 6px; }
+.canvas-rotation-control > button:hover { background: #edf5fc; }
+.canvas-rotation-control button:disabled { opacity: .45; cursor: default; }
+.canvas-rotation-control button:focus-visible { outline: 2px solid #1673b8; outline-offset: 2px; }
+.rotation-main small { font-variant-numeric: tabular-nums; color: #60778c; }
+.rotation-menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: min(310px, 80vw); padding: 6px; border: 1px solid #d4e1ee; border-radius: 10px; background: white; box-shadow: 0 12px 30px #163c6326; }
+.rotation-menu button { display: block; width: 100%; border: 0; border-radius: 6px; padding: 10px; background: transparent; text-align: left; color: #254866; cursor: pointer; font: inherit; font-size: 12px; }
+.rotation-menu button:hover { background: #edf5fc; }
+
 .canvas-view-menu > .icon-button.active {
   color: var(--primary);
   border-color: #b8d7ff;
