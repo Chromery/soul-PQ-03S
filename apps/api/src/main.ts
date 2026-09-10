@@ -4,6 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
 import { json, urlencoded } from "express";
 import { AppModule } from "./app.module.js";
+import { ErpAuditService } from "./erp-sync/erp-audit.service.js";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
@@ -12,8 +13,11 @@ async function bootstrap() {
   const origins = configuredOrigins.split(",").map((origin) => origin.trim());
 
   app.setGlobalPrefix("api");
-  app.use(json({ limit: "60mb" }));
-  app.use(urlencoded({ extended: true, limit: "60mb" }));
+  const erpAudit = app.get(ErpAuditService);
+  app.use(erpAudit.track);
+  app.use(json({ limit: "60mb", verify: erpAudit.recordRaw }));
+  app.use(urlencoded({ extended: true, limit: "60mb", verify: erpAudit.recordRaw }));
+  app.use(erpAudit.capture);
   app.enableCors({ origin: origins, credentials: true, preflightContinue: true });
   app.useGlobalPipes(
     new ValidationPipe({

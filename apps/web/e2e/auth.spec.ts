@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { clerk } from "@clerk/testing/playwright";
 
 test("anonymous API requests cannot read studies or documents", async ({ request }) => {
-  for (const endpoint of ["/api/studies", "/api/activities", "/api/system/status", "/api/properties/320129/documents/planimetria/download"]) {
+  for (const endpoint of ["/api/studies", "/api/activities", "/api/system/status", "/api/system/erp-audit", "/api/properties/320129/documents/planimetria/download"]) {
     expect((await request.get(endpoint)).status()).toBe(401);
   }
   expect((await request.get("/api/integrations/erp/v1/studi/modifiche")).status()).toBe(401);
@@ -31,6 +31,8 @@ test("staging operator signs in, retains welcome preference and cannot administe
   await expect(page.getByLabel("Operatore corrente")).toBeVisible();
   await expect(welcome).not.toBeVisible();
   expect(await page.evaluate(async () => (await fetch("/api/system/status")).status)).toBe(403);
+  expect(await page.evaluate(async () => (await fetch("/api/system/erp-audit")).status)).toBe(403);
+  expect(await page.evaluate(async () => (await fetch("/api/system/erp-audit/00000000-0000-4000-8000-000000000000")).status)).toBe(403);
   expect(await page.evaluate(async () => (await fetch("/api/system/backups", { method: "POST" })).status)).toBe(403);
   await clerk.signOut({ page });
   await expect(page.getByLabel("Operatore corrente")).not.toBeVisible();

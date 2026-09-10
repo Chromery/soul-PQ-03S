@@ -70,6 +70,7 @@ services:
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
       S3_KEY_PREFIX: ${S3_KEY_PREFIX:-erp}
       BACKUP_DIR: /backups/postgres
+      ERP_AUDIT_DIR: /var/lib/soul-pq/erp-audit
       BACKUP_TZ: ${BACKUP_TZ:-Europe/Rome}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
       BACKUP_TIME_LOCAL: ${BACKUP_TIME_LOCAL:-03:00}
@@ -97,6 +98,7 @@ services:
     volumes:
       - ./backups/postgres:/backups/postgres
       - imu_delibere_cache:/var/lib/soul-pq/imu-delibere
+      - erp_audit_logs:/var/lib/soul-pq/erp-audit
     healthcheck:
       test:
         [
@@ -128,3 +130,4 @@ services:
 volumes:
   postgres_data:
   imu_delibere_cache:
+  erp_audit_logs:

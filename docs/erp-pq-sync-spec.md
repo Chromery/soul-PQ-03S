@@ -2,6 +2,11 @@
 
 Versione: `v1.4` (estensione retrocompatibile del path `/v1`)
 
+Dalla release PQ `1.1.1`, le API ERP restituiscono anche l'header `X-PQ-Request-Id`:
+conservarlo nei log ERP e comunicarlo quando si segnala un errore. Il contratto JSON non cambia.
+PQ conserva per 10 giorni richiesta JSON sanificata e risultato, escludendo allegati binari e credenziali.
+Dettagli, limiti e accesso amministrativo: [Tracking ERP](erp-audit.md).
+
 Questo documento definisce il contratto minimo di integrazione tra ERP Soul e Soul Prospect Qualifier (`PQ`).
 
 PQ espone API server-to-server chiamate dall'ERP. L'autenticazione utenti interni resta separata e verra gestita con Clerk; questa integrazione usa credenziali machine-to-machine.

@@ -9,6 +9,8 @@ import { VisuraExtractionModule } from "../visura-extraction/visura-extraction.m
 import { DocumentStorageService } from "./document-storage.service.js";
 import { ErpSyncController } from "./erp-sync.controller.js";
 import { ErpSyncService } from "./erp-sync.service.js";
+import { ErpAuditService } from "./erp-audit.service.js";
+import { ErpAuditController } from "./erp-audit.controller.js";
 
 @Module({
   imports: [
@@ -20,7 +22,7 @@ import { ErpSyncService } from "./erp-sync.service.js";
     ScaleExtractionModule,
     VisuraExtractionModule,
   ],
-  controllers: [ErpSyncController],
-  providers: [DocumentStorageService, ErpSyncService],
+  controllers: [ErpSyncController, ErpAuditController],
+  providers: [DocumentStorageService, ErpSyncService, ErpAuditService],
 })
 export class ErpSyncModule {}
