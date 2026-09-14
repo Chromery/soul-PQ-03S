@@ -5,8 +5,10 @@ test("study optimization matches presentation totals, signs, edits and responsiv
   const properties = [
     { id: "E2E-OPT-1", address: "Via campione 1", currentRendita: 1000.12, estimatedRendita: 800.10 },
     { id: "E2E-OPT-2", address: "Via campione 2", currentRendita: 500.33, estimatedRendita: 550.40 },
+    ...["Negativo", "Neutro", "Sospeso"].map(outcome => ({ id: outcome, outcome,
+      address: `Via ${outcome}`, currentRendita: 90000, estimatedRendita: 0 })),
   ].map(property => ({ ...property, comune: "Milano", provincia: "MI", categoria: "D/7", foglio: "1", particella: "2", subalterno: "3",
-    diffPercent: 0, imuDiff: 0, outcome: "Da verificare", hasStudy: true, notes: "", documents: {}, priceLists: [] }));
+    diffPercent: 0, imuDiff: 0, outcome: "outcome" in property ? property.outcome : "Positivo", hasStudy: true, notes: "", documents: {}, priceLists: [] }));
   const study = { id: "E2E-OPT-STUDY", company: "Test ottimizzazione", vat: "", comune: "Milano", provincia: "MI", region: "Lombardia",
     status: "Aperta", createdAt: "2026-09-07", importedAt: "2026-09-07", deadline: "2026-12-31", diffRendita: -149.95,
     diffImu: 0, originalRendita: 1500.45, totalRendita: 1350.50, catDRendita: 1500.45, commercialOwner: "", technicalOwner: "Test",
@@ -34,7 +36,7 @@ test("study optimization matches presentation totals, signs, edits and responsiv
   await page.goto(`/studi/${study.id}`);
   const card = page.locator(".detail-metric").filter({ has: page.getByText("Valore ottimizzazione", { exact: true }) });
   const value = card.locator(":scope > strong");
-  const preview = page.getByLabel("Totali anteprima presentazione").locator(".summary-stat").filter({ hasText: "Differenza rendita" }).locator("strong");
+  const preview = page.getByLabel("Totali anteprima presentazione").locator(".summary-stat").filter({ hasText: "Valore ottimizzazione" }).locator("strong");
   await expect(value).toHaveText("149,95 €");
   await expect(preview).toHaveText(await value.innerText());
   await expect(page.locator(".detail-metrics .detail-metric")).toHaveCount(5);
@@ -44,6 +46,8 @@ test("study optimization matches presentation totals, signs, edits and responsiv
     expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   }
   await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole("textbox", { name: "Rendita catastale attribuibile per Via Negativo", exact: true }).fill("");
+  await expect(value).toHaveText("149,95 €");
   const estimated = page.getByRole("textbox", { name: "Rendita catastale attribuibile per Via campione 1", exact: true });
   await estimated.fill("1000,12");
   await expect(value).toHaveText("-50,07 €");
@@ -59,4 +63,7 @@ test("study optimization matches presentation totals, signs, edits and responsiv
   // No financial/editor values are saved by the presentation-only overrides.
   expect(study.totalRendita).toBe(1350.50);
   expect(unexpectedWrites).toEqual([]);
+  for (const property of properties) property.outcome = "Neutro";
+  await page.reload();
+  await expect(value).toHaveText("0,00 €");
 });

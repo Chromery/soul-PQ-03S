@@ -173,3 +173,23 @@ test("il pull ERP omette la presentazione quando non esiste una v3 manuale", asy
   assert.equal(response.totale, 1);
   assert.equal(Object.hasOwn(response.studi[0] ?? {}, "presentazione"), false);
 });
+
+test("il pull esporta ottimizzazione solo positivi e include le modifiche alle bozze nel cursore", async () => {
+  const fixture = serviceFixture(false);
+  const study = { ...studyFixture(false), presentationDraft: {
+    updatedAt: presentationCreatedAt, overrides: { "IMM-1:renditaAttribuibile": "750,25" },
+  } };
+  study.properties.push(...["Negativo", "Sospeso", "Neutro"].map(outcome => ({
+    ...propertyFixture(), id: outcome, outcome, currentRendita: 9000, estimatedRendita: 100,
+  })));
+  (fixture.service as any).prisma.feasibilityStudy.findMany = async () => [study];
+  const result = await fixture.service.listModifiedStudies("2026-09-01T00:00:00.000Z");
+  assert.equal(result.totale, 1);
+  assert.equal(result.studi[0].metriche.valore_ottimizzazione, "249.75");
+  assert.equal(result.studi[0].metriche.differenza_rendita, "-200.00");
+  assert.equal(result.studi[0].modificato_il, presentationCreatedAt.toISOString());
+  study.presentationDraft.overrides["IMM-1:renditaAttribuibile"] = "";
+  assert.equal((await fixture.service.listModifiedStudies()).studi[0].metriche.valore_ottimizzazione, null);
+  study.properties[0].outcome = "Sospeso";
+  assert.equal((await fixture.service.listModifiedStudies()).studi[0].metriche.valore_ottimizzazione, "0.00");
+});

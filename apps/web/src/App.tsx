@@ -79,7 +79,7 @@ import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperi
 import { CurrentOperator, useIdentity } from "./Auth";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.1";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.2";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -5330,6 +5330,10 @@ function SettingsPage({ appVersion, onNotice }: { appVersion: string; onNotice: 
             <SettingsValue label="Stato letto" value={systemStatus ? formatDateTime(systemStatus.generatedAt) : "Caricamento"} />
           </div>
           <div className="settings-inline-actions">
+            <a className="button secondary compact-button" href={`${API_BASE_URL}/system/erp-openapi`} download>
+              <Download size={15} />
+              Scarica Swagger ERP
+            </a>
             <a className="button secondary compact-button" href="/formaps-open/" target="_blank" rel="noreferrer">
               <ExternalLink size={15} />
               Helper forMaps
@@ -6689,6 +6693,19 @@ function presentationDraftTotals(draft: PresentationDraft) {
   return { ...totals, renditaDifference: totals.renditaAttuale - totals.renditaAttribuibile };
 }
 
+function presentationOptimizationValue(draft: PresentationDraft, sourceProperties: readonly Pick<PropertyItem, "id" | "outcome">[]): number | null {
+  const positives = new Set(sourceProperties.filter(property => property.outcome === "Positivo").map(property => property.id));
+  let cents = 0;
+  for (const property of draft.properties) {
+    if (!positives.has(property.id)) continue;
+    const current = presentationMoneyToCents(property.renditaAttuale, true);
+    const estimated = presentationMoneyToCents(property.renditaAttribuibile, true);
+    if (current === undefined || estimated === undefined) return null;
+    cents += Math.round(current * 100) - Math.round(estimated * 100);
+  }
+  return cents / 100;
+}
+
 function mergePresentationDraft(baseline: PresentationDraft, overrides: Record<string, string>): PresentationDraft {
   return { clientName: overrides.clientName ?? baseline.clientName, properties: baseline.properties.map(property =>
     PRESENTATION_PROPERTY_FIELDS.reduce((result, field) => ({ ...result,
@@ -6782,6 +6799,7 @@ function PresentationAction({
   const selectedPayloads = selectedDrafts
     .map(presentationPropertyPayload)
     .filter((property): property is PresentationPropertyPayload => Boolean(property));
+  const selectedOptimization = presentationOptimizationValue({ ...draft, properties: selectedDrafts }, study.properties);
   const selectionHasInvalidData = selectedPayloads.length !== selectedPropertyIds.length || !draft.clientName.trim();
   const selectionColumns: Array<{ key: PresentationPropertyField | "outcome"; label: string }> = [
     { key: "outcome", label: "Esito" }, { key: "societa", label: "Società" }, { key: "comune", label: "Comune" },
@@ -7053,6 +7071,7 @@ function PresentationAction({
 
             <div className="presentation-selection-toolbar">
               <strong>{selectedPropertyIds.length}/{study.properties.length} selezionati</strong>
+              <span>Valore ottimizzazione (solo positivi): {selectedOptimization === null ? "n.d." : formatEuro(selectedOptimization)}</span>
               <div>
                 <button type="button" onClick={() => setSelectedPropertyIds(study.properties.map((property) => property.id))}>Tutti</button>
                 <button type="button" onClick={() => setSelectedPropertyIds(study.properties.filter((property) => property.outcome === "Positivo").map((property) => property.id))}>Solo positivi</button>
@@ -7228,7 +7247,7 @@ function PresentationDataPreview({
     return sort.direction === "asc" ? comparison : -comparison;
   });
   const totals = presentationDraftTotals(draft);
-  const renditaDifference = totals.renditaDifference;
+  const optimization = presentationOptimizationValue(draft, sourceProperties);
   const imuDifference = totals.imuAttuale - totals.imuOttenibile;
 
   function moneyInput(
@@ -7357,7 +7376,7 @@ function PresentationDataPreview({
       <div className="presentation-preview-totals" aria-label="Totali anteprima presentazione">
         <SummaryStat label="Rendita attuale" value={formatEuro(totals.renditaAttuale)} />
         <SummaryStat label="Rendita attribuibile" value={formatEuro(totals.renditaAttribuibile)} />
-        <SummaryStat label="Differenza rendita" value={formatEuro(renditaDifference)} />
+        <SummaryStat label="Valore ottimizzazione (solo positivi)" value={optimization === null ? "n.d." : formatEuro(optimization)} />
         <SummaryStat
           label="IMU attuale"
           value={totals.imuComplete > 0 ? formatEuro(totals.imuAttuale) : "n.d."}
@@ -7603,7 +7622,7 @@ function StudyDetail({
     updatePresentationPropertyField, resetPresentationPropertyField, resetPresentationDraft } = usePersistentPresentationDraft(
     `/studies/${encodeURIComponent(study.id)}/presentations`, presentationBaseline, study.properties, onNotice);
   const propertyTableColumns = useTableColumns("soul-table-study-properties-v1", PROPERTY_TABLE_COLUMNS);
-  const presentationTotals = useMemo(() => presentationDraftTotals(presentationDraft), [presentationDraft]);
+  const optimization = useMemo(() => presentationOptimizationValue(presentationDraft, study.properties), [presentationDraft, study.properties]);
   const visiblePropertyColumnIds = useMemo(
     () => new Set<PropertyTableColumnId>(propertyTableColumns.visibleColumns.map((column) => column.id)),
     [propertyTableColumns.visibleColumns],
@@ -8410,10 +8429,10 @@ function StudyDetail({
         <DetailMetric
           icon={<CircleDollarSign size={22} />}
           label="Valore ottimizzazione"
-          value={presentationTotals.invalid > 0 ? "n.d." : formatEuro(presentationTotals.renditaDifference)}
-          positive={presentationTotals.renditaDifference >= 0}
-          supplementaryLabel="Dati presentazione"
-          supplementaryValue={presentationTotals.invalid > 0 ? "Da completare" : "R.C. attuale − attribuibile"}
+          value={optimization === null ? "n.d." : formatEuro(optimization)}
+          positive={optimization !== null && optimization >= 0}
+          supplementaryLabel="Solo immobili positivi · Dati presentazione"
+          supplementaryValue={optimization === null ? "Da completare" : "R.C. attuale − attribuibile"}
         />
       </section>
 

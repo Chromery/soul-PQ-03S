@@ -18,6 +18,7 @@ function studyFixture() {
     properties: [
       {
         id: "immobile-1",
+        outcome: "Positivo",
         comune: "Merano",
         provincia: "BZ",
         address: "Via Roma 10",
@@ -81,6 +82,7 @@ function serviceFixture(options: { humanReadableAddress?: string | null; normali
   );
   return {
     service,
+    study,
     snapshot: () => capturedSnapshot,
     fileName: () => capturedFileName,
     addressWrites,
@@ -124,6 +126,7 @@ test("la presentazione v3 usa lo snapshot dinamico ed è disponibile soltanto in
   const snapshot = fixture.snapshot();
   assert.ok(snapshot);
   assert.equal(snapshot.version, 3);
+  assert.equal(snapshot.optimizationValue, 246.92);
   assert.equal(summary.version, 3);
   assert.match(
     fixture.fileName(),
@@ -132,6 +135,24 @@ test("la presentazione v3 usa lo snapshot dinamico ed è disponibile soltanto in
   assert.equal(summary.htmlUrl, null);
   assert.equal(summary.htmlDownloadUrl, null);
   assert.equal(summary.pdfUrl, "/api/presentations/deck-1/pdf");
+});
+
+test("v3 congela ottimizzazione ed esiti server: altri esiti esclusi anche se selezionati", async () => {
+  const fixture = serviceFixture();
+  fixture.study.properties.push(...["Negativo", "Neutro", "Sospeso"].map(outcome => ({
+    ...fixture.study.properties[0], id: outcome, outcome, currentRendita: 99000, estimatedRendita: 0,
+  })));
+  const input = { id: "immobile-1", outcome: "Negativo", societa: "Cliente", comune: "Merano", indirizzo: "Via Roma 10",
+    foglioParticellaSub: "Fg. 1", categoria: "D/7", renditaAttuale: 1000.12, renditaAttribuibile: 800.10,
+    imuAttuale: null, imuOttenibile: null };
+  await fixture.service.createV3("studio-1", fixture.study.properties.map(p => p.id), [input]);
+  assert.equal(fixture.snapshot()?.immobili.length, 4);
+  assert.equal(fixture.snapshot()?.immobili[0].outcome, "Positivo");
+  assert.equal(fixture.snapshot()?.optimizationValue, 200.02);
+  fixture.study.properties[0].outcome = "Negativo";
+  assert.equal(fixture.snapshot()?.optimizationValue, 200.02);
+  await fixture.service.createV3("studio-1", fixture.study.properties.map(p => p.id));
+  assert.equal(fixture.snapshot()?.optimizationValue, 0);
 });
 
 test("la generazione PDF normalizza, salva e sostituisce l'indirizzo ERP non modificato", async () => {

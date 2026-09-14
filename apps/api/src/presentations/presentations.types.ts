@@ -1,5 +1,6 @@
 export type PresentationPropertySnapshot = {
   id: string;
+  outcome?: string;
   societa: string;
   comune: string;
   indirizzo: string;
@@ -26,6 +27,8 @@ export type PresentationSnapshot = {
     technicalOwner: string;
   };
   immobili: PresentationPropertySnapshot[];
+  // Absent on historical decks: do not reinterpret their original totals.
+  optimizationValue?: number;
 };
 
 export type PresentationSummary = {

@@ -12,7 +12,7 @@ test("v3 summary uses signed rent variation and asset label, preserving table am
   const config = { get: (_key: string, fallback: unknown) => fallback };
   const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, args: ["--no-sandbox"] });
   const page = await browser.newPage({ viewport: { width: 1400, height: 990 } });
-  const snapshot = { version: 3, generatedAt: "2026-09-09T18:00:00Z",
+  const snapshot = { version: 3, optimizationValue: undefined as number | undefined, generatedAt: "2026-09-09T18:00:00Z",
     studio: { id: "VISUAL-TEST", company: "Società campione", vat: "", comune: "Monza", provincia: "MI", commercialOwner: "", technicalOwner: "" },
     immobili: [{ id: "VISUAL-PROPERTY", societa: "Società campione", comune: "Monza (MI)", indirizzo: "Via campione 110",
       foglioParticellaSub: "Fg. 35 - Part. 67 - Sub. 711", categoria: "D/7", renditaAttuale: 715396.02,
@@ -49,6 +49,25 @@ test("v3 summary uses signed rent variation and asset label, preserving table am
       if (process.env.PQ_SUMMARY_REVIEW_DIR) await page.locator("#slide-5").screenshot({ path: path.join(process.env.PQ_SUMMARY_REVIEW_DIR, `${name}.png`) });
     }
     snapshot.version = 3; snapshot.immobili[0].renditaAttribuibile = 595187.01;
+    for (const [amount, expected, className] of [[200.02, "−200,02", "good"], [0, "0,00", ""], [-50.07, "+50,07", "bad"]] as const) {
+      snapshot.optimizationValue = amount;
+      await page.goto("about:blank");
+      await page.setContent(await (service as any).renderSnapshot(snapshot), { waitUntil: "load" });
+      await page.waitForSelector("#assets-ready", { state: "attached" });
+      assert.ok((await page.locator("#rent-difference").innerText()).startsWith(expected));
+      assert.equal(await page.locator("#rent-difference").getAttribute("class") ?? "", className);
+      assert.equal(await page.locator("#rent-difference").locator("..").locator("small").innerText(), "VALORE OTTIMIZZAZIONE · SOLO POSITIVI");
+      assert.ok((await page.locator("#property-totals td").nth(3).innerText()).startsWith("120.209,01"));
+      assert.ok(await page.locator("#rent-difference").locator("..").evaluate(el => el.scrollHeight <= el.clientHeight + 1));
+    }
+    snapshot.optimizationValue = 200.02;
+    if (process.env.PQ_SUMMARY_REVIEW_DIR) {
+      await page.goto("about:blank");
+      await page.setContent(await (service as any).renderSnapshot(snapshot), { waitUntil: "load" });
+      await page.waitForSelector("#assets-ready", { state: "attached" });
+      await page.evaluate(() => document.documentElement.classList.add("export-mode"));
+      await page.locator("#slide-5").screenshot({ path: path.join(process.env.PQ_SUMMARY_REVIEW_DIR, "optimization.png") });
+    }
     const result = await service.renderV3Pdf(deck.id);
     assert.equal((await PDFDocument.load(result.pdf)).getPageCount(), 6);
     if (process.env.PQ_SUMMARY_REVIEW_DIR) await writeFile(path.join(process.env.PQ_SUMMARY_REVIEW_DIR, "v3-summary.pdf"), result.pdf);

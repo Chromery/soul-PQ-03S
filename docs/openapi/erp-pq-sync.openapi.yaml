@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Soul Prospect Qualifier - ERP/PQ Sync API
-  version: 1.4.0
+  version: 1.5.0
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -9,6 +9,11 @@ info:
     API server-to-server esposte da Soul Prospect Qualifier per sincronizzare gli
     studi di fattibilita dall'ERP e permettere all'ERP di leggere le modifiche
     successive prodotte in PQ.
+
+    La v1.5 (PQ 1.1.2) aggiunge `metriche.valore_ottimizzazione` nel pull:
+    somma delle rendite attuali meno attribuibili dei soli immobili con esito Positivo,
+    incluse le modifiche alle rendite nella bozza dello studio. Non cambia `differenza_rendita`.
+    Le modifiche della bozza aggiornano il timestamp considerato dal pull incrementale.
 
     La v1.4 estende in modo retrocompatibile lo stesso endpoint v1 con gli esiti
     studio allineati all'ERP e l'aggiornamento automatico di `data_esito` a ogni
@@ -34,6 +39,28 @@ tags:
   - name: ERP Sync
     description: Sincronizzazione dati ERP/PQ
 paths:
+  /system/erp-openapi:
+    servers:
+      - url: /api
+    get:
+      tags: [Documentazione]
+      operationId: downloadErpOpenapi
+      summary: Scarica lo Swagger OpenAPI corrente (solo amministratori PQ)
+      description: Richiede login Clerk amministratore; il token tecnico ERP non abilita il download. Risposta attachment con Cache-Control no-store.
+      security:
+        - clerkSession: []
+        - clerkBearer: []
+      responses:
+        "200":
+          description: Documento OpenAPI YAML della versione online
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "401":
+          description: Login PQ richiesto
+        "403":
+          description: Ruolo amministratore richiesto
   /studi/sync:
     post:
       tags:
@@ -869,6 +896,20 @@ components:
     MetricheStudioOutput:
       type: object
       properties:
+        valore_ottimizzazione:
+          type: [string, "null"]
+          readOnly: true
+          description: |
+            Euro con due decimali: somma (rendita attuale - attribuibile) dei soli
+            immobili con esito esattamente Positivo. Usa le stime effettive PQ e,
+            se presenti, gli override delle rendite salvati nella bozza dello studio.
+            Negativi, Neutri e Sospesi esclusi, anche se hanno un risparmio numerico.
+            Zero se nessun positivo; null se una rendita dei positivi non è valida.
+            Positivo per riduzione, negativo per aumento; non è una percentuale.
+            La presentazione v3 applica la stessa formula ai positivi selezionati,
+            congelando importi/esiti alla generazione. Il PDF mostra la riduzione
+            con meno e verde; le bozze di gruppo restano indipendenti da quelle studio.
+          examples: ["200.02", "0.00", null]
         rendita_originale_totale:
           type: string
         rendita_proposta_totale:

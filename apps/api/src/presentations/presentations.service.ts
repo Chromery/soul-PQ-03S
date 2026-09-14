@@ -13,6 +13,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { StudiesService } from "../studies/studies.service.js";
 import { personalizeV3Cover } from "./v3-cover.js";
 import { mergeDraftChanges, validateDraftChanges } from "./presentation-draft.js";
+import { optimizationValue } from "./optimization-value.js";
 import type {
   PresentationPropertyInput,
   PresentationSnapshot,
@@ -222,6 +223,7 @@ export class PresentationsService implements OnModuleDestroy {
       }
       return {
         id: property.id,
+        ...(version === 3 ? { outcome: property.outcome } : {}),
         societa: normalizePresentationText(input?.societa, study.company),
         comune: presentationMunicipality(
           normalizePresentationText(input?.comune, property.comune || study.comune),
@@ -258,6 +260,10 @@ export class PresentationsService implements OnModuleDestroy {
         company: clientName,
       },
       immobili: snapshotProperties,
+      ...(version === 3 ? { optimizationValue: optimizationValue(snapshotProperties.map(property => ({
+        id: property.id, outcome: property.outcome,
+        currentRendita: property.renditaAttuale, estimatedRendita: property.renditaAttribuibile,
+      }))) ?? 0 } : {}),
     };
     const fileName = presentationFileName(snapshot.studio.company, generatedAt, version);
     const deck = await this.prisma.presentationDeck.create({

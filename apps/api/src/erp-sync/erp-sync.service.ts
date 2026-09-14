@@ -28,6 +28,7 @@ import type { ImuCalculation } from "../imu/imu.types.js";
 import { PriceListsService } from "../price-lists/price-lists.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { estimatedRenditaFromAnalysisDraft } from "../rendita.js";
+import { optimizationValue } from "../presentations/optimization-value.js";
 import { ScaleExtractionService } from "../scale-extraction/scale-extraction.service.js";
 import {
   isTerminalStudyOutcome,
@@ -56,6 +57,7 @@ type ErpPresentationDeck = Pick<
 >;
 
 type StudyWithRelations = FeasibilityStudy & {
+  presentationDraft?: { overrides: unknown; updatedAt: Date } | null;
   properties: PropertyWithRelations[];
   versions: StudyVersion[];
   presentations: ErpPresentationDeck[];
@@ -176,6 +178,7 @@ export class ErpSyncService {
     const since = modifiedAfter ? parseDate(modifiedAfter, "modificati_dopo") : null;
     const studies = await this.prisma.feasibilityStudy.findMany({
       include: {
+        presentationDraft: true,
         properties: {
           include: {
             documents: true,
@@ -581,6 +584,7 @@ export class ErpSyncService {
     const presentation = latestErpPresentation(study);
     const modifiedAt = maxDate([
       study.updatedAt,
+      ...(study.presentationDraft ? [study.presentationDraft.updatedAt] : []),
       ...study.properties.map((property) => property.updatedAt),
       ...study.properties.flatMap((property) => property.documents.map((document) => document.updatedAt)),
       ...study.properties.flatMap((property) => (property.analysisDraft ? [property.analysisDraft.updatedAt] : [])),
@@ -633,6 +637,10 @@ export class ErpSyncService {
         rendita_originale_totale: decimalToString(study.originalRendita),
         rendita_proposta_totale: decimalToString(study.totalRendita),
         differenza_rendita: decimalToString(study.diffRendita),
+        valore_ottimizzazione: optimizationValue(calculatedProperties.map(({ property, estimatedRendita }) => ({
+          id: property.id, outcome: property.outcome,
+          currentRendita: Number(property.currentRendita), estimatedRendita,
+        })), (study.presentationDraft?.overrides ?? {}) as Record<string, unknown>)?.toFixed(2) ?? null,
         imu_attuale_totale: currentImuTotal.toFixed(2),
         imu_prevista_totale: estimatedImuTotal.toFixed(2),
         differenza_imu: (estimatedImuTotal - currentImuTotal).toFixed(2),

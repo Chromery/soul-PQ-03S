@@ -1,6 +1,17 @@
 # ERP/PQ Sync API Spec
 
-Versione: `v1.4` (estensione retrocompatibile del path `/v1`)
+Versione: `v1.5` (estensione retrocompatibile del path `/v1`, PQ 1.1.2)
+
+Il pull `GET /studi/modifiche` aggiunge `metriche.valore_ottimizzazione`: somma in
+euro delle rendite attuali meno attribuibili dei soli immobili Positivi, comprese
+le modifiche persistenti alle rendite nella bozza dello studio. Stringa con due
+decimali, `"0.00"` senza positivi, `null` per rendite dei positivi non valide.
+Il timestamp della bozza concorre a `modificato_il`. `differenza_rendita` non cambia.
+La formula è condivisa con le nuove presentazioni v3 sui positivi selezionati;
+le bozze di gruppo restano indipendenti. [Regole complete](study-optimization.md).
+
+Swagger aggiornato: [scarica da PQ](https://pq-soul.rainailab.com/api/system/erp-openapi),
+richiede login Clerk amministratore; disponibile anche dalle Impostazioni.
 
 Dalla release PQ `1.1.1`, le API ERP restituiscono anche l'header `X-PQ-Request-Id`:
 conservarlo nei log ERP e comunicarlo quando si segnala un errore. Il contratto JSON non cambia.
