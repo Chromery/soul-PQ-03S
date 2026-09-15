@@ -99,3 +99,16 @@ test("review action accepts only explicit accept or reject", () => {
   for (const action of ["accept", "reject"]) assert.equal(validateSync(Object.assign(new ReviewGroupingSuggestionDto(), { action })).length, 0);
   for (const action of [undefined, "delete", true, {}]) assert.ok(validateSync(Object.assign(new ReviewGroupingSuggestionDto(), { action })).length);
 });
+
+test("accepting a subset leaves excluded members ungrouped and validates membership", async () => {
+  const f = fixture(); f.properties.push(property("3"), property("4"));
+  const [suggestion] = (await f.service.list("study")).pending;
+  for (const ids of [["1"], ["1", "1"], ["1", "foreign"]]) {
+    await assert.rejects(f.service.review("study", suggestion.id, "accept", ids), /almeno due/);
+  }
+  await assert.rejects(f.service.review("study", suggestion.id, "reject", ["1", "2"]), /intero/);
+  await f.service.review("study", suggestion.id, "accept", ["1", "2"]);
+  assert.ok(f.properties.slice(0, 2).every(property => property.valuationGroupId === "new-group"));
+  assert.ok(f.properties.slice(2).every(property => property.valuationGroupId === null));
+  assert.deepEqual((await f.service.list("study")).pending[0].propertyIds, ["3", "4"]);
+});

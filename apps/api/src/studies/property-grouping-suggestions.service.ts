@@ -26,7 +26,7 @@ export class PropertyGroupingSuggestionsService {
       rejected: candidates.filter(item => rejectedAt.has(item.id)).map(item => ({ ...item, rejectedAt: rejectedAt.get(item.id) })) };
   }
 
-  async review(studyId: string, signature: string, action: "accept" | "reject") {
+  async review(studyId: string, signature: string, action: "accept" | "reject", propertyIds?: string[]) {
     if (!/^[a-f0-9]{64}$/.test(signature) || !["accept", "reject"].includes(action)) throw new BadRequestException("Suggerimento non valido");
     await this.prisma.$transaction(async tx => {
       // Serialize reviews for this study; conditional membership updates also
@@ -34,14 +34,18 @@ export class PropertyGroupingSuggestionsService {
       await tx.$queryRaw`SELECT id FROM "FeasibilityStudy" WHERE id = ${studyId} FOR UPDATE`;
       const suggestion = (await this.candidates(tx, studyId)).find(item => item.id === signature);
       if (!suggestion) throw new ConflictException("Il suggerimento è cambiato o è già stato accettato. Aggiorna la lista.");
+      const selected = propertyIds ?? suggestion.propertyIds;
+      if (action === "reject" && propertyIds !== undefined) throw new BadRequestException("Il rifiuto riguarda l'intero suggerimento");
+      if (!Array.isArray(selected) || selected.length < 2 || selected.length > 1000 || new Set(selected).size !== selected.length
+        || selected.some(id => !suggestion.propertyIds.includes(id))) throw new BadRequestException("Seleziona almeno due immobili del suggerimento");
       if (action === "reject") {
         await tx.propertyGroupingDismissal.upsert({ where: { studyId_signature: { studyId, signature } },
           create: { studyId, signature }, update: {} });
       } else {
         const group = await tx.propertyValuationGroup.create({ data: { studyId } });
-        const result = await tx.property.updateMany({ where: { studyId, id: { in: suggestion.propertyIds }, valuationGroupId: null },
+        const result = await tx.property.updateMany({ where: { studyId, id: { in: selected }, valuationGroupId: null },
           data: { valuationGroupId: group.id } });
-        if (result.count !== suggestion.propertyIds.length) throw new ConflictException("Alcuni immobili sono già raggruppati. Aggiorna la lista.");
+        if (result.count !== selected.length) throw new ConflictException("Alcuni immobili sono già raggruppati. Aggiorna la lista.");
         await tx.propertyGroupingDismissal.deleteMany({ where: { studyId, signature } });
       }
     });

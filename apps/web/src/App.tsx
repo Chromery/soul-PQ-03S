@@ -81,7 +81,7 @@ import { CurrentOperator, useIdentity } from "./Auth";
 import { PropertyGroupingSuggestions } from "./PropertyGroupingSuggestions";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.6";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.7";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -3341,6 +3341,26 @@ function App() {
     }
   }
 
+  async function changeGroupMembersForStudy(studyId: string, groupId: string, propertyIds: string[], action: "add" | "remove") {
+    try {
+      const url = `${API_BASE_URL}/studies/${encodeURIComponent(studyId)}/property-valuation-groups/${encodeURIComponent(groupId)}/members`;
+      const send = (resetValuation = false) => fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, propertyIds, resetValuation }) });
+      let response = await send();
+      let payload = await response.json();
+      if (response.status === 409 && payload.code === "GROUP_REVIEW_REQUIRED") {
+        if (!window.confirm(payload.message)) return false;
+        response = await send(true); payload = await response.json();
+      }
+      if (!response.ok) throw new Error(payload.message || "Impossibile modificare il gruppo");
+      const updatedStudy = payload as FeasibilityStudy;
+      setStudies(current => current.map(study => study.id === updatedStudy.id ? updatedStudy : study));
+      flash(action === "add" ? "Immobili aggiunti. Apri il nuovo editor complessivo per valutare il gruppo aggiornato."
+        : "Immobili rimossi dal gruppo. Gli immobili restano nello studio.");
+      return true;
+    } catch (error) { flash(error instanceof Error ? error.message : "Impossibile modificare il gruppo"); return false; }
+  }
+
   function updatePropertyDocument(
     propertyId: string,
     type: "planimetria" | "elenco_subalterni",
@@ -3697,7 +3717,8 @@ function App() {
           onReorder={(propertyIds) => reorderStudyProperties(activeStudy.id, propertyIds)}
           onCreateProperty={(form) => createPropertyForStudy(activeStudy.id, form)}
           onDeleteProperties={(propertyIds) => deletePropertiesFromStudy(activeStudy.id, propertyIds)}
-          onGroupProperties={(propertyIds) => groupPropertiesForStudy(activeStudy.id, propertyIds)}
+          onGroupProperties={(propertyIds, groupId) => groupId ? changeGroupMembersForStudy(activeStudy.id, groupId, propertyIds, "add") : groupPropertiesForStudy(activeStudy.id, propertyIds)}
+          onRemoveGroupMembers={(groupId, propertyIds) => changeGroupMembersForStudy(activeStudy.id, groupId, propertyIds, "remove")}
           onSuggestedGroupAccepted={(updatedStudy) => setStudies(current => current.map(study => study.id === updatedStudy.id ? updatedStudy : study))}
           onUngroupProperties={(groupId) => ungroupPropertiesForStudy(activeStudy.id, groupId)}
           onPropertyEstimateChange={updatePropertyEstimatedValue}
@@ -6890,7 +6911,7 @@ function PresentationAction({
   study,
   draft: sourceDraft,
   onNotice,
-  version = 1,
+  version = 3,
   endpointBase,
 }: {
   study: PresentationSource;
@@ -6902,7 +6923,7 @@ function PresentationAction({
   const isV2 = version === 2;
   const isV3 = version === 3;
   const actionLabel = isV3
-    ? "Generazione PDF v3"
+    ? "Generazione Presentazione"
     : isV2
       ? "Creazione presentazione v2"
       : "Genera presentazione";
@@ -6970,7 +6991,7 @@ function PresentationAction({
       const response = await fetch(`${API_BASE_URL}${presentationsEndpoint}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const decks: PresentationDeck[] = await response.json();
-      setHistory(Array.isArray(decks) ? decks : []);
+      setHistory(Array.isArray(decks) ? decks.filter(deck => deck.version === 3) : []);
       setLatestDeck(decks?.find(deck => (deck.version ?? 1) === version) ?? null);
     } catch { setHistoryError(true); }
     finally { setHistoryLoading(false); }
@@ -7158,13 +7179,13 @@ function PresentationAction({
 
       <button className="button secondary" type="button" onClick={() => {
         setHistoryOpen(true); setHistoryLimit(20); void loadHistory();
-      }}><History size={16} /> Storico presentazioni{version !== 3 ? ` · v${version}` : ""}</button>
+      }}><History size={16} /> Storico presentazioni</button>
 
       {historyOpen && <div className="modal-backdrop" onMouseDown={event => {
         if (event.target === event.currentTarget && !deletingId) setHistoryOpen(false);
       }}><section className="editor-modal presentation-history-modal" role="dialog" aria-modal="true" aria-label="Storico presentazioni"
         onKeyDown={event => { if (event.key === "Escape" && !deletingId) setHistoryOpen(false); }}>
-        <div className="modal-head"><div><h2>Storico presentazioni</h2><p>{study.company} · tutte le versioni</p></div>
+        <div className="modal-head"><div><h2>Storico presentazioni</h2><p>{study.company}</p></div>
           <button type="button" className="icon-button" disabled={!!deletingId} aria-label="Chiudi storico" onClick={() => setHistoryOpen(false)}><X size={16} /></button></div>
         <p className="modal-note">Ogni generazione conserva i dati di quel momento. Le modifiche alla bozza non cambiano le presentazioni già generate.</p>
         {historyLoading ? <p role="status">Caricamento storico…</p> : historyError ? <p role="alert">Impossibile caricare lo storico. <button type="button" onClick={() => void loadHistory()}>Riprova</button></p>
@@ -7195,7 +7216,7 @@ function PresentationAction({
             <div className="modal-head">
               <div>
                 <h2 id={`presentation-title-${study.id}`}>
-                  {isV3 ? "Generazione PDF v3" : isV2 ? "Creazione presentazione v2" : "Genera presentazione cliente"}
+                  {isV3 ? "Generazione Presentazione" : isV2 ? "Creazione presentazione v2" : "Genera presentazione cliente"}
                 </h2>
                 <p>{study.company} · {study.id}</p>
               </div>
@@ -7761,6 +7782,7 @@ function StudyDetail({
   onDeleteProperties,
   onGroupProperties,
   onSuggestedGroupAccepted,
+  onRemoveGroupMembers,
   onUngroupProperties,
   onPropertyEstimateChange,
   onNotesSave,
@@ -7777,7 +7799,8 @@ function StudyDetail({
   onReorder: (propertyIds: string[]) => Promise<boolean>;
   onCreateProperty: (form: NewPropertyFormState) => Promise<boolean>;
   onDeleteProperties: (propertyIds: string[]) => Promise<boolean>;
-  onGroupProperties: (propertyIds: string[]) => Promise<boolean>;
+  onGroupProperties: (propertyIds: string[], groupId?: string) => Promise<boolean>;
+  onRemoveGroupMembers: (groupId: string, propertyIds: string[]) => Promise<boolean>;
   onSuggestedGroupAccepted: (study: FeasibilityStudy) => void;
   onUngroupProperties: (groupId: string) => Promise<boolean>;
   onPropertyEstimateChange: (
@@ -7936,9 +7959,14 @@ function StudyDetail({
       (valuationGroups.get(groupId) ?? []).map((property) => property.id)
     ),
   ), [completeSelectedValuationGroupIds, valuationGroups]);
-  const canGroupSelectedProperties =
-    selectedProperties.length >= 2 &&
-    selectedProperties.every((property) => !property.valuationGroupId);
+  const addToGroupId = completeSelectedValuationGroupIds.length === 1
+    && selectedProperties.every(property => !property.valuationGroupId || property.valuationGroupId === completeSelectedValuationGroupIds[0])
+    && selectedProperties.some(property => !property.valuationGroupId) ? completeSelectedValuationGroupIds[0] : undefined;
+  const canGroupSelectedProperties = selectedProperties.length >= 2 &&
+    (selectedProperties.every(property => !property.valuationGroupId) || !!addToGroupId);
+  const removeFromGroupId = selectedProperties[0]?.valuationGroupId;
+  const canRemoveGroupMembers = !!removeFromGroupId && selectedProperties.every(property => property.valuationGroupId === removeFromGroupId)
+    && selectedProperties.length < (valuationGroups.get(removeFromGroupId)?.length ?? 0);
   const canUngroupSelectedProperties =
     completeSelectedValuationGroupIds.length === 1 &&
     selectedPropertyIds.length > 0 &&
@@ -8082,7 +8110,7 @@ function StudyDetail({
   async function handleGroupSelectedProperties() {
     if (!canGroupSelectedProperties || valuationGroupBusy) return;
     setValuationGroupBusy(true);
-    const success = await onGroupProperties(selectedProperties.map((property) => property.id));
+    const success = await onGroupProperties(selectedProperties.filter(property => !addToGroupId || !property.valuationGroupId).map(property => property.id), addToGroupId);
     setValuationGroupBusy(false);
     if (success) setSelectedPropertyIds([]);
   }
@@ -8097,6 +8125,16 @@ function StudyDetail({
       setSelectedPropertyIds([]);
       setExpandedValuationGroupIds((current) => current.filter((selectedGroupId) => selectedGroupId !== groupId));
     }
+  }
+
+  async function handleRemoveGroupMembers() {
+    if (!canRemoveGroupMembers || !removeFromGroupId || valuationGroupBusy) return;
+    const remaining = (valuationGroups.get(removeFromGroupId)?.length ?? 0) - selectedProperties.length;
+    if (!window.confirm(`Rimuovere ${selectedProperties.length} immobili dal gruppo? Gli immobili resteranno nello studio.${remaining < 2 ? " Rimarrà una sola unità: il gruppo sarà sciolto." : ""}`)) return;
+    setValuationGroupBusy(true);
+    const success = await onRemoveGroupMembers(removeFromGroupId, selectedProperties.map(property => property.id));
+    setValuationGroupBusy(false);
+    if (success) setSelectedPropertyIds([]);
   }
 
   function renderPropertyHeader(
@@ -8163,17 +8201,6 @@ function StudyDetail({
             study={study}
             draft={presentationDraft}
             onNotice={onNotice}
-          />
-          <PresentationAction
-            study={study}
-            draft={presentationDraft}
-            onNotice={onNotice}
-            version={2}
-          />
-          <PresentationAction
-            study={study}
-            draft={presentationDraft}
-            onNotice={onNotice}
             version={3}
           />
           <button className="button secondary" onClick={onExport}>
@@ -8236,14 +8263,14 @@ function StudyDetail({
             onClick={() => void handleGroupSelectedProperties()}
             title={
               selectedProperties.some((property) => property.valuationGroupId)
-                ? "Sciogli prima il gruppo degli immobili già raggruppati"
+                ? "Seleziona un gruppo completo e gli immobili non raggruppati da aggiungervi"
                 : "Seleziona almeno due immobili non ancora raggruppati"
             }
           >
             <Layers3 size={15} />
             {valuationGroupBusy && canGroupSelectedProperties
               ? "Unione..."
-              : "Uniscili per val. complessiva"}
+              : "Unisci alla valutazione complessiva"}
           </button>
           <button
             className="button secondary compact-button"
@@ -8254,6 +8281,10 @@ function StudyDetail({
           >
             <Unlink2 size={15} />
             Sciogli gruppo
+          </button>
+          <button className="button secondary compact-button" type="button" disabled={!canRemoveGroupMembers || valuationGroupBusy}
+            onClick={() => void handleRemoveGroupMembers()} title="Espandi un gruppo e seleziona i singoli immobili da rimuovere">
+            <Unlink2 size={15} /> Rimuovi dal gruppo
           </button>
           <button
             className="button secondary compact-button"

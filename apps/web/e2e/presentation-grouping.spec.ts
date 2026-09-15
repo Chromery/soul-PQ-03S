@@ -58,8 +58,8 @@ for (const groupScope of [false, true]) test(`presentation grouping in ${groupSc
   await saved(); await page.reload(); await saved();
   await expect(preview.locator(".presentation-group-row")).toContainText("Sub. 1, 3");
   await expect(preview.locator(".presentation-group-row")).toContainText("410,40");
-  await page.getByRole("button", { name: "Generazione PDF v3", exact: true }).click();
-  const modal = page.getByRole("dialog", { name: "Generazione PDF v3", exact: true });
+  await page.getByRole("button", { name: "Generazione Presentazione", exact: true }).click();
+  const modal = page.getByRole("dialog", { name: "Generazione Presentazione", exact: true });
   await expect(modal.locator(".presentation-group-row")).toHaveCount(1);
   await modal.getByRole("button", { name: /Espandi gruppo/ }).click();
   await modal.locator('[data-property-id="PG-3"]').getByRole("checkbox").uncheck();

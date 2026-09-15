@@ -2,10 +2,11 @@ import { test, expect } from "@playwright/test";
 import { clerk } from "@clerk/testing/playwright";
 
 test("suggested groups review: badge, persistent refusals, later acceptance, errors and responsive dialog", async ({ page }) => {
-  const properties = [1, 2, 3, 4].map(n => ({ id: `SUG-${n}`, address: `Via delle Industrie ${n}`, comune: "Bergamo", provincia: "BG",
-    foglio: "12", particella: n < 3 ? "44" : "55", subalterno: String(n), valuationGroupId: null as string | null,
+  const properties = [1, 2, 3, 4, 5].map(n => ({ id: `SUG-${n}`, address: `Via delle Industrie ${n}`, comune: "Bergamo", provincia: "BG",
+    foglio: "12", particella: n < 4 ? "44" : "55", subalterno: String(n), valuationGroupId: null as string | null,
     categoria: "D/7", currentRendita: 1000 * n, estimatedRendita: 500 * n, currentImu: 100, estimatedImu: 50,
-    diffPercent: -50, imuDiff: -50, outcome: "Positivo", hasStudy: true, notes: "", documents: {}, priceLists: [] }));
+    diffPercent: -50, imuDiff: -50, outcome: "Positivo", hasStudy: true, notes: n === 1 ? "Verificare accesso indipendente" : "", titolarita: "Proprietà 1/1",
+    documents: n === 1 ? { planimetria: "Elaborato.pdf", visura: "Visura.pdf" } : {}, priceLists: [] }));
   const study = { id: "SUG-STUDY", company: "Società campione", vat: "", comune: "Bergamo", provincia: "BG", region: "Lombardia",
     status: "Aperta", createdAt: "2026-09-15", importedAt: "2026-09-15", deadline: "2026-12-31", diffRendita: -5000,
     diffImu: -200, originalRendita: 10000, totalRendita: 5000, catDRendita: 10000, commercialOwner: "", technicalOwner: "", notes: "", erpUrl: "", properties };
@@ -13,7 +14,7 @@ test("suggested groups review: badge, persistent refusals, later acceptance, err
   const reviews: any[] = [], unexpected: string[] = [];
   let fail = false;
   const suggestions = () => {
-    const items = ["a", "b"].map((letter, i) => ({ id: letter.repeat(64), propertyIds: properties.slice(i * 2, i * 2 + 2).map(p => p.id),
+    const items = ["a", "b"].map((letter, i) => ({ id: letter.repeat(64), propertyIds: properties.filter(p => p.particella === (i ? "55" : "44")).map(p => p.id),
       comune: "Bergamo", provincia: "BG", sezione: "", foglio: "12", matchField: "particella", matchValue: i ? "55" : "44" }))
       .filter(item => item.propertyIds.every(id => !properties.find(p => p.id === id)?.valuationGroupId));
     return { pending: items.filter(item => !rejected.has(item.id)), rejected: items.filter(item => rejected.has(item.id)).map(item => ({ ...item, rejectedAt: "2026-09-15T12:00:00Z" })) };
@@ -25,10 +26,10 @@ test("suggested groups review: badge, persistent refusals, later acceptance, err
     if (path.includes("/property-grouping-suggestions")) {
       if (method === "POST") {
         if (fail) return route.fulfill({ status: 503, json: { message: "Test error" } });
-        const signature = path.split("/").pop()!, { action } = route.request().postDataJSON();
-        reviews.push({ signature, action });
+        const signature = path.split("/").pop()!, { action, propertyIds } = route.request().postDataJSON();
+        reviews.push({ signature, action, propertyIds });
         if (action === "reject") rejected.add(signature);
-        else for (const property of properties.slice(signature.startsWith("a") ? 0 : 2, signature.startsWith("a") ? 2 : 4)) property.valuationGroupId = `accepted-${signature[0]}`;
+        else for (const property of properties.filter(p => propertyIds.includes(p.id))) property.valuationGroupId = `accepted-${signature[0]}`;
         return route.fulfill({ json: { ...suggestions(), study: action === "accept" ? study : null } });
       }
       return route.fulfill({ json: suggestions() });
@@ -68,10 +69,18 @@ test("suggested groups review: badge, persistent refusals, later acceptance, err
   await modal.getByRole("button", { name: "Rifiutati 1", exact: true }).click();
   await expect(modal.locator("article")).toHaveCount(1);
   await expect(modal.getByRole("button", { name: /Rifiuta Foglio/ })).toHaveCount(0);
+  await expect(modal.getByLabel("Elaborato planimetrico: presente", { exact: true })).toHaveCount(1);
+  await expect(modal.getByLabel("Visura: assente", { exact: true })).toHaveCount(2);
+  await modal.getByRole("checkbox", { name: "Includi Via delle Industrie 3", exact: true }).uncheck();
+  await modal.getByRole("checkbox", { name: "Includi Via delle Industrie 2", exact: true }).uncheck();
+  await expect(modal.getByRole("button", { name: "Accetta Foglio 12 · Particella 44", exact: true })).toBeDisabled();
+  await modal.getByRole("checkbox", { name: "Includi Via delle Industrie 2", exact: true }).check();
   if (process.env.PQ_SUGGESTIONS_REVIEW_DIR) await modal.screenshot({ path: `${process.env.PQ_SUGGESTIONS_REVIEW_DIR}/rejected.png` });
   await modal.getByRole("button", { name: "Accetta Foglio 12 · Particella 44", exact: true }).click();
   await expect(modal.getByRole("heading", { name: "Nessun suggerimento rifiutato" })).toBeVisible();
   expect(properties.slice(0, 2).every(property => property.valuationGroupId === "accepted-a")).toBe(true);
+  expect(properties[2].valuationGroupId).toBeNull();
+  expect(reviews.find(review => review.action === "accept").propertyIds.sort()).toEqual(["SUG-1", "SUG-2"]);
   await modal.getByRole("button", { name: "Da rivedere 1", exact: true }).click();
   await modal.getByRole("button", { name: "Rifiuta Foglio 12 · Particella 55", exact: true }).click();
   await expect(modal.getByRole("heading", { name: "Nessun gruppo da rivedere" })).toBeVisible();
@@ -81,6 +90,6 @@ test("suggested groups review: badge, persistent refusals, later acceptance, err
   await expect(page.locator(".suggestion-trigger")).toBeFocused();
   await page.reload(); await expect(page.getByRole("button", { name: "Gruppi suggeriti: 0 da rivedere", exact: true })).toBeVisible();
   expect(reviews.map(review => review.action)).toEqual(["reject", "accept", "reject"]);
-  expect(properties.map(property => property.currentRendita)).toEqual([1000, 2000, 3000, 4000]);
+  expect(properties.map(property => property.currentRendita)).toEqual([1000, 2000, 3000, 4000, 5000]);
   expect(unexpected).toEqual([]);
 });

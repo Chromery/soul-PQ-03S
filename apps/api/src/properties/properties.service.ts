@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { PDFDocument } from "pdf-lib";
 import type { Readable } from "node:stream";
 import { documentTypePath, parseDocumentType } from "../document-types.js";
@@ -300,6 +300,8 @@ export class PropertiesService {
     });
 
     await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "PropertyValuationGroup" WHERE id = ${valuationGroupId} FOR UPDATE`;
+      if (locked.length !== 1) throw new ConflictException("La composizione del gruppo è cambiata. Riapri l’editor dalla lista immobili.");
       await tx.propertyValuationGroupAnalysisDraft.upsert({
         where: { valuationGroupId },
         create: { valuationGroupId, ...data },

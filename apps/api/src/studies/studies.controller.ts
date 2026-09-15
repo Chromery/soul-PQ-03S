@@ -6,6 +6,7 @@ import { UpdateStudyDto } from "./dto/update-study.dto.js";
 import { UpdateStudyGroupDto } from "./dto/update-study-group.dto.js";
 import { StudiesService } from "./studies.service.js";
 import { ArchiveStudiesDto } from "./dto/archive-studies.dto.js";
+import { UpdatePropertyValuationGroupDto } from "./dto/update-property-valuation-group.dto.js";
 
 @Controller("studies")
 export class StudiesController {
@@ -85,6 +86,11 @@ export class StudiesController {
     const study = await this.studies.ungroupProperties(id, groupId);
     if (!study) throw new NotFoundException("Studio o gruppo non trovato");
     return study;
+  }
+
+  @Patch(":id/property-valuation-groups/:groupId/members")
+  updateGroupMembers(@Param("id") studyId: string, @Param("groupId") groupId: string, @Body() input: UpdatePropertyValuationGroupDto) {
+    return this.studies.updateValuationGroupMembers(studyId, groupId, input);
   }
 
   @Delete(":id/properties")

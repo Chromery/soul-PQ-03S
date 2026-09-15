@@ -75,6 +75,7 @@ model FeasibilityStudy {
   presentations   PresentationDeck[]
   presentationDraft PresentationDraft?
   groupingDismissals PropertyGroupingDismissal[]
+  valuationGroupRevisions PropertyValuationGroupRevision[]
 
   @@index([studyGroupId])
 }
@@ -86,6 +87,17 @@ model PropertyGroupingDismissal {
   study      FeasibilityStudy @relation(fields: [studyId], references: [id], onDelete: Cascade)
 
   @@id([studyId, signature])
+}
+
+model PropertyValuationGroupRevision {
+  id         String @id @default(cuid())
+  studyId    String
+  groupId    String
+  payload    Json
+  createdAt  DateTime @default(now())
+  study      FeasibilityStudy @relation(fields: [studyId], references: [id], onDelete: Cascade)
+
+  @@index([studyId, groupId])
 }
 
 model StudyGroup {

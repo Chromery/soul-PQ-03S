@@ -3,7 +3,7 @@
 .suggestion-trigger-icon { position: relative; display: inline-flex; margin-right: 4px; }
 .suggestion-trigger .suggestion-count { position: absolute; top: -11px; right: -12px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 20px; background: #00739a; color: white; border: 2px solid #fff; font: 700 10px/13px system-ui; text-align: center; }
 .suggestion-backdrop { z-index: 160; padding: 24px; }
-.suggestions-modal { width: min(820px, 100%); max-height: min(880px, 90dvh); display: flex; flex-direction: column; overflow: hidden; border-radius: 20px; background: #f6f9fc; box-shadow: 0 28px 90px #09223955; font-family: Inter, Arial, sans-serif; }
+.suggestions-modal { width: min(1440px, 100%); max-height: min(1000px, 94dvh); display: flex; flex-direction: column; overflow: hidden; border-radius: 20px; background: #f6f9fc; box-shadow: 0 28px 90px #09223955; font-family: Inter, Arial, sans-serif; }
 .suggestions-header { display: flex; gap: 16px; align-items: flex-start; padding: 28px; color: white; background: linear-gradient(125deg, #0a3558, #006b94); }
 .suggestions-heading-icon { padding: 13px; background: #ffffff18; border: 1px solid #ffffff25; border-radius: 15px; }
 .suggestions-eyebrow { font: 600 10px/1.4 system-ui; text-transform: uppercase; letter-spacing: .14em; color: #bce5f4; }
@@ -30,12 +30,18 @@
 .suggestion-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; color: #728195; font-size: 10px; }
 .suggestion-card-meta span { display: inline-flex; align-items: center; gap: 5px; }
 .suggestion-property-list { overflow: auto; max-height: 230px; border: 1px solid #e9eef3; border-radius: 9px; }
-.suggestion-property-list table { width: 100%; min-width: 430px; border-collapse: collapse; font-size: 11px; }
+.suggestion-property-list table { width: 100%; min-width: 1100px; border-collapse: collapse; font-size: 12px; }
 .suggestion-property-list th { position: sticky; top: 0; background: #f7f9fc; text-align: left; color: #738093; font-weight: 600; font-size: 10px; }
 .suggestion-property-list th, .suggestion-property-list td { padding: 9px 10px; border-bottom: 1px solid #edf1f5; }
-.suggestion-property-list td:first-child { min-width: 170px; overflow-wrap: anywhere; }
-.suggestion-property-list td:not(:first-child) { white-space: nowrap; }
-.suggestion-property-list td:last-child, .suggestion-property-list th:last-child { text-align: right; }
+.suggestion-property-list td:nth-child(2) { min-width: 210px; max-width: 300px; overflow-wrap: anywhere; }
+.suggestion-property-list td:nth-child(7), .suggestion-property-list td:last-child { min-width: 100px; max-width: 200px; overflow-wrap: anywhere; }
+.suggestion-property-list td:nth-child(8), .suggestion-property-list td:nth-child(9) { white-space: nowrap; text-align: right; }
+.suggestion-property-list input { width: 16px; height: 16px; accent-color: #006b94; cursor: pointer; }
+.suggestion-property-list .suggestion-excluded { background: #f5f7fa; color: #7b8897; }
+.suggestion-documents { display: flex; gap: 5px; white-space: nowrap; }
+.suggestion-documents span { display: inline-flex; align-items: center; gap: 3px; padding: 4px; border-radius: 5px; font-size: 10px; }
+.suggestion-documents .available { background: #eaf7ef; color: #147752; }
+.suggestion-documents .missing { background: #f1f3f6; color: #7b8897; }
 .suggestions-empty { padding: 34px 25px; text-align: center; }
 .suggestions-empty > span { display: inline-grid; place-items: center; width: 60px; height: 60px; border-radius: 20px; background: #e5f5ed; color: #25865e; }
 .suggestions-empty h3 { color: #20415a; font-size: 18px; }

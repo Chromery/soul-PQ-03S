@@ -21,6 +21,7 @@ for (const group of [false, true]) test(`presentation ${group ? "group" : "study
     propertyIds: ["HISTORY-3"], propertyCount: 1, fileName: `Presentazione-${i}.pdf`, createdAt: "2026-09-09T15:00:00Z",
     htmlUrl: null, htmlDownloadUrl: null, pdfUrl: `/api/presentations/deck-${i}/pdf` });
   let history = Array.from({ length: 25 }, (_, i) => deck(25 - i));
+  history.push({ ...deck(-1), version: 1, fileName: "Legacy-v1.pdf" }, { ...deck(-2), version: 2, fileName: "Legacy-v2.pdf" });
   await page.route("**/api/**", async route => {
     const { pathname } = new URL(route.request().url()), method = route.request().method();
     if (pathname.startsWith("/api/auth/")) return route.fallback();
@@ -65,8 +66,11 @@ for (const group of [false, true]) test(`presentation ${group ? "group" : "study
   await expect(preview.getByRole("status")).toContainText("Modifiche non salvate");
   await expect(address).toHaveValue("Via salvata dopo errore");
   failSave = false; await preview.getByRole("button", { name: "Riprova", exact: true }).click(); await saved();
-  await page.getByRole("button", { name: "Generazione PDF v3", exact: true }).click();
-  const modal = page.getByRole("dialog", { name: "Generazione PDF v3", exact: true });
+  await expect(page.getByRole("button", { name: "Generazione Presentazione", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Storico presentazioni", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /Creazione presentazione v2|Genera presentazione$/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "Generazione Presentazione", exact: true }).click();
+  const modal = page.getByRole("dialog", { name: "Generazione Presentazione", exact: true });
   for (const width of [1280, 768]) {
     await page.setViewportSize({ width, height: 900 });
     const box = await modal.boundingBox();
@@ -93,6 +97,7 @@ for (const group of [false, true]) test(`presentation ${group ? "group" : "study
   await expect(historyModal.locator("article")).toHaveCount(20);
   await historyModal.getByRole("button", { name: "Mostra altre (6)", exact: true }).click();
   await expect(historyModal.locator("article")).toHaveCount(26);
+  await expect(historyModal.getByText(/Legacy-v[12]/)).toHaveCount(0);
   page.once("dialog", dialog => dialog.dismiss());
   await historyModal.getByRole("button", { name: "Elimina Presentazione-26.pdf", exact: true }).click();
   expect(deletes).toHaveLength(0);
@@ -106,5 +111,5 @@ for (const group of [false, true]) test(`presentation ${group ? "group" : "study
   await saved(); await page.reload();
   await expect(address).toHaveValue("Indirizzo ERP aggiornato");
   await expect(preview.getByLabel("Cliente mostrato in copertina")).toHaveValue(group ? "Gruppo campione" : "Test storico");
-  expect(history).toHaveLength(25); expect(unexpected).toEqual([]);
+  expect(history).toHaveLength(27); expect(history.filter(item => item.version < 3)).toHaveLength(2); expect(unexpected).toEqual([]);
 });

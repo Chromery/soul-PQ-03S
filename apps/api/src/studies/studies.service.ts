@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ActivitiesService } from "../activities/activities.service.js";
 import { DocumentType } from "../generated/prisma/enums.js";
 import type {
@@ -23,6 +23,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { estimatedRenditaFromAnalysisDraft } from "../rendita.js";
 import { municipalityWithSection } from "../visura-extraction/visura-text-extractor.js";
 import type { UpdateStudyDto } from "./dto/update-study.dto.js";
+import type { UpdatePropertyValuationGroupDto } from "./dto/update-property-valuation-group.dto.js";
 import {
   isTerminalStudyOutcome,
   normalizeStudyOutcome,
@@ -416,6 +417,48 @@ export class StudiesService {
             hasStudy: previous.hasStudy,
           },
         });
+      }
+      await tx.propertyValuationGroup.delete({ where: { id: groupId } });
+    });
+    await this.refreshStudyTotals(studyId);
+    return this.find(studyId);
+  }
+
+  async updateValuationGroupMembers(studyId: string, groupId: string, input: UpdatePropertyValuationGroupDto) {
+    const ids = input.propertyIds;
+    if (!["add", "remove"].includes(input.action) || !Array.isArray(ids) || ids.length < 1 || ids.length > 1000
+      || new Set(ids).size !== ids.length || ids.some(id => typeof id !== "string" || !id)) {
+      throw new BadRequestException("Selezione immobili non valida");
+    }
+    await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "FeasibilityStudy" WHERE id = ${studyId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "PropertyValuationGroup" WHERE id = ${groupId} AND "studyId" = ${studyId} FOR UPDATE`;
+      const group = await tx.propertyValuationGroup.findFirst({ where: { id: groupId, studyId }, include: { properties: true, analysisDraft: true } });
+      if (!group) throw new NotFoundException("Il gruppo non esiste più. Aggiorna lo studio.");
+      const previousIds = group.properties.map(property => property.id);
+      if (input.action === "remove" && ids.some(id => !previousIds.includes(id))) throw new BadRequestException("Gli immobili selezionati non appartengono al gruppo");
+      if (input.action === "add") {
+        const eligible = await tx.property.count({ where: { studyId, id: { in: ids }, valuationGroupId: null } });
+        if (eligible !== ids.length) throw new ConflictException("Seleziona immobili non raggruppati dello stesso studio e un solo gruppo completo");
+      }
+      if (group.analysisDraft && input.resetValuation !== true) throw new ConflictException({ code: "GROUP_REVIEW_REQUIRED",
+        message: "Il gruppo ha una valutazione salvata. Modificarne la composizione richiede una nuova valutazione: la bozza precedente sarà conservata in una copia tecnica e saranno ripristinati i valori individuali pre-gruppo disponibili. Continuare?" });
+      const nextIds = input.action === "add" ? [...previousIds, ...ids] : previousIds.filter(id => !ids.includes(id));
+      // Preserve the full previous draft before replacing the group. A new group ID
+      // prevents stale editor tabs/local drafts from applying geometry to a changed PDF.
+      await tx.propertyValuationGroupRevision.create({ data: { studyId, groupId,
+        payload: JSON.parse(JSON.stringify({ action: input.action, propertyIds: ids, previousMembers: group.properties, analysisDraft: group.analysisDraft })) } });
+      const restored = group.analysisDraft ? previousValuationGroupPropertyValues(group.analysisDraft.payload) : [];
+      for (const previous of restored.filter(property => previousIds.includes(property.id))) {
+        const { id, ...values } = previous;
+        await tx.property.updateMany({ where: { id, studyId, valuationGroupId: groupId }, data: values });
+      }
+      const detached = await tx.property.updateMany({ where: { studyId, id: { in: previousIds }, valuationGroupId: groupId }, data: { valuationGroupId: null } });
+      if (detached.count !== previousIds.length) throw new ConflictException("Il gruppo è cambiato. Aggiorna lo studio.");
+      if (nextIds.length >= 2) {
+        const replacement = await tx.propertyValuationGroup.create({ data: { studyId } });
+        const assigned = await tx.property.updateMany({ where: { studyId, id: { in: nextIds }, valuationGroupId: null }, data: { valuationGroupId: replacement.id } });
+        if (assigned.count !== nextIds.length) throw new ConflictException("Alcuni immobili sono stati raggruppati nel frattempo. Aggiorna lo studio.");
       }
       await tx.propertyValuationGroup.delete({ where: { id: groupId } });
     });
