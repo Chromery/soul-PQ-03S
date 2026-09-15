@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Soul Prospect Qualifier - ERP/PQ Sync API
-  version: 1.5.1
+  version: 1.5.2
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -39,6 +39,60 @@ tags:
   - name: ERP Sync
     description: Sincronizzazione dati ERP/PQ
 paths:
+  /studies/{studyId}/property-grouping-suggestions:
+    servers: [{url: /api}]
+    parameters:
+      - {name: studyId, in: path, required: true, schema: {type: string}}
+    get:
+      tags: [Studi PQ]
+      operationId: listPropertyGroupingSuggestions
+      summary: Gruppi suggeriti e rifiutati (PQ 1.1.6)
+      description: Solo sessioni PQ. Stesso comune, sezione, foglio e particella, subalterni distinti e immobili non raggruppati. I rifiuti persistono per studio e composizione del gruppo; nuovi membri richiedono una nuova revisione. Non modifica dati.
+      security: [{clerkSession: []}, {clerkBearer: []}]
+      responses:
+        "200":
+          description: Lista condivisa tra gli operatori. Il contatore considera soltanto pending.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GroupingSuggestionList'}
+        "401": {description: Login PQ richiesto}
+        "404": {description: Studio non trovato}
+  /studies/{studyId}/property-grouping-suggestions/{signature}:
+    servers: [{url: /api}]
+    parameters:
+      - {name: studyId, in: path, required: true, schema: {type: string}}
+      - {name: signature, in: path, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
+    post:
+      tags: [Studi PQ]
+      operationId: reviewPropertyGroupingSuggestion
+      summary: Accetta o rifiuta un suggerimento
+      description: Accept crea atomicamente un gruppo reale senza ricalcolare stime. Reject salva il rifiuto senza modificare immobili. Un suggerimento rifiutato resta accettabile. Un suggerimento obsoleto non viene applicato. Disponibile a operatori e amministratori PQ, non tramite token ERP.
+      security: [{clerkSession: []}, {clerkBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              additionalProperties: false
+              properties:
+                action: {type: string, enum: [accept, reject]}
+      responses:
+        "201":
+          description: Liste aggiornate e, per accept, studio PQ aggiornato.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/GroupingSuggestionList'}
+                  - type: object
+                    properties:
+                      study: {type: [object, 'null'], additionalProperties: true, description: 'Studio PQ aggiornato per accept; null per reject.'}
+        "400": {description: Azione o firma non valida}
+        "401": {description: Login PQ richiesto}
+        "404": {description: Studio non trovato}
+        "409": {description: Suggerimento cambiato o già gestito; ricaricare la lista}
   /studies/archive:
     servers:
       - url: /api
@@ -461,6 +515,25 @@ components:
       schema:
         $ref: "#/components/schemas/DocumentTypePath"
   schemas:
+    GroupingSuggestionList:
+      type: object
+      required: [pending, rejected]
+      properties:
+        pending: {type: array, items: {$ref: '#/components/schemas/GroupingSuggestion'}}
+        rejected: {type: array, items: {$ref: '#/components/schemas/GroupingSuggestion'}}
+    GroupingSuggestion:
+      type: object
+      required: [id, propertyIds, comune, provincia, sezione, foglio, matchField, matchValue]
+      properties:
+        id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        propertyIds: {type: array, minItems: 2, uniqueItems: true, items: {type: string}}
+        comune: {type: string}
+        provincia: {type: string}
+        sezione: {type: string}
+        foglio: {type: string}
+        matchField: {type: string, const: particella}
+        matchValue: {type: string}
+        rejectedAt: {type: string, format: date-time}
     SyncStudiRequest:
       type: object
       required:

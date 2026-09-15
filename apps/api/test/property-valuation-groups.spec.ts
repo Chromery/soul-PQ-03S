@@ -146,6 +146,7 @@ test("raggruppa soltanto immobili dello studio non gia raggruppati", async () =>
       property: {
         updateMany: async (input: Record<string, unknown>) => {
           writes.push(input);
+          return { count: 2 };
         },
       },
     }),
@@ -158,7 +159,7 @@ test("raggruppa soltanto immobili dello studio non gia raggruppati", async () =>
   assert.equal(result?.id, "STUDIO-1");
   assert.deepEqual(writes[0], { data: { studyId: "STUDIO-1" } });
   assert.deepEqual(writes[1], {
-    where: { studyId: "STUDIO-1", id: { in: ["IMM-1", "IMM-2"] } },
+    where: { studyId: "STUDIO-1", id: { in: ["IMM-1", "IMM-2"] }, valuationGroupId: null },
     data: { valuationGroupId: "GRUPPO-1" },
   });
 });

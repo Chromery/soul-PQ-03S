@@ -78,9 +78,10 @@ import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperience";
 import { CurrentOperator, useIdentity } from "./Auth";
+import { PropertyGroupingSuggestions } from "./PropertyGroupingSuggestions";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.5";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.6";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -3697,6 +3698,7 @@ function App() {
           onCreateProperty={(form) => createPropertyForStudy(activeStudy.id, form)}
           onDeleteProperties={(propertyIds) => deletePropertiesFromStudy(activeStudy.id, propertyIds)}
           onGroupProperties={(propertyIds) => groupPropertiesForStudy(activeStudy.id, propertyIds)}
+          onSuggestedGroupAccepted={(updatedStudy) => setStudies(current => current.map(study => study.id === updatedStudy.id ? updatedStudy : study))}
           onUngroupProperties={(groupId) => ungroupPropertiesForStudy(activeStudy.id, groupId)}
           onPropertyEstimateChange={updatePropertyEstimatedValue}
           onNotesSave={savePropertyNotes}
@@ -7758,6 +7760,7 @@ function StudyDetail({
   onCreateProperty,
   onDeleteProperties,
   onGroupProperties,
+  onSuggestedGroupAccepted,
   onUngroupProperties,
   onPropertyEstimateChange,
   onNotesSave,
@@ -7775,6 +7778,7 @@ function StudyDetail({
   onCreateProperty: (form: NewPropertyFormState) => Promise<boolean>;
   onDeleteProperties: (propertyIds: string[]) => Promise<boolean>;
   onGroupProperties: (propertyIds: string[]) => Promise<boolean>;
+  onSuggestedGroupAccepted: (study: FeasibilityStudy) => void;
   onUngroupProperties: (groupId: string) => Promise<boolean>;
   onPropertyEstimateChange: (
     propertyId: string,
@@ -8194,6 +8198,8 @@ function StudyDetail({
               <GripVertical size={15} />
               {propertySortKey === "manual" ? "Ordine manuale" : "Trascina per salvare un nuovo ordine"}
             </span>
+            <PropertyGroupingSuggestions studyId={study.id} properties={study.properties} onNotice={onNotice}
+              onStudyUpdated={(updatedStudy: FeasibilityStudy) => { setSelectedPropertyIds([]); onSuggestedGroupAccepted(updatedStudy); }} />
             <TableColumnMenu
               columns={PROPERTY_TABLE_COLUMNS}
               visibility={propertyTableColumns.visibility}

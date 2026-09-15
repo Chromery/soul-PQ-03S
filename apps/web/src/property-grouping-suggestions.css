@@ -1,0 +1,48 @@
+.suggestion-trigger { gap: 10px; }
+.suggestion-trigger.has-pending { background: #eef7fc; color: #07577c; border-color: #bbdced; }
+.suggestion-trigger-icon { position: relative; display: inline-flex; margin-right: 4px; }
+.suggestion-trigger .suggestion-count { position: absolute; top: -11px; right: -12px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 20px; background: #00739a; color: white; border: 2px solid #fff; font: 700 10px/13px system-ui; text-align: center; }
+.suggestion-backdrop { z-index: 160; padding: 24px; }
+.suggestions-modal { width: min(820px, 100%); max-height: min(880px, 90dvh); display: flex; flex-direction: column; overflow: hidden; border-radius: 20px; background: #f6f9fc; box-shadow: 0 28px 90px #09223955; font-family: Inter, Arial, sans-serif; }
+.suggestions-header { display: flex; gap: 16px; align-items: flex-start; padding: 28px; color: white; background: linear-gradient(125deg, #0a3558, #006b94); }
+.suggestions-heading-icon { padding: 13px; background: #ffffff18; border: 1px solid #ffffff25; border-radius: 15px; }
+.suggestions-eyebrow { font: 600 10px/1.4 system-ui; text-transform: uppercase; letter-spacing: .14em; color: #bce5f4; }
+.suggestions-header h2 { margin: 4px 0 8px; font-size: 25px; color: white; }
+.suggestions-header p { margin: 0; font-size: 12px; line-height: 1.7; color: #d9eaf3; }
+.suggestions-close { margin-left: auto; padding: 7px; border-radius: 9px; border: 1px solid #ffffff30; color: white; background: #ffffff0d; }
+.suggestions-navigation { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 24px; border-bottom: 1px solid #e3eaf0; background: white; }
+.suggestions-navigation > div { display: flex; gap: 5px; padding: 4px; background: #f0f4f8; border-radius: 12px; }
+.suggestions-navigation > div button { display: inline-flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; padding: 9px 12px; color: #64748b; background: transparent; font-size: 12px; font-weight: 650; }
+.suggestions-navigation button[aria-pressed="true"] { background: white; color: #065b80; box-shadow: 0 1px 5px #152e4612; }
+.suggestions-navigation span { padding: 2px 7px; background: #e7eff5; border-radius: 12px; font-size: 10px; }
+.suggestions-body { padding: 20px 24px; overflow: auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.suggestion-card { padding: 18px; background: white; border: 1px solid #dce7ef; border-radius: 14px; box-shadow: 0 3px 10px #17375004; }
+.suggestion-card.is-rejected { background: #fcfdfe; }
+.suggestion-card-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+.suggestion-card-heading h3 { margin: 0; font-size: 14px; color: #153a53; }
+.suggestion-card-heading p { margin: 7px 0 0; color: #718293; font-size: 11px; }
+.suggestion-review-actions { display: flex; gap: 7px; flex-shrink: 0; }
+.suggestion-review-actions button { width: 36px; height: 36px; border-radius: 10px; display: inline-grid; place-items: center; transition: background .15s; }
+.suggestion-accept { color: #147752; background: #eaf7ef; border: 1px solid #cce8d9; }
+.suggestion-accept:hover:not(:disabled) { background: #d4efdf; }
+.suggestion-reject { color: #6f7885; background: #f6f8fa; border: 1px solid #e2e6eb; }
+.suggestion-reject:hover:not(:disabled) { color: #a83e46; background: #fff0f1; }
+.suggestion-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; color: #728195; font-size: 10px; }
+.suggestion-card-meta span { display: inline-flex; align-items: center; gap: 5px; }
+.suggestion-property-list { overflow: auto; max-height: 230px; border: 1px solid #e9eef3; border-radius: 9px; }
+.suggestion-property-list table { width: 100%; min-width: 430px; border-collapse: collapse; font-size: 11px; }
+.suggestion-property-list th { position: sticky; top: 0; background: #f7f9fc; text-align: left; color: #738093; font-weight: 600; font-size: 10px; }
+.suggestion-property-list th, .suggestion-property-list td { padding: 9px 10px; border-bottom: 1px solid #edf1f5; }
+.suggestion-property-list td:first-child { min-width: 170px; overflow-wrap: anywhere; }
+.suggestion-property-list td:not(:first-child) { white-space: nowrap; }
+.suggestion-property-list td:last-child, .suggestion-property-list th:last-child { text-align: right; }
+.suggestions-empty { padding: 34px 25px; text-align: center; }
+.suggestions-empty > span { display: inline-grid; place-items: center; width: 60px; height: 60px; border-radius: 20px; background: #e5f5ed; color: #25865e; }
+.suggestions-empty h3 { color: #20415a; font-size: 18px; }
+.suggestions-empty p { max-width: 460px; margin: 0 auto 20px; color: #718093; font-size: 12px; line-height: 1.8; }
+.suggestions-empty button { display: inline-flex; align-items: center; gap: 6px; padding: 9px 13px; border: 1px solid #cfdee8; border-radius: 9px; background: white; color: #006b94; }
+.suggestions-error { padding: 12px; border-radius: 9px; background: #fff3ed; color: #a74427; font-size: 12px; }
+.suggestions-error button { margin-left: 8px; background: none; border: 0; text-decoration: underline; color: inherit; }
+.suggestions-footer { padding: 14px 24px; color: #728295; font-size: 10px; line-height: 1.6; border-top: 1px solid #e3eaf0; background: white; }
+.suggestions-modal button:focus-visible, .suggestion-trigger:focus-visible { outline: 3px solid #49add3; outline-offset: 3px; }
+@media (max-width: 600px) { .suggestion-backdrop { padding: 10px; } .suggestions-modal { max-height: 94dvh; border-radius: 16px; } .suggestions-header { padding: 20px 16px; gap: 12px; } .suggestions-heading-icon { display: none; } .suggestions-body { padding: 14px; } .suggestions-navigation { padding: 12px 14px; } .suggestions-navigation > div button { padding: 8px; } .suggestion-card { padding: 12px; } }

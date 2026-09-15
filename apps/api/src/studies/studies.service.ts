@@ -380,10 +380,11 @@ export class StudiesService {
 
     await this.prisma.$transaction(async (tx) => {
       const group = await tx.propertyValuationGroup.create({ data: { studyId } });
-      await tx.property.updateMany({
-        where: { studyId, id: { in: uniquePropertyIds } },
+      const assigned = await tx.property.updateMany({
+        where: { studyId, id: { in: uniquePropertyIds }, valuationGroupId: null },
         data: { valuationGroupId: group.id },
       });
+      if (assigned.count !== uniquePropertyIds.length) throw new BadRequestException("Alcuni immobili sono già stati raggruppati. Aggiorna la lista.");
     });
     return this.find(studyId);
   }
