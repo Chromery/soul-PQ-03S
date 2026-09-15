@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@clerk/react";
 import type { ReactNode } from "react";
 import { usePresentationDraftStore } from "./presentation-draft-store";
 import {
@@ -79,7 +80,7 @@ import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperi
 import { CurrentOperator, useIdentity } from "./Auth";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.3";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.4";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -5262,10 +5263,41 @@ function ArchivePropertySortHeader({
 }
 
 function SettingsPage({ appVersion, onNotice }: { appVersion: string; onNotice: (message: string) => void }) {
+  const { getToken } = useAuth();
+  const [swaggerBusy, setSwaggerBusy] = useState(false);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [backupBusy, setBackupBusy] = useState(false);
   const [preferences, setPreferences] = useState<EditorPreferences>(() => readEditorPreferences());
+
+  async function downloadSwagger() {
+    if (swaggerBusy) return;
+    setSwaggerBusy(true);
+    try {
+      // A direct API navigation cannot renew Clerk's short-lived session cookie.
+      // Renew inside the authenticated application and never put tokens in URLs.
+      const token = await getToken({ skipCache: true });
+      if (!token) throw new Error("Sessione scaduta. Accedi nuovamente a PQ e riprova.");
+      const response = await fetch(`${API_BASE_URL}/system/erp-openapi`, {
+        headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+      });
+      if (response.status === 401) throw new Error("Sessione scaduta. Accedi nuovamente a PQ e riprova.");
+      if (response.status === 403) throw new Error("Il download Swagger è riservato agli amministratori.");
+      if (!response.ok) throw new Error("Download Swagger non riuscito. Riprova tra poco.");
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "erp-pq-sync.openapi.yaml";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "Download Swagger non riuscito. Riprova tra poco.");
+    } finally {
+      setSwaggerBusy(false);
+    }
+  }
 
   useEffect(() => {
     void refreshSystemStatus();
@@ -5355,10 +5387,10 @@ function SettingsPage({ appVersion, onNotice }: { appVersion: string; onNotice: 
             <SettingsValue label="Stato letto" value={systemStatus ? formatDateTime(systemStatus.generatedAt) : "Caricamento"} />
           </div>
           <div className="settings-inline-actions">
-            <a className="button secondary compact-button" href={`${API_BASE_URL}/system/erp-openapi`} download>
+            <button type="button" className="button secondary compact-button" onClick={() => void downloadSwagger()} disabled={swaggerBusy}>
               <Download size={15} />
-              Scarica Swagger ERP
-            </a>
+              {swaggerBusy ? "Download in corso…" : "Scarica Swagger ERP"}
+            </button>
             <a className="button secondary compact-button" href="/formaps-open/" target="_blank" rel="noreferrer">
               <ExternalLink size={15} />
               Helper forMaps
