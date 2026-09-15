@@ -1,7 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 
 export const DRAFT_FIELDS = ["societa", "comune", "indirizzo", "foglioParticellaSub", "categoria",
-  "renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"];
+  "renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile", "presentationGroup"];
 
 // Draft values intentionally remain strings: incomplete edits must survive reopening.
 export function validateDraftChanges(input: unknown, propertyIds: Set<string>) {
@@ -16,6 +16,9 @@ export function validateDraftChanges(input: unknown, propertyIds: Set<string>) {
       throw new BadRequestException("Campo o immobile non appartenente alla presentazione");
     if (value !== null && (typeof value !== "string" || value.length > 1000))
       throw new BadRequestException("Valore della bozza non valido (massimo 1000 caratteri)");
+    if (field === "presentationGroup" && value !== null && value !== ""
+      && (typeof value !== "string" || !/^(manual|valuation):[a-zA-Z0-9_-]{1,200}$/.test(value)))
+      throw new BadRequestException("Raggruppamento della presentazione non valido");
     result[key] = value as string | null;
   }
   return result;

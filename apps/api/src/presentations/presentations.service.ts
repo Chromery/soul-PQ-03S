@@ -14,6 +14,7 @@ import { StudiesService } from "../studies/studies.service.js";
 import { personalizeV3Cover } from "./v3-cover.js";
 import { mergeDraftChanges, validateDraftChanges } from "./presentation-draft.js";
 import { optimizationValue } from "./optimization-value.js";
+import { groupPresentationRows } from "./presentation-grouping.js";
 import type {
   PresentationPropertyInput,
   PresentationSnapshot,
@@ -181,7 +182,8 @@ export class PresentationsService implements OnModuleDestroy {
     const { version, owner, clientName, studio, sources, propertyIds, propertyInputs } = input;
 
     const requestedIds = new Set(propertyIds);
-    const selectedSources = sources.filter(({ property }) => requestedIds.has(property.id));
+    const sourceById = new Map(sources.map(source => [source.property.id, source]));
+    const selectedSources = [...requestedIds].map(id => sourceById.get(id)).filter((source): source is PresentationSourceProperty => !!source);
     if (selectedSources.length !== propertyIds.length) {
       const availableIds = new Set(sources.map(({ property }) => property.id));
       const invalidIds = propertyIds.filter((propertyId) => !availableIds.has(propertyId));
@@ -252,6 +254,10 @@ export class PresentationsService implements OnModuleDestroy {
         ),
       };
     }));
+    const savedDraft = await this.prisma.presentationDraft.findUnique({
+      where: { id: owner.studyId ? `study:${owner.studyId}` : `group:${owner.studyGroupId}` },
+      select: { overrides: true },
+    });
     const snapshot: PresentationSnapshot = {
       version,
       generatedAt: generatedAt.toISOString(),
@@ -260,6 +266,8 @@ export class PresentationsService implements OnModuleDestroy {
         company: clientName,
       },
       immobili: snapshotProperties,
+      tableRows: groupPresentationRows(snapshotProperties, selectedSources.map(source => source.property),
+        (savedDraft?.overrides ?? {}) as Record<string, string>),
       ...(version === 3 ? { optimizationValue: optimizationValue(snapshotProperties.map(property => ({
         id: property.id, outcome: property.outcome,
         currentRendita: property.renditaAttuale, estimatedRendita: property.renditaAttribuibile,

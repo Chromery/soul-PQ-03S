@@ -1498,10 +1498,11 @@
       const imuVariationTenYears = Number.isFinite(imuVariation) ? imuVariation * 10 : null;
       const savingTenYears = Number.isFinite(annualSaving) ? annualSaving * 10 : null;
       const detailLimit = 8;
-      const detailItems = items.slice(0, detailLimit);
+      const tableItems = window.soulDeckData.tableRows ?? items;
+      const detailItems = tableItems.slice(0, detailLimit);
 
-      economicTableNote.textContent = items.length > detailLimit
-        ? `Dettaglio dei primi ${detailLimit} immobili su ${items.length} selezionati.`
+      economicTableNote.textContent = tableItems.length > detailLimit
+        ? `Dettaglio delle prime ${detailLimit} righe su ${tableItems.length}; ${items.length} immobili selezionati.`
         : `${items.length} ${items.length === 1 ? "immobile selezionato" : "immobili selezionati"}.`;
 
       propertyRows.innerHTML = detailItems.map((item) => {

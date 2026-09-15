@@ -47,6 +47,7 @@ function serviceFixture(options: { humanReadableAddress?: string | null; normali
     study.properties[0].humanReadableAddress = options.humanReadableAddress ?? null;
   }
   const prisma = {
+    presentationDraft: { findUnique: async () => null },
     property: {
       update: async ({ data }: { data: { humanReadableAddress: string } }) => {
         addressWrites.push(data.humanReadableAddress);
@@ -205,6 +206,7 @@ test("la presentazione v3 di gruppo include tutti gli studi e usa il nome rinomi
   };
   let deckData: Record<string, any> | null = null;
   const prisma = {
+    presentationDraft: { findUnique: async () => null },
     studyGroup: {
       findUnique: async () => ({
         id: "gruppo-1",

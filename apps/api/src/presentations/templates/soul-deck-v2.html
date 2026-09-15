@@ -155,6 +155,7 @@
     html.presentation-v3 .properties-card td { padding-left: 9px; padding-right: 9px; }
     html.presentation-v3 .properties-card th:nth-child(4),
     html.presentation-v3 .properties-card td:nth-child(4) { white-space: nowrap; overflow-wrap: normal; }
+    html.presentation-v3 .properties-card .grouped-property td:nth-child(4) { white-space: normal; overflow-wrap: anywhere; }
     html.presentation-v3 .properties-card td:nth-child(n+6),
     html.presentation-v3 .metric strong,
     html.presentation-v3 .annual-saving strong,
@@ -341,7 +342,8 @@
     const tenYearSaving = annualSaving * 10;
     document.querySelectorAll("[data-client]").forEach((element) => element.textContent = data.studio.company);
     const rows = document.getElementById("property-rows");
-    rows.innerHTML = data.immobili.map((item) => {
+    const tableItems = data.tableRows ?? data.immobili;
+    rows.innerHTML = tableItems.map((item) => {
       const rentDiff = difference(item.renditaAttuale, item.renditaAttribuibile);
       const hasImu = Number.isFinite(item.imuAttuale) && Number.isFinite(item.imuOttenibile);
       const imuVariation = hasImu ? item.imuOttenibile - item.imuAttuale : null;
@@ -350,7 +352,7 @@
       const imuLabel = Number.isFinite(imuVariation)
         ? `${imuVariation > 0 ? "+" : imuVariation < 0 ? "−" : ""}${euro.format(Math.abs(imuVariation))}`
         : "n.d.";
-      return `<tr><td>${escapeHtml(item.societa)}</td><td>${escapeHtml(item.comune)}</td><td>${escapeHtml(item.indirizzo)}</td><td>${escapeHtml(item.foglioParticellaSub)}</td><td>${escapeHtml(item.categoria || "—")}</td><td>${euro.format(item.renditaAttuale)}</td><td>${euro.format(item.renditaAttribuibile)}</td><td>${euro.format(rentDiff)}</td><td class="${imuClass}">${imuLabel}</td><td>${percent(reduction)}</td></tr>`;
+      return `<tr class="${item.memberIds?.length > 1 ? "grouped-property" : ""}"><td>${escapeHtml(item.societa)}</td><td>${escapeHtml(item.comune)}</td><td>${escapeHtml(item.indirizzo)}</td><td>${escapeHtml(item.foglioParticellaSub)}</td><td>${escapeHtml(item.categoria || "—")}</td><td>${euro.format(item.renditaAttuale)}</td><td>${euro.format(item.renditaAttribuibile)}</td><td>${euro.format(rentDiff)}</td><td class="${imuClass}">${imuLabel}</td><td>${percent(reduction)}</td></tr>`;
     }).join("");
     const totalRentDifference = currentRent - estimatedRent;
     const totalReduction = currentRent ? totalRentDifference / currentRent : null;
@@ -358,10 +360,10 @@
     const totalImuClass = totalImuVariation > 0 ? "bad" : totalImuVariation < 0 ? "good" : "";
     document.getElementById("property-totals").innerHTML = `<td colspan="5">Totale portafoglio</td><td>${euro.format(currentRent)}</td><td>${euro.format(estimatedRent)}</td><td>${euro.format(totalRentDifference)}</td><td class="${totalImuClass}">${totalImuVariation > 0 ? "+" : totalImuVariation < 0 ? "−" : ""}${euro.format(Math.abs(totalImuVariation))}</td><td>${percent(totalReduction)}</td>`;
     const propertiesCard = document.getElementById("properties-card");
-    if (data.immobili.length > 5) propertiesCard.classList.add("compact");
-    if (data.immobili.length > 9) propertiesCard.classList.add("ultra");
-    if (data.immobili.length > 5) document.querySelector(".economics").classList.add("many");
-    if (data.immobili.length > 9) document.querySelector(".economics").classList.add("ultra");
+    if (tableItems.length > 5) propertiesCard.classList.add("compact");
+    if (tableItems.length > 9) propertiesCard.classList.add("ultra");
+    if (tableItems.length > 5) document.querySelector(".economics").classList.add("many");
+    if (tableItems.length > 9) document.querySelector(".economics").classList.add("ultra");
     document.getElementById("total-current-rent").textContent = euro.format(currentRent);
     document.getElementById("total-estimated-rent").textContent = euro.format(estimatedRent);
     document.getElementById("rent-difference").textContent = euro.format(totalRentDifference);

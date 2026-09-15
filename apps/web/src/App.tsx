@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/react";
 import type { ReactNode } from "react";
 import { usePresentationDraftStore } from "./presentation-draft-store";
@@ -80,7 +80,7 @@ import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperi
 import { CurrentOperator, useIdentity } from "./Auth";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.4";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.5";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -6773,7 +6773,7 @@ function usePersistentPresentationDraft(endpoint: string, baseline: Presentation
   const persistence = usePresentationDraftStore(`${API_BASE_URL}${endpoint}/draft`);
   const draft = useMemo(() => mergePresentationDraft(baseline, persistence.overrides), [baseline, persistence.overrides]);
   const touched = new Set(Object.keys(persistence.overrides).filter(key => key === "clientName"
-    || baseline.properties.some(property => key.startsWith(`${property.id}:`))));
+    || (!key.endsWith(":presentationGroup") && baseline.properties.some(property => key.startsWith(`${property.id}:`)))));
   function updateProperty(propertyId: string, field: PresentationPropertyField, value: string) {
     const source = properties.find(property => property.id === propertyId);
     const updates: Record<string, string> = { [`${propertyId}:${field}`]: value };
@@ -6791,7 +6791,7 @@ function usePersistentPresentationDraft(endpoint: string, baseline: Presentation
   }
   function reset() {
     if (!window.confirm("Ripristinare tutti i dati della presentazione dai valori attuali della stima? Le presentazioni già generate non saranno modificate.")) return;
-    persistence.change(Object.fromEntries(Object.keys(persistence.overrides).map(key => [key, null])));
+    persistence.change(Object.fromEntries(Object.keys(persistence.overrides).filter(key => !key.endsWith(":presentationGroup")).map(key => [key, null])));
     onNotice("Ripristino dei dati della stima in salvataggio.");
   }
   return { presentationDraft: draft, presentationTouchedFields: touched, presentationPersistence: persistence,
@@ -6807,6 +6807,81 @@ function PresentationSaveStatus({ persistence }: { persistence: ReturnType<typeo
       : "Modifiche salvate · mantenute fino al ripristino esplicito"}
     {persistence.status === "error" && <button type="button" onClick={() => void persistence.flush()}>Riprova</button>}
   </p>;
+}
+
+type PresentationGroupingSource = Pick<PropertyItem, "id" | "outcome" | "valuationGroupId">;
+type PresentationRowGroup = { key: string; members: PresentationPropertyDraft[]; property: PresentationPropertyDraft };
+
+function presentationRowGroups(properties: PresentationPropertyDraft[], sources: readonly PresentationGroupingSource[], overrides: Record<string, string>): PresentationRowGroup[] {
+  const sourceById = new Map(sources.map(property => [property.id, property]));
+  const groups = new Map<string, PresentationPropertyDraft[]>();
+  for (const property of properties) {
+    const source = sourceById.get(property.id);
+    const group = overrides[`${property.id}:presentationGroup`] ?? (source?.valuationGroupId ? `valuation:${source.valuationGroupId}` : "");
+    const key = group ? `group:${group}` : `property:${property.id}`;
+    const members = groups.get(key) ?? [];
+    members.push(property); groups.set(key, members);
+  }
+  return [...groups.entries()].map(([key, members]) => {
+    if (members.length === 1) return { key, members, property: members[0] };
+    const property = { ...members[0], id: key };
+    for (const field of PRESENTATION_PROPERTY_FIELDS) {
+      if (["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(field)) {
+        const values = members.map(member => presentationMoneyToCents(member[field], false));
+        property[field] = values.some(value => value == null) ? "" : formatPresentationMoneyInput(
+          values.reduce<number>((sum, value) => sum + Math.round(value! * 100), 0) / 100);
+      } else {
+        const values = [...new Set(members.map(member => member[field]))];
+        const refs = field === "foglioParticellaSub" ? values.map(value => /^(.*? - Sub\. )(.+)$/.exec(value)) : [];
+        property[field] = refs.length && refs.every(ref => ref && ref[1] === refs[0]?.[1])
+          ? refs[0]![1] + refs.map(ref => ref![2]).join(", ") : values.join(" / ");
+      }
+    }
+    return { key, members, property };
+  });
+}
+
+function PresentationGroupingToolbar({ groups, selectedIds, persistence, onSelectionClear }: {
+  groups: PresentationRowGroup[]; selectedIds: string[];
+  persistence: ReturnType<typeof usePresentationDraftStore>; onSelectionClear?: () => void;
+}) {
+  const selected = new Set(selectedIds);
+  const selectedGroups = groups.filter(group => group.members.length > 1 && group.members.some(member => selected.has(member.id)));
+  const availableIds = new Set(groups.flatMap(group => group.members.map(member => member.id)));
+  const validSelected = selectedIds.filter(id => availableIds.has(id));
+  function groupSelected() {
+    const key = `manual:${crypto.randomUUID()}`;
+    persistence.change(Object.fromEntries(validSelected.map(id => [`${id}:presentationGroup`, key])));
+    onSelectionClear?.();
+  }
+  function ungroupSelected() {
+    // Dissolve every selected group, including members not selected for PDF export.
+    const ids = new Set(selectedGroups.flatMap(group => group.members.map(member => member.id)));
+    persistence.change(Object.fromEntries([...ids].map(id => [`${id}:presentationGroup`, ""])));
+    onSelectionClear?.();
+  }
+  const overrides = Object.keys(persistence.overrides).filter(key => key.endsWith(":presentationGroup"));
+  return <div className="presentation-grouping-toolbar">
+    <span>{validSelected.length} immobili selezionati · {groups.length} righe</span>
+    <button type="button" className="button secondary compact-button" disabled={!persistence.loaded || validSelected.length < 2} onClick={groupSelected}><Layers3 size={14} />Raggruppa selezionati</button>
+    <button type="button" className="button secondary compact-button" disabled={!persistence.loaded || !selectedGroups.length} onClick={ungroupSelected}><Unlink2 size={14} />Sciogli raggruppamenti selezionati</button>
+    <button type="button" className="button secondary compact-button" disabled={!persistence.loaded || !overrides.length} onClick={() => {
+      if (window.confirm("Ripristinare i raggruppamenti dai gruppi immobili dello studio? I valori modificati nella presentazione resteranno invariati.")) {
+        persistence.change(Object.fromEntries(overrides.map(key => [key, null]))); onSelectionClear?.();
+      }
+    }}>Ripristina gruppi originali</button>
+  </div>;
+}
+
+function PresentationGroupCells({ group, outcomes }: { group: PresentationRowGroup; outcomes: Map<string, PropertyOutcome> }) {
+  const values = new Set(group.members.map(member => outcomes.get(member.id) ?? "Neutro"));
+  return <>
+    <td>{values.size === 1 ? <OutcomeBadge outcome={[...values][0]} /> : <span>Esiti misti</span>}<small className="presentation-group-count">{group.members.length} {group.members.length === 1 ? "immobile" : "immobili"}</small></td>
+    {PRESENTATION_PROPERTY_FIELDS.map(field => <td key={field} className="presentation-group-value">{
+      ["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(field)
+        ? formatPresentationDraftAmount(group.property[field], "n.d.") : group.property[field]
+    }</td>)}
+  </>;
 }
 
 function PresentationAction({
@@ -6841,6 +6916,7 @@ function PresentationAction({
   const [historyError, setHistoryError] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(20);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [expandedPresentationGroups, setExpandedPresentationGroups] = useState<Set<string>>(() => new Set());
   const [selectionSort, setSelectionSort] = useState<{ key: PresentationPropertyField | "outcome"; direction: "asc" | "desc" }>({ key: "outcome", direction: "asc" });
   const presentationsEndpoint = endpointBase
     ?? `/studies/${encodeURIComponent(study.id)}/presentations`;
@@ -6865,13 +6941,17 @@ function PresentationAction({
     { key: "renditaAttribuibile", label: "R.C. attribuibile (€)" },
     { key: "imuAttuale", label: "IMU attuale (€)" }, { key: "imuOttenibile", label: "IMU ottenibile (€)" },
   ];
-  const orderedSelection = [...study.properties].sort((a, b) => {
+  const selectionGroups = presentationRowGroups(draft.properties, study.properties, persistence.overrides);
+  const selectionOutcomes = new Map(study.properties.map(property => [property.id, property.outcome]));
+  const orderedSelectionGroups = [...selectionGroups].sort((first, second) => {
+    const a = first.property, b = second.property;
     const { key, direction } = selectionSort;
     const rank = { Positivo: 0, Negativo: 1, Sospeso: 2, Neutro: 3 };
     let comparison = 0;
-    if (key === "outcome") comparison = rank[a.outcome] - rank[b.outcome];
+    if (key === "outcome") comparison = Math.min(...first.members.map(member => rank[selectionOutcomes.get(member.id) ?? "Neutro"]))
+      - Math.min(...second.members.map(member => rank[selectionOutcomes.get(member.id) ?? "Neutro"]));
     else {
-      const left = propertyDraftById.get(a.id)?.[key] ?? "", right = propertyDraftById.get(b.id)?.[key] ?? "";
+      const left = a[key], right = b[key];
       if (["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(key)) {
         const l = presentationMoneyToCents(left, false), r = presentationMoneyToCents(right, false);
         if (l == null || r == null) return l == null ? (r == null ? 0 : 1) : -1;
@@ -6880,6 +6960,7 @@ function PresentationAction({
     }
     return direction === "asc" ? comparison : -comparison;
   });
+  const orderedSelection = orderedSelectionGroups.flatMap(group => group.members);
 
   async function loadHistory() {
     setHistoryLoading(true); setHistoryError(false);
@@ -7141,13 +7222,33 @@ function PresentationAction({
               </p>
             )}
 
+            <PresentationGroupingToolbar groups={selectionGroups} selectedIds={selectedPropertyIds}
+              persistence={{ ...persistence, loaded: persistence.loaded && !busy }} />
+            <p className="modal-note">I raggruppamenti valgono solo per la presentazione. Nel PDF vengono sommati soltanto gli immobili inclusi; espandi un gruppo per includerli o escluderli singolarmente.</p>
+
             <div className="presentation-generator-table-wrap">
               <table className="presentation-preview-table presentation-generator-table"><thead><tr>
                 <th>Includi</th>{selectionColumns.map(({ key, label }) => <th key={key} aria-sort={ariaSortState(selectionSort.key === key, selectionSort.direction)}>
                   <button type="button" className="sort-header" onClick={() => setSelectionSort(current => ({ key, direction: current.key === key && current.direction === "asc" ? "desc" : "asc" }))}>
                     {label}{selectionSort.key === key ? (selectionSort.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : <ArrowDownUp size={13} />}
                   </button></th>)}
-              </tr></thead><tbody>{orderedSelection.map((property) => {
+              </tr></thead><tbody>{orderedSelectionGroups.map(group => <Fragment key={group.key}>
+                {group.members.length > 1 && <tr className="presentation-group-row" data-presentation-group={group.key}>
+                  <td><div className="presentation-group-controls"><input type="checkbox" disabled={busy}
+                    aria-label={`Includi gruppo ${group.property.indirizzo}`} checked={group.members.every(member => selectedPropertyIds.includes(member.id))}
+                    ref={element => { if (element) element.indeterminate = group.members.some(member => selectedPropertyIds.includes(member.id)) && !group.members.every(member => selectedPropertyIds.includes(member.id)); }}
+                    onChange={event => setSelectedPropertyIds(current => event.target.checked
+                      ? [...new Set([...current, ...group.members.map(member => member.id)])]
+                      : current.filter(id => !group.members.some(member => member.id === id)))} />
+                    <button type="button" className="icon-button" aria-label={`${expandedPresentationGroups.has(group.key) ? "Comprimi" : "Espandi"} gruppo ${group.property.indirizzo}`} aria-expanded={expandedPresentationGroups.has(group.key)}
+                      onClick={() => setExpandedPresentationGroups(current => { const next = new Set(current); if (next.has(group.key)) next.delete(group.key); else next.add(group.key); return next; })}>
+                      {expandedPresentationGroups.has(group.key) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </button></div>
+                    <small>{group.members.filter(member => selectedPropertyIds.includes(member.id)).length}/{group.members.length} inclusi</small>
+                  </td>
+                  <PresentationGroupCells group={presentationRowGroups(group.members.filter(member => selectedPropertyIds.includes(member.id)), study.properties, persistence.overrides)[0] ?? group} outcomes={selectionOutcomes} />
+                </tr>}
+                {(group.members.length === 1 || expandedPresentationGroups.has(group.key)) && group.members.map((property) => {
                 const propertyDraft = propertyDraftById.get(property.id);
                 const incomplete = !propertyDraft || presentationPropertyHasIncompleteData(propertyDraft);
                 return (
@@ -7155,18 +7256,19 @@ function PresentationAction({
                     <td>
                     <input
                       type="checkbox"
+                      disabled={busy}
                       aria-label={`Includi ${propertyDraft?.indirizzo || property.id}`}
                       checked={selectedPropertyIds.includes(property.id)}
                       onChange={() => toggleProperty(property.id)}
                     />
                     </td>
                     {selectionColumns.map(({ key }) => <td key={key}>{key === "outcome"
-                      ? <><OutcomeBadge outcome={property.outcome} />{incomplete && <small className="presentation-incomplete">Dati incompleti</small>}</>
+                      ? <><OutcomeBadge outcome={selectionOutcomes.get(property.id) ?? "Neutro"} />{incomplete && <small className="presentation-incomplete">Dati incompleti</small>}</>
                       : ["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(key)
                         ? formatPresentationDraftAmount(propertyDraft?.[key], "n.d.") : propertyDraft?.[key] || "—"}</td>)}
                   </tr>
                 );
-              })}</tbody></table>
+              })}</Fragment>)}</tbody></table>
             </div>
 
             {generatedDeck && (
@@ -7262,7 +7364,7 @@ function PresentationDataPreview({
   onPropertyFieldReset,
   onReset,
 }: {
-  sourceProperties: readonly Pick<PropertyItem, "id" | "outcome">[];
+  sourceProperties: readonly PresentationGroupingSource[];
   persistence: ReturnType<typeof usePresentationDraftStore>;
   draft: PresentationDraft;
   baseline: PresentationDraft;
@@ -7277,6 +7379,8 @@ function PresentationDataPreview({
   onPropertyFieldReset: (propertyId: string, field: PresentationPropertyField) => void;
   onReset: () => void;
 }) {
+  const [selectedRows, setSelectedRows] = useState<string[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const [sort, setSort] = useState<{ key: PresentationPropertyField | "outcome"; direction: "asc" | "desc" }>({ key: "outcome", direction: "asc" });
   const outcomes = new Map(sourceProperties.map(property => [property.id, property.outcome]));
   const outcomeRank = { Positivo: 0, Negativo: 1, Sospeso: 2, Neutro: 3 };
@@ -7288,11 +7392,14 @@ function PresentationDataPreview({
     { key: "renditaAttribuibile", label: "R.C. attribuibile (€)" },
     { key: "imuAttuale", label: "IMU attuale (€)" }, { key: "imuOttenibile", label: "IMU ottenibile (€)" },
   ];
-  const orderedProperties = [...draft.properties].sort((a, b) => {
+  const groups = presentationRowGroups(draft.properties, sourceProperties, persistence.overrides);
+  const orderedGroups = [...groups].sort((first, second) => {
+    const a = first.property, b = second.property;
     const key = sort.key;
     let comparison: number;
     if (key === "outcome") {
-      comparison = outcomeRank[outcomes.get(a.id) ?? "Neutro"] - outcomeRank[outcomes.get(b.id) ?? "Neutro"];
+      comparison = Math.min(...first.members.map(member => outcomeRank[outcomes.get(member.id) ?? "Neutro"]))
+        - Math.min(...second.members.map(member => outcomeRank[outcomes.get(member.id) ?? "Neutro"]));
     } else if (["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(key)) {
       const left = presentationMoneyToCents(a[key], false), right = presentationMoneyToCents(b[key], false);
       // Missing/invalid amounts stay at the end in either direction.
@@ -7387,12 +7494,16 @@ function PresentationDataPreview({
       <p className="presentation-preview-info">
         Se modifichi una rendita, la relativa IMU viene ricalcolata soltanto per la presentazione con
         aliquota e moltiplicatore della stima. Le aree e i valori salvati nell’editor non vengono modificati.
+        {" "}I gruppi sono sommati in un’unica riga nel PDF. Espandili per modificare i singoli immobili.
       </p>
 
+      <PresentationGroupingToolbar groups={groups} selectedIds={selectedRows} persistence={persistence} onSelectionClear={() => setSelectedRows([])} />
+
       <div className="presentation-preview-table-wrap">
-        <table className="presentation-preview-table">
+        <table className="presentation-preview-table presentation-grouped-table">
           <thead>
             <tr>
+              <th>Raggruppa</th>
               {columns.map(({ key, label }) => (
                 <th key={key} aria-sort={ariaSortState(sort.key === key, sort.direction)}>
                   <button type="button" className={`sort-header ${sort.key === key ? "active" : ""}`}
@@ -7405,8 +7516,26 @@ function PresentationDataPreview({
             </tr>
           </thead>
           <tbody>
-            {orderedProperties.map((property) => (
-              <tr key={property.id}>
+            {orderedGroups.map(group => <Fragment key={group.key}>
+              {group.members.length > 1 && <tr className="presentation-group-row" data-presentation-group={group.key}>
+                <td><div className="presentation-group-controls">
+                  <input type="checkbox" aria-label={`Seleziona gruppo ${group.property.indirizzo}`}
+                    disabled={!persistence.loaded} checked={group.members.every(member => selectedRows.includes(member.id))}
+                    ref={element => { if (element) element.indeterminate = group.members.some(member => selectedRows.includes(member.id)) && !group.members.every(member => selectedRows.includes(member.id)); }}
+                    onChange={event => setSelectedRows(current => event.target.checked
+                      ? [...new Set([...current, ...group.members.map(member => member.id)])]
+                      : current.filter(id => !group.members.some(member => member.id === id)))} />
+                  <button type="button" className="icon-button" aria-label={`${expandedGroups.has(group.key) ? "Comprimi" : "Espandi"} gruppo ${group.property.indirizzo}`} aria-expanded={expandedGroups.has(group.key)}
+                    onClick={() => setExpandedGroups(current => { const next = new Set(current); if (next.has(group.key)) next.delete(group.key); else next.add(group.key); return next; })}>
+                    {expandedGroups.has(group.key) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  </button>
+                </div></td>
+                <PresentationGroupCells group={group} outcomes={outcomes} />
+              </tr>}
+              {(group.members.length === 1 || expandedGroups.has(group.key)) && group.members.map(property => (
+              <tr key={property.id} data-property-id={property.id} className={group.members.length > 1 ? "presentation-group-member" : ""}>
+                <td><input type="checkbox" aria-label={`Seleziona ${property.indirizzo}`} disabled={!persistence.loaded}
+                  checked={selectedRows.includes(property.id)} onChange={event => setSelectedRows(current => event.target.checked ? [...current, property.id] : current.filter(id => id !== property.id))} /></td>
                 <td><OutcomeBadge outcome={outcomes.get(property.id) ?? "Neutro"} /></td>
                 {(["societa", "comune", "indirizzo", "foglioParticellaSub", "categoria"] as const).map((field) => (
                   <td key={field}>
@@ -7426,6 +7555,7 @@ function PresentationDataPreview({
                 <td>{moneyInput(property, "imuOttenibile", false, "IMU ottenibile")}</td>
               </tr>
             ))}
+            </Fragment>)}
           </tbody>
         </table>
       </div>

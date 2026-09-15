@@ -1,5 +1,6 @@
 export type PresentationPropertySnapshot = {
   id: string;
+  memberIds?: string[];
   outcome?: string;
   societa: string;
   comune: string;
@@ -27,6 +28,8 @@ export type PresentationSnapshot = {
     technicalOwner: string;
   };
   immobili: PresentationPropertySnapshot[];
+  // Frozen display rows; individual sources remain intact for totals and history.
+  tableRows?: PresentationPropertySnapshot[];
   // Absent on historical decks: do not reinterpret their original totals.
   optimizationValue?: number;
 };
