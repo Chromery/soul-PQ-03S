@@ -79,7 +79,7 @@ import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperi
 import { CurrentOperator, useIdentity } from "./Auth";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.2";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.3";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -2686,6 +2686,7 @@ function App() {
   const [appointmentOnly, setAppointmentOnly] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [selectedStudyIds, setSelectedStudyIds] = useState<string[]>([]);
+  const [archiveBusy, setArchiveBusy] = useState(false);
   const [studyGroupBusy, setStudyGroupBusy] = useState(false);
   const [expandedStudyGroupIds, setExpandedStudyGroupIds] = useState<string[]>([]);
   const [editorDirty, setEditorDirty] = useState(false);
@@ -2999,6 +3000,24 @@ function App() {
       flash("Impossibile salvare le modifiche dello studio.");
       return false;
     }
+  }
+
+  async function archiveSelectedStudies(archived: boolean) {
+    if (archiveBusy || !selectedStudies.length) return;
+    const ids = selectedStudies.filter(study => Boolean(study.isTest) !== archived).map(study => study.id);
+    if (!ids.length) return;
+    setArchiveBusy(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/studies/archive`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studyIds: ids, archived }),
+      });
+      if (!response.ok) throw new Error("Salvataggio non riuscito");
+      setStudies(current => current.map(study => ids.includes(study.id) ? { ...study, isTest: archived } : study));
+      setSelectedStudyIds([]);
+      flash(archived ? "Studi archiviati. Puoi ripristinarli dall’archivio." : "Studi ripristinati dall’archivio.");
+    } catch { flash("Impossibile aggiornare l’archivio. Riprova."); }
+    finally { setArchiveBusy(false); }
   }
 
   async function groupSelectedStudies() {
@@ -3829,7 +3848,7 @@ function App() {
 
           <div className="pq-study-controls">
             <TestStudiesToggle shown={showTestStudies} count={testStudyCount} onToggle={toggleTestStudies} />
-            {showTestStudies && <span>Stai visualizzando anche i dati di prova, inclusi nei riepiloghi.</span>}
+            {showTestStudies && <span>Stai visualizzando anche gli studi archiviati, inclusi nei riepiloghi.</span>}
             <button className="pq-welcome-link" onClick={() => setWelcomeOpen(true)}>Benvenuto in PQ</button>
           </div>
           {studiesLoading && <div className="pq-data-state" role="status">Caricamento del tuo spazio di lavoro…</div>}
@@ -4017,6 +4036,12 @@ function App() {
               )}
 
               <div className="selection-toolbar" aria-label="Azioni studi selezionati">
+                <button className="button secondary compact-button" type="button"
+                  disabled={archiveBusy || !selectedStudies.some(study => !study.isTest)}
+                  onClick={() => void archiveSelectedStudies(true)}>Archivia selezionati</button>
+                <button className="button secondary compact-button" type="button"
+                  disabled={archiveBusy || !selectedStudies.some(study => study.isTest)}
+                  onClick={() => void archiveSelectedStudies(false)}>Ripristina dall’archivio</button>
                 <span className="selection-count">
                   {selectedStudies.length > 0
                     ? `${selectedStudies.length} studi selezionati`
@@ -6019,7 +6044,7 @@ function StudyGroupRows({
           <td>
             <div className="company-cell study-group-title">
               <strong>{groupName}</strong>
-              {studies.some((study) => study.isTest) && <em className="pq-test-badge">{studies.every((study) => study.isTest) ? "Gruppo di test" : "Include studi di test"}</em>}
+              {studies.some((study) => study.isTest) && <em className="pq-test-badge">{studies.every((study) => study.isTest) ? "Gruppo archiviato" : "Include studi archiviati"}</em>}
               <span title={companyNames.join(", ")}>{companyNames.join(" · ")}</span>
               <button
                 className="study-group-open-button"
@@ -6180,7 +6205,7 @@ function StudyRows({
           <td>
             <div className="company-cell">
               <strong title={study.company}>{study.company}</strong>
-              {study.isTest && <em className="pq-test-badge">Studio di test</em>}
+              {study.isTest && <em className="pq-test-badge">Archiviato</em>}
               <span title={`${study.comune} (${study.provincia}) - ${study.vat}`}>
                 {study.comune} ({study.provincia}) - {study.vat}
               </span>

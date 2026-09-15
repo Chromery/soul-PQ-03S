@@ -5,6 +5,7 @@ import { ReorderStudyPropertiesDto } from "./dto/reorder-study-properties.dto.js
 import { UpdateStudyDto } from "./dto/update-study.dto.js";
 import { UpdateStudyGroupDto } from "./dto/update-study-group.dto.js";
 import { StudiesService } from "./studies.service.js";
+import { ArchiveStudiesDto } from "./dto/archive-studies.dto.js";
 
 @Controller("studies")
 export class StudiesController {
@@ -23,6 +24,11 @@ export class StudiesController {
   @Post("groups")
   groupStudies(@Body() input: CreateStudyGroupDto) {
     return this.studies.groupStudies(input.studyIds);
+  }
+
+  @Post("archive")
+  archive(@Body() input: ArchiveStudiesDto) {
+    return this.studies.archive(input.studyIds, input.archived);
   }
 
   @Delete("groups/:groupId")

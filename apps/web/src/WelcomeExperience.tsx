@@ -86,7 +86,7 @@ export function EmptyWorkspace({ onCreate, onRefresh, onWelcome }: {
 
 export function TestStudiesToggle({ shown, count, onToggle }: { shown: boolean; count: number; onToggle: () => void }) {
   return <button className={`button secondary pq-test-toggle ${shown ? "active" : ""}`} aria-pressed={shown} onClick={onToggle}>
-    <Layers3 size={16} />{shown ? "Nascondi gli studi di test" : "Mostra gli studi di test"}
+    <Layers3 size={16} />{shown ? "Nascondi archivio" : "Mostra archivio"}
     <span className="pq-test-count">{count}</span>
   </button>;
 }

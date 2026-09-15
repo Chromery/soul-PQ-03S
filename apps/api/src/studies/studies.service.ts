@@ -106,6 +106,19 @@ export class StudiesService {
     return study ? this.toApiStudy(study) : null;
   }
 
+  async archive(studyIds: string[], archived: boolean) {
+    // Preserve the existing DB flag for compatibility; archive does not delete data
+    // or change import dates, outcomes, groups or editor drafts.
+    return this.prisma.$transaction(async tx => {
+      const found = await tx.feasibilityStudy.count({ where: { id: { in: studyIds } } });
+      if (found !== studyIds.length) throw new BadRequestException("Uno o più studi non sono disponibili");
+      const result = await tx.feasibilityStudy.updateMany({
+        where: { id: { in: studyIds }, isTest: !archived }, data: { isTest: archived },
+      });
+      return { studyIds, archived, updated: result.count };
+    });
+  }
+
   async update(id: string, input: UpdateStudyDto) {
     const exists = await this.prisma.feasibilityStudy.findUnique({
       where: { id },

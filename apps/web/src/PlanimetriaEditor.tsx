@@ -29,6 +29,7 @@ import {
   Plus,
   Redo2,
   RotateCw,
+  RotateCcw,
   Ruler,
   Save,
   Circle,
@@ -8396,7 +8397,7 @@ export default function PlanimetriaEditor({
       runtime.redoStack = [];
       redrawMasks();
       markDirty();
-      setStatus(allPages ? `Ruotate ${pages.length} pagine a destra` : delta > 0 ? "Pagina ruotata a destra" : "Pagina ruotata a sinistra");
+      setStatus(allPages ? `Ruotate ${pages.length} pagine ${delta > 0 ? "a destra" : "a sinistra"}` : delta > 0 ? "Pagina ruotata a destra" : "Pagina ruotata a sinistra");
       bumpRevision();
     } catch (error) {
       console.error(error);
@@ -8727,9 +8728,9 @@ export default function PlanimetriaEditor({
         <div className="plan-editor-title">
           <div>
             <p className="eyebrow">{valuationGroup ? "Editor valutazione complessiva" : "Editor planimetrie"}</p>
-            <h1>{property.address}</h1>
+            <h1 title={property.address}>{property.address}</h1>
             <div className="plan-editor-meta-row">
-              <span>
+              <span title={study.company}>
                 {study.company} · {property.comune} · {valuationGroup
                   ? `${valuationGroup.properties.length} unità combinate`
                   : `categoria ${property.categoria}`}
@@ -8874,6 +8875,56 @@ export default function PlanimetriaEditor({
               <PanelLeftClose size={18} />
             </button>
           </div>
+
+          <section className="tool-block editor-history-controls" aria-label="Cronologia e cancellazione">
+                <button
+                  className="icon-button"
+                  title={withShortcut("Indietro", SHORTCUTS.undo)}
+                  disabled={!canUndo || busy}
+                  onClick={undoSelectionEdit}
+                >
+                  <Undo2 size={17} />
+                </button>
+                <button
+                  className="icon-button"
+                  title={withShortcut("Avanti", SHORTCUTS.redo)}
+                  disabled={!canRedo || busy}
+                  onClick={redoSelectionEdit}
+                >
+                  <Redo2 size={17} />
+                </button>
+                <div className="delete-split-control">
+                  <button
+                    className="icon-button danger-icon"
+                    title={withShortcut("Cancella elemento selezionato", SHORTCUTS.delete)}
+                    disabled={!canDeleteSelectedObject || busy}
+                    onClick={deleteSelectedObjects}
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                  <button
+                    className="icon-button danger-icon split-chevron"
+                    title="Altre azioni di cancellazione"
+                    disabled={(!hasCurrentPageAreas && !hasCurrentPageLotBoundary) || busy}
+                    onClick={() => setDeleteMenuOpen((open) => !open)}
+                    aria-expanded={deleteMenuOpen}
+                  >
+                    <ChevronDown size={15} />
+                  </button>
+                  {deleteMenuOpen && (
+                    <div className="delete-menu" role="menu">
+                      <button type="button" onClick={requestClearCurrentPage} disabled={!hasCurrentPageAreas}>
+                        <Trash2 size={15} />
+                        Cancella aree pagina
+                      </button>
+                      <button type="button" onClick={removeCurrentPageLotBoundary} disabled={!hasCurrentPageLotBoundary}>
+                        <LandPlot size={15} />
+                        Cancella definizione lotto
+                      </button>
+                    </div>
+                  )}
+                </div>
+          </section>
 
           {!valuationGroup && onNotesSave && (
             <section className="tool-block property-notes-tool">
@@ -9229,17 +9280,21 @@ export default function PlanimetriaEditor({
                     if (!event.currentTarget.contains(event.relatedTarget)) setRotationMenuOpen(false);
                   }} onKeyDown={event => { if (event.key === "Escape") setRotationMenuOpen(false); }}>
                     <button type="button" className="rotation-main" disabled={!hasPdf || busy}
-                      aria-label="Ruota pagina a destra" title={withShortcut("Ruota pagina di 90° a destra", SHORTCUTS.rotateRight)}
+                      aria-label="Ruota pagina a destra" data-rotation={currentPageRotation} title={withShortcut(`Ruota pagina di 90° a destra (orientamento ${currentPageRotation}°)`, SHORTCUTS.rotateRight)}
                       onClick={() => void rotateCurrentPage(90)}>
-                      <RotateCw size={17} /><span>Ruota</span><small>{currentPageRotation}°</small>
+                      <RotateCw size={17} />
                     </button>
+                    <button type="button" className="rotation-main" disabled={!hasPdf || busy}
+                      aria-label="Ruota pagina a sinistra" title="Ruota pagina di 90° a sinistra"
+                      onClick={() => void rotateCurrentPage(-90)}><RotateCcw size={17} /></button>
                     <button type="button" className="rotation-options" disabled={!hasPdf || busy}
                       aria-label="Opzioni rotazione" aria-haspopup="menu" aria-expanded={rotationMenuOpen}
                       onClick={() => setRotationMenuOpen(open => !open)}><ChevronDown size={14} /></button>
                     {rotationMenuOpen && <div className="rotation-menu" role="menu" aria-label="Rotazione PDF">
                       <button type="button" role="menuitem" disabled={pageCount < 2}
                         onClick={() => void rotateCurrentPage(90, true)}>Ruota tutto il file di 90° a destra ({pageCount} pagine)</button>
-                      <button type="button" role="menuitem" onClick={() => void rotateCurrentPage(-90)}>Ruota solo questa pagina a sinistra</button>
+                      <button type="button" role="menuitem" disabled={pageCount < 2}
+                        onClick={() => void rotateCurrentPage(-90, true)}>Ruota tutto il file di 90° a sinistra ({pageCount} pagine)</button>
                       {!valuationGroup && <button type="button" role="menuitem" disabled={scaleExtractionBusy}
                         onClick={() => { setRotationMenuOpen(false); const data = runtimeRef.current.pdfData;
                           if (data) void triggerScaleExtraction(data.slice(0), runtimeRef.current.fileName, false, true); }}>
@@ -9272,53 +9327,6 @@ export default function PlanimetriaEditor({
                       </div>
                     )}
                   </div>
-                </div>
-                <button
-                  className="icon-button"
-                  title={withShortcut("Indietro", SHORTCUTS.undo)}
-                  disabled={!canUndo || busy}
-                  onClick={undoSelectionEdit}
-                >
-                  <Undo2 size={17} />
-                </button>
-                <button
-                  className="icon-button"
-                  title={withShortcut("Avanti", SHORTCUTS.redo)}
-                  disabled={!canRedo || busy}
-                  onClick={redoSelectionEdit}
-                >
-                  <Redo2 size={17} />
-                </button>
-                <div className="delete-split-control">
-                  <button
-                    className="icon-button danger-icon"
-                    title={withShortcut("Cancella elemento selezionato", SHORTCUTS.delete)}
-                    disabled={!canDeleteSelectedObject || busy}
-                    onClick={deleteSelectedObjects}
-                  >
-                    <Trash2 size={17} />
-                  </button>
-                  <button
-                    className="icon-button danger-icon split-chevron"
-                    title="Altre azioni di cancellazione"
-                    disabled={(!hasCurrentPageAreas && !hasCurrentPageLotBoundary) || busy}
-                    onClick={() => setDeleteMenuOpen((open) => !open)}
-                    aria-expanded={deleteMenuOpen}
-                  >
-                    <ChevronDown size={15} />
-                  </button>
-                  {deleteMenuOpen && (
-                    <div className="delete-menu" role="menu">
-                      <button type="button" onClick={requestClearCurrentPage} disabled={!hasCurrentPageAreas}>
-                        <Trash2 size={15} />
-                        Cancella aree pagina
-                      </button>
-                      <button type="button" onClick={removeCurrentPageLotBoundary} disabled={!hasCurrentPageLotBoundary}>
-                        <LandPlot size={15} />
-                        Cancella definizione lotto
-                      </button>
-                    </div>
-                  )}
                 </div>
               </div>
               <span className="canvas-pixel-meta">{canvasPixels}</span>

@@ -5432,6 +5432,7 @@ button.activity-item {
   height: 100%;
   min-height: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   overflow: hidden;
@@ -5446,6 +5447,8 @@ button.activity-item {
 }
 
 .plan-editor-header {
+  min-width: 0;
+  max-width: 100%;
   margin-bottom: 16px;
 }
 
@@ -5515,6 +5518,7 @@ button.activity-item {
 
 .plan-editor-title > div:first-child {
   min-width: 0;
+  flex: 1 1 240px;
 }
 
 .plan-editor-title h1 {
@@ -5548,6 +5552,8 @@ button.activity-item {
 }
 
 .plan-editor-meta-row > span:first-child {
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5582,7 +5588,8 @@ button.activity-item {
 }
 
 .plan-editor-actions {
-  flex: 0 0 auto;
+  min-width: 0;
+  flex: 0 1 65%;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -5684,6 +5691,8 @@ button.activity-item {
 }
 
 .plan-editor-grid {
+  min-width: 0;
+  max-width: 100%;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 300px;
   gap: 10px;
@@ -6270,7 +6279,8 @@ button.activity-item {
 
 .canvas-toolbar {
   min-height: 52px;
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   justify-content: space-between;
@@ -6284,7 +6294,7 @@ button.activity-item {
 .canvas-toolbar-meta {
   display: flex;
   min-width: 0;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -6334,10 +6344,11 @@ button.activity-item {
 }
 
 .canvas-toolbar-controls {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .canvas-toolbar-meta {
+  max-width: 100%;
   justify-content: flex-end;
   color: var(--secondary);
   font-size: 12px;
@@ -6360,6 +6371,25 @@ button.activity-item {
   border-radius: 8px;
   background: #fff;
 }
+
+.canvas-edit-actions,
+.canvas-zoom-toolbar {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.editor-history-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  position: relative;
+  z-index: 5;
+}
+
+.editor-history-controls .delete-split-control { position: static; }
+.editor-history-controls .delete-menu { left: 0; right: 0; min-width: 0; }
 
 .canvas-zoom-toolbar {
   display: inline-flex;
@@ -6385,6 +6415,12 @@ button.activity-item {
   min-width: 0;
   width: 100%;
   accent-color: var(--primary);
+}
+
+/* Keep compact overrides after base rules so 100% browser zoom fits too. */
+@container (max-width: 1000px) {
+  .canvas-zoom-toolbar > label { width: 40px; display: block; text-align: center; }
+  .canvas-zoom-toolbar > label input { display: none; }
 }
 
 .canvas-view-menu {
@@ -8115,8 +8151,8 @@ button.activity-item {
 }
 
 .selection-action-row {
-  display: grid;
-  grid-template-columns: 34px 34px 34px minmax(72px, 1fr) 34px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
@@ -8132,7 +8168,7 @@ button.activity-item {
 }
 
 .selection-action-row .compact-button {
-  width: 100%;
+  width: auto;
   min-width: 0;
   min-height: 34px;
   padding: 0 8px;
@@ -8788,7 +8824,13 @@ button.activity-item {
     flex-direction: column;
   }
 
+  .plan-editor-title > div:first-child {
+    flex: 0 1 auto;
+    width: 100%;
+  }
+
   .plan-editor-actions {
+    flex: 0 1 auto;
     width: 100%;
     justify-content: stretch;
   }

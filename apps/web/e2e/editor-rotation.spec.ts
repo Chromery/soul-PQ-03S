@@ -51,7 +51,7 @@ test("automatic text rotation, split control, whole-file geometry/calibration, u
   const url = `/studi/${study.id}/immobili/${property.id}/planimetria`;
   await page.goto(url);
   const rotate = page.getByRole("button", { name: "Ruota pagina a destra", exact: true });
-  await expect(rotate).toBeEnabled(); await expect(rotate).toContainText("90°");
+  await expect(rotate).toBeEnabled(); await expect(rotate).toHaveAttribute("data-rotation", "90");
   const save = async () => { const before = saves; await page.getByRole("button", { name: "Salva bozza", exact: true }).click();
     await expect.poll(() => saves).toBe(before + 1); };
   await rotate.click(); await expect(rotate).toBeEnabled(); await save();
@@ -71,7 +71,7 @@ test("automatic text rotation, split control, whole-file geometry/calibration, u
   expect(draft.pageScales["4"].calibration.start).toEqual({ x: 100, y: 100 });
   await rotate.click(); await expect(rotate).toBeEnabled(); await rotate.click(); await expect(rotate).toBeEnabled(); await save();
   expect(draft.pageRotations["1"]).toBe(0);
-  await page.reload(); await expect(rotate).toBeEnabled(); await expect(rotate).toContainText("0°");
+  await page.reload(); await expect(rotate).toBeEnabled(); await expect(rotate).toHaveAttribute("data-rotation", "0");
   expect(unexpected).toEqual([]);
 });
 
@@ -124,7 +124,7 @@ for (const mode of ["pending", "missing", "legacy-ai"] as const) test(`scanned P
   }
   await expect.poll(() => polls).toBeGreaterThan(0);
   await expect(page.getByText("Orientamento OCR verificato", { exact: true }).first()).toBeVisible();
-  await expect(rotate).toContainText(mode !== "missing" ? "90°" : "0°");
+  await expect(rotate).toHaveAttribute("data-rotation", mode !== "missing" ? "90" : "0");
   await page.getByRole("button", { name: "Salva bozza", exact: true }).click();
   await expect.poll(() => saves).toBe(1);
   expect(draft.pageRotations["1"]).toBe(mode !== "missing" ? 90 : 0);
