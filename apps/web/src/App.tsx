@@ -2,6 +2,7 @@ import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "
 import { useAuth } from "@clerk/react";
 import type { ReactNode } from "react";
 import { usePresentationDraftStore } from "./presentation-draft-store";
+import { allocatePresentationTotal } from "./presentation-group-allocation";
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -81,7 +82,7 @@ import { CurrentOperator, useIdentity } from "./Auth";
 import { PropertyGroupingSuggestions } from "./PropertyGroupingSuggestions";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.7";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.8";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -158,6 +159,8 @@ type PropertyItem = {
   currentImu?: number | null;
   estimatedImu?: number | null;
   imuDiff: number;
+  currentImuRateOverride?: number | null;
+  currentImuMultiplierOverride?: number | null;
   imuRateOverride?: number | null;
   imuMultiplierOverride?: number | null;
   imuCalculation?: PropertyImuCalculation | null;
@@ -188,7 +191,11 @@ type PropertyItem = {
   priceLists?: PriceListItem[];
 };
 
+type PropertyImuOverridePatch = { imuRateOverride?: number | null; imuMultiplierOverride?: number | null; currentImuRateOverride?: number | null; currentImuMultiplierOverride?: number | null };
+
 type PropertyImuOverrideUpdate = {
+  currentImuRateOverride: number | null;
+  currentImuMultiplierOverride: number | null;
   imuRateOverride: number | null;
   imuMultiplierOverride: number | null;
   currentImu: number | null;
@@ -3129,7 +3136,7 @@ function App() {
 
   async function savePropertyImuOverrides(
     propertyId: string,
-    patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
+    patch: PropertyImuOverridePatch,
   ): Promise<PropertyImuOverrideUpdate> {
     const response = await fetch(`${API_BASE_URL}/properties/${encodeURIComponent(propertyId)}`, {
       method: "PATCH",
@@ -3142,15 +3149,8 @@ function App() {
     }
     const update = (await response.json()) as PropertyImuOverrideUpdate;
     updatePropertyInStudies(propertyId, (property) => ({ ...property, ...update }), true);
-    if (Object.prototype.hasOwnProperty.call(patch, "imuMultiplierOverride")) {
-      flash(update.imuMultiplierOverride === null
-        ? "Ripristinato il moltiplicatore catastale di sistema."
-        : "Moltiplicatore catastale manuale salvato e applicato ai calcoli.");
-    } else {
-      flash(update.imuRateOverride === null
-        ? "Ripristinata l’aliquota IMU predefinita dal sistema."
-        : "Aliquota IMU manuale salvata e applicata ai calcoli.");
-    }
+    const current = "currentImuRateOverride" in patch || "currentImuMultiplierOverride" in patch;
+    flash(`Parametri ${current ? "IMU attuale" : "IMU prevista"} salvati. L’altro calcolo rimane indipendente.`);
     return update;
   }
 
@@ -6700,7 +6700,7 @@ function presentationMoneyToCents(value: string, required: false): number | null
 function presentationMoneyToCents(value: string, required: boolean) {
   if (!value.trim()) return required ? undefined : null;
   const parsed = parseOptionalDecimalInput(value);
-  if (parsed === null || parsed < 0) return undefined;
+  if (parsed === null || !Number.isSafeInteger(Math.round(parsed * 100)) || parsed < 0) return undefined;
   return Math.round((parsed + 1e-9) * 100) / 100;
 }
 
@@ -6854,7 +6854,7 @@ function presentationRowGroups(properties: PresentationPropertyDraft[], sources:
         property[field] = values.some(value => value == null) ? "" : formatPresentationMoneyInput(
           values.reduce<number>((sum, value) => sum + Math.round(value! * 100), 0) / 100);
       } else {
-        const values = [...new Set(members.map(member => member[field]))];
+        const values = [...new Set(members.map(member => member[field].trim()).filter(Boolean))];
         const refs = field === "foglioParticellaSub" ? values.map(value => /^(.*? - Sub\. )(.+)$/.exec(value)) : [];
         property[field] = refs.length && refs.every(ref => ref && ref[1] === refs[0]?.[1])
           ? refs[0]![1] + refs.map(ref => ref![2]).join(", ") : values.join(" / ");
@@ -6896,15 +6896,77 @@ function PresentationGroupingToolbar({ groups, selectedIds, persistence, onSelec
   </div>;
 }
 
-function PresentationGroupCells({ group, outcomes }: { group: PresentationRowGroup; outcomes: Map<string, PropertyOutcome> }) {
+function PresentationGroupCells({ group, outcomes, persistence, sources = [] }: {
+  group: PresentationRowGroup; outcomes: Map<string, PropertyOutcome>;
+  persistence: ReturnType<typeof usePresentationDraftStore>;
+  sources?: readonly Pick<PropertyItem, "id" | "currentImuCalculation" | "imuCalculation">[];
+}) {
   const values = new Set(group.members.map(member => outcomes.get(member.id) ?? "Neutro"));
+  function change(field: PresentationPropertyField, value: string | null) {
+    const changes: Record<string, string | null> = {};
+    const numeric = ["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(field);
+    const amount = value === null ? null : presentationMoneyToCents(value, false);
+    const shares = numeric && amount != null ? allocatePresentationTotal(amount,
+      group.members.map(member => presentationMoneyToCents(member[field], false) ?? null),
+      group.members.map(member => presentationMoneyToCents(member.renditaAttuale, false) ?? 0)) : null;
+    const linked = field === "renditaAttuale" ? "imuAttuale" : field === "renditaAttribuibile" ? "imuOttenibile" : null;
+    group.members.forEach((member, index) => {
+      const next = shares ? formatPresentationMoneyInput(shares[index]) : value;
+      changes[`${member.id}:${field}`] = next;
+      if (linked && value === null) changes[`${member.id}:${linked}`] = null;
+      else if (linked && next !== null) {
+        const source = sources.find(source => source.id === member.id);
+        const calculation = field === "renditaAttuale" ? source?.currentImuCalculation : source?.imuCalculation;
+        const recalculated = presentationImuFromRendita(next, calculation);
+        if (recalculated !== null) changes[`${member.id}:${linked}`] = recalculated;
+      }
+    });
+    persistence.change(changes);
+  }
   return <>
     <td>{values.size === 1 ? <OutcomeBadge outcome={[...values][0]} /> : <span>Esiti misti</span>}<small className="presentation-group-count">{group.members.length} {group.members.length === 1 ? "immobile" : "immobili"}</small></td>
-    {PRESENTATION_PROPERTY_FIELDS.map(field => <td key={field} className="presentation-group-value">{
-      ["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(field)
-        ? formatPresentationDraftAmount(group.property[field], "n.d.") : group.property[field]
-    }</td>)}
+    {PRESENTATION_PROPERTY_FIELDS.map(field => <td key={field} className="presentation-group-value">
+      <PresentationGroupInput key={`${field}:${group.members.map(member => member.id).join(",")}`}
+        field={field} value={group.property[field]} groupKey={group.key} disabled={!persistence.loaded}
+        modified={group.members.some(member => `${member.id}:${field}` in persistence.overrides)}
+        onCommit={value => change(field, value)} onReset={() => change(field, null)} />
+    </td>)}
   </>;
+}
+
+function PresentationGroupInput({ field, value, groupKey, disabled, modified, onCommit, onReset }: {
+  field: PresentationPropertyField; value: string; groupKey: string; disabled: boolean; modified: boolean;
+  onCommit: (value: string) => void; onReset: () => void;
+}) {
+  const [input, setInput] = useState(value);
+  const [editing, setEditing] = useState(false);
+  const [editError, setEditError] = useState(false);
+  useEffect(() => { if (!editing) setInput(value); }, [value, editing]);
+  const numeric = ["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(field);
+  const invalid = numeric ? presentationMoneyInputInvalid(input, field.startsWith("rendita")) : !input.trim();
+  function commit() {
+    // Invalid edits never reach the draft or PDF.
+    if (invalid) return false;
+    setEditError(false);
+    if (input !== value) onCommit(input);
+    setEditing(false);
+    return true;
+  }
+  return <div className="presentation-input-with-override">
+    <input value={input} disabled={disabled} maxLength={1000} inputMode={numeric ? "decimal" : "text"}
+      aria-label={`${field} del ${groupKey}`} aria-invalid={invalid} className={invalid ? "invalid" : ""}
+      title="Modifica la bozza di tutti i membri del gruppo. Importi ripartiti proporzionalmente; Invio o uscita dal campo per salvare."
+      onFocus={() => setEditing(true)} onChange={event => { setInput(event.target.value); setEditError(false); }}
+      onBlur={() => { if (!commit()) { setInput(value); setEditing(false); setEditError(true); } }}
+      onKeyDown={event => {
+        if (event.key === "Enter") { event.preventDefault(); if (commit()) event.currentTarget.blur(); else setEditError(true); }
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setInput(value); setEditing(false); }
+      }} />
+    {modified && <button type="button" className="icon-button" disabled={disabled}
+      aria-label={`Ripristina ${field} del ${groupKey}`} title="Ripristina questo campo dai dati stima per tutti i membri"
+      onClick={onReset}><RefreshCw size={12} /></button>}
+    {editError && <small role="alert">Valore non valido: modifica non salvata.</small>}
+  </div>;
 }
 
 function PresentationAction({
@@ -7247,7 +7309,7 @@ function PresentationAction({
 
             <PresentationGroupingToolbar groups={selectionGroups} selectedIds={selectedPropertyIds}
               persistence={{ ...persistence, loaded: persistence.loaded && !busy }} />
-            <p className="modal-note">I raggruppamenti valgono solo per la presentazione. Nel PDF vengono sommati soltanto gli immobili inclusi; espandi un gruppo per includerli o escluderli singolarmente.</p>
+            <p className="modal-note">I raggruppamenti valgono solo per la presentazione. Nel PDF vengono sommati soltanto gli immobili inclusi; espandi un gruppo per includerli o escluderli singolarmente. Modificando la riga del gruppo aggiorni solo i membri inclusi: testi uguali per tutti, importi ripartiti proporzionalmente (in assenza di valori, secondo le rendite attuali o in parti uguali). Invio o uscita dal campo per salvare.</p>
 
             <div className="presentation-generator-table-wrap">
               <table className="presentation-preview-table presentation-generator-table"><thead><tr>
@@ -7269,7 +7331,8 @@ function PresentationAction({
                     </button></div>
                     <small>{group.members.filter(member => selectedPropertyIds.includes(member.id)).length}/{group.members.length} inclusi</small>
                   </td>
-                  <PresentationGroupCells group={presentationRowGroups(group.members.filter(member => selectedPropertyIds.includes(member.id)), study.properties, persistence.overrides)[0] ?? group} outcomes={selectionOutcomes} />
+                  <PresentationGroupCells group={presentationRowGroups(group.members.filter(member => selectedPropertyIds.includes(member.id)), study.properties, persistence.overrides)[0] ?? group} outcomes={selectionOutcomes}
+                    sources={study.properties} persistence={{ ...persistence, loaded: persistence.loaded && !busy && group.members.some(member => selectedPropertyIds.includes(member.id)) }} />
                 </tr>}
                 {(group.members.length === 1 || expandedPresentationGroups.has(group.key)) && group.members.map((property) => {
                 const propertyDraft = propertyDraftById.get(property.id);
@@ -7387,7 +7450,7 @@ function PresentationDataPreview({
   onPropertyFieldReset,
   onReset,
 }: {
-  sourceProperties: readonly PresentationGroupingSource[];
+  sourceProperties: readonly (PresentationGroupingSource & Pick<PropertyItem, "currentImuCalculation" | "imuCalculation">)[];
   persistence: ReturnType<typeof usePresentationDraftStore>;
   draft: PresentationDraft;
   baseline: PresentationDraft;
@@ -7517,7 +7580,9 @@ function PresentationDataPreview({
       <p className="presentation-preview-info">
         Se modifichi una rendita, la relativa IMU viene ricalcolata soltanto per la presentazione con
         aliquota e moltiplicatore della stima. Le aree e i valori salvati nell’editor non vengono modificati.
-        {" "}I gruppi sono sommati in un’unica riga nel PDF. Espandili per modificare i singoli immobili.
+        {" "}Puoi modificare anche la riga del gruppo: i testi vengono applicati ai membri e gli importi ripartiti proporzionalmente
+        (in assenza di valori, secondo le rendite attuali o in parti uguali). Invio o uscita dal campo per salvare.
+        Espandi il gruppo per modificare un singolo immobile; la freccia di ripristino recupera i valori della stima.
       </p>
 
       <PresentationGroupingToolbar groups={groups} selectedIds={selectedRows} persistence={persistence} onSelectionClear={() => setSelectedRows([])} />
@@ -7553,7 +7618,7 @@ function PresentationDataPreview({
                     {expandedGroups.has(group.key) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                   </button>
                 </div></td>
-                <PresentationGroupCells group={group} outcomes={outcomes} />
+                <PresentationGroupCells group={group} outcomes={outcomes} persistence={persistence} sources={sourceProperties} />
               </tr>}
               {(group.members.length === 1 || expandedGroups.has(group.key)) && group.members.map(property => (
               <tr key={property.id} data-property-id={property.id} className={group.members.length > 1 ? "presentation-group-member" : ""}>
@@ -7811,7 +7876,7 @@ function StudyDetail({
   ) => void;
   onImuOverridesSave: (
     propertyId: string,
-    patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
+    patch: PropertyImuOverridePatch,
   ) => Promise<PropertyImuOverrideUpdate>;
   onOutcomeChange: (propertyId: string, outcome: PropertyOutcome) => Promise<boolean>;
   onNotesSave: (propertyId: string, notes: string) => Promise<boolean>;
@@ -8730,7 +8795,7 @@ function PropertyAreaDetail({
   onOpenDocument: (type: PropertyDocumentKind) => void;
   onImuOverridesSave: (
     propertyId: string,
-    patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
+    patch: PropertyImuOverridePatch,
   ) => Promise<PropertyImuOverrideUpdate>;
   onMissing: (message: string) => void;
   onClose: () => void;
@@ -9669,7 +9734,7 @@ function ImuCalculationBreakdown({
   property: PropertyItem;
   onImuOverridesSave: (
     propertyId: string,
-    patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
+    patch: PropertyImuOverridePatch,
   ) => Promise<PropertyImuOverrideUpdate>;
 }) {
   const calculation = property.imuCalculation;
@@ -9769,7 +9834,7 @@ function ImuCalculationBreakdown({
         </div>
         <p>
           {currentImuSource === "calculated"
-            ? "Calcolata da PQ dalla rendita attuale con la stessa aliquota comunale e la stessa metodologia usate per l’IMU prevista."
+            ? "Calcolata dalla rendita attuale con aliquota e moltiplicatore indipendenti dall’IMU prevista."
             : currentImuSource === "stored"
               ? "Dato registrato nell’ERP o inserito manualmente: PQ non lo ha ricalcolato."
               : "Né il dato registrato né un’aliquota calcolabile sono disponibili."}
@@ -9804,26 +9869,29 @@ function ImuOverrideControls({
   contextLabel: string;
   onSave: (
     propertyId: string,
-    patch: { imuRateOverride?: number | null; imuMultiplierOverride?: number | null },
+    patch: PropertyImuOverridePatch,
   ) => Promise<PropertyImuOverrideUpdate>;
   compact?: boolean;
 }) {
   const calculated = calculation?.status === "calculated" ? calculation : null;
+  const isCurrent = contextLabel === "IMU attuale";
+  const rateOverride = isCurrent ? property.currentImuRateOverride : property.imuRateOverride;
+  const multiplierOverride = isCurrent ? property.currentImuMultiplierOverride : property.imuMultiplierOverride;
   const [rateInput, setRateInput] = useState("");
   const [multiplierInput, setMultiplierInput] = useState("");
   const [savingField, setSavingField] = useState<"rate" | "multiplier" | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const rate = property.imuRateOverride ?? calculated?.ratePercent ?? null;
-    const multiplier = property.imuMultiplierOverride ?? calculated?.cadastralMultiplier ?? null;
+    const rate = rateOverride ?? calculated?.ratePercent ?? null;
+    const multiplier = multiplierOverride ?? calculated?.cadastralMultiplier ?? null;
     setRateInput(rate === null ? "" : formatImuOverrideInput(rate));
     setMultiplierInput(multiplier === null ? "" : formatImuOverrideInput(multiplier));
     setError("");
   }, [
     property.id,
-    property.imuRateOverride,
-    property.imuMultiplierOverride,
+    rateOverride,
+    multiplierOverride,
     calculated?.ratePercent,
     calculated?.cadastralMultiplier,
   ]);
@@ -9834,7 +9902,9 @@ function ImuOverrideControls({
     try {
       await onSave(
         property.id,
-        field === "rate" ? { imuRateOverride: value } : { imuMultiplierOverride: value },
+        field === "rate"
+          ? (isCurrent ? { currentImuRateOverride: value } : { imuRateOverride: value })
+          : (isCurrent ? { currentImuMultiplierOverride: value } : { imuMultiplierOverride: value }),
       );
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Salvataggio override IMU non riuscito");
@@ -9866,7 +9936,7 @@ function ImuOverrideControls({
       <div className="imu-override-field">
         <div>
           <span>Aliquota IMU</span>
-          {property.imuRateOverride !== null && property.imuRateOverride !== undefined && (
+          {rateOverride !== null && rateOverride !== undefined && (
             <span className="manual-override-badge">Manuale</span>
           )}
         </div>
@@ -9890,7 +9960,7 @@ function ImuOverrideControls({
           <button type="button" disabled={savingField !== null} onClick={applyRate}>
             {savingField === "rate" ? "Salvataggio..." : "Applica"}
           </button>
-          {property.imuRateOverride !== null && property.imuRateOverride !== undefined && (
+          {rateOverride !== null && rateOverride !== undefined && (
             <button type="button" disabled={savingField !== null} onClick={() => void saveOverride("rate", null)}>
               Ripristina
             </button>
@@ -9906,7 +9976,7 @@ function ImuOverrideControls({
       <div className="imu-override-field">
         <div>
           <span>Moltiplicatore catastale</span>
-          {property.imuMultiplierOverride !== null && property.imuMultiplierOverride !== undefined && (
+          {multiplierOverride !== null && multiplierOverride !== undefined && (
             <span className="manual-override-badge">Manuale</span>
           )}
         </div>
@@ -9930,7 +10000,7 @@ function ImuOverrideControls({
           <button type="button" disabled={savingField !== null} onClick={applyMultiplier}>
             {savingField === "multiplier" ? "Salvataggio..." : "Applica"}
           </button>
-          {property.imuMultiplierOverride !== null && property.imuMultiplierOverride !== undefined && (
+          {multiplierOverride !== null && multiplierOverride !== undefined && (
             <button type="button" disabled={savingField !== null} onClick={() => void saveOverride("multiplier", null)}>
               Ripristina
             </button>

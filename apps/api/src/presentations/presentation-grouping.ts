@@ -17,7 +17,7 @@ export function groupPresentationRows(
   return [...groups.values()].map(members => {
     if (members.length === 1) return members[0];
     const join = (field: "societa" | "comune" | "indirizzo" | "categoria") =>
-      [...new Set(members.map(member => member[field]))].join(" / ");
+      [...new Set(members.map(member => member[field].trim()).filter(Boolean))].join(" / ");
     const sum = (field: "renditaAttuale" | "renditaAttribuibile" | "imuAttuale" | "imuOttenibile") =>
       members.some(member => member[field] == null) ? null
         : members.reduce((total, member) => total + Math.round(member[field]! * 100), 0) / 100;

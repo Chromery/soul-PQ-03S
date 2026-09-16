@@ -16,6 +16,7 @@ import {
   formapsTerritoryByMunicipalityId,
   resolveFormapsTerritory,
 } from "../formaps-territories/formaps-territory-resolver.js";
+import { imuOverrides, type ImuOverrides } from "../imu/imu-overrides.js";
 import { ImuService } from "../imu/imu.service.js";
 import type { ImuCalculation } from "../imu/imu.types.js";
 import { PriceListsService } from "../price-lists/price-lists.service.js";
@@ -297,7 +298,7 @@ export class StudiesService {
       study.properties.length === 0
         ? 0
         : Math.max(...study.properties.map((property) => property.displayOrder)) + 1;
-    const currentImuCalculation = this.calculateImu(input.currentRendita, input, study.provincia);
+    const currentImuCalculation = this.calculateImu(input.currentRendita, input, study.provincia, true);
     const estimatedImuCalculation = input.estimatedRendita > 0
       ? this.calculateImu(input.estimatedRendita, input, study.provincia)
       : null;
@@ -550,7 +551,7 @@ export class StudiesService {
     );
     const currentImu = sum(
       properties.map((property) => (
-        calculatedAmount(this.calculateImu(Number(property.currentRendita), property))
+        calculatedAmount(this.calculateImu(Number(property.currentRendita), property, undefined, true))
         ?? (property.currentImu === null ? 0 : Number(property.currentImu))
       )),
     );
@@ -609,7 +610,7 @@ export class StudiesService {
     const elencoSubalterni = property.documents.find((document) => document.type === DocumentType.ELENCO_SUBALTERNI);
     const currentRendita = Number(property.currentRendita);
     const estimatedRendita = effectiveEstimatedRendita(property, usesStudyGroupDraft);
-    const currentImuCalculation = this.calculateImu(currentRendita, property);
+    const currentImuCalculation = this.calculateImu(currentRendita, property, undefined, true);
     const estimatedImuCalculation = estimatedRendita > 0 || property.hasStudy
       ? this.calculateImu(estimatedRendita, property)
       : null;
@@ -654,6 +655,8 @@ export class StudiesService {
       estimatedImu,
       imuDiff: estimatedImu === null || currentImu === null ? 0 : estimatedImu - currentImu,
       imuRateOverride: property.imuRateOverride === null ? null : Number(property.imuRateOverride),
+      currentImuRateOverride: property.currentImuRateOverride == null ? null : Number(property.currentImuRateOverride),
+      currentImuMultiplierOverride: property.currentImuMultiplierOverride == null ? null : Number(property.currentImuMultiplierOverride),
       imuMultiplierOverride: property.imuMultiplierOverride === null ? null : Number(property.imuMultiplierOverride),
       imuCalculation: estimatedImuCalculation,
       currentImuCalculation: currentImuSource === "calculated" ? currentImuCalculation : null,
@@ -704,26 +707,21 @@ export class StudiesService {
   private calculateImu(
     rendita: number,
     property: (
-      Pick<Property, "categoria" | "comune" | "provincia" | "imuRateOverride" | "imuMultiplierOverride">
+      (Pick<Property, "categoria" | "comune" | "provincia"> & ImuOverrides)
       | (Pick<CreatePropertyInput, "categoria" | "comune" | "provincia"> & {
         imuRateOverride?: null;
         imuMultiplierOverride?: null;
       })
     ),
     fallbackProvince?: string,
+    current = false,
   ) {
     return this.imu.calculate({
       rendita,
       categoria: property.categoria,
       comune: property.comune ?? "",
       provincia: property.provincia ?? fallbackProvince,
-      rateOverridePercent: property.imuRateOverride === null || property.imuRateOverride === undefined
-        ? null
-        : Number(property.imuRateOverride),
-      cadastralMultiplierOverride:
-        property.imuMultiplierOverride === null || property.imuMultiplierOverride === undefined
-          ? null
-          : Number(property.imuMultiplierOverride),
+      ...imuOverrides(property, current),
     });
   }
 }

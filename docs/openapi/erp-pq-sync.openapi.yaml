@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Soul Prospect Qualifier - ERP/PQ Sync API
-  version: 1.5.3
+  version: 1.5.4
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -9,6 +9,13 @@ info:
     API server-to-server esposte da Soul Prospect Qualifier per sincronizzare gli
     studi di fattibilita dall'ERP e permettere all'ERP di leggere le modifiche
     successive prodotte in PQ.
+
+    La v1.5.4 (PQ 1.1.8, staging) separa i parametri IMU attuale e prevista.
+    Gli override preesistenti sono copiati all'IMU attuale senza cambiare gli importi.
+    `aliquota_imu_override` e `moltiplicatore_imu_override` descrivono la prevista;
+    i nuovi campi con suffisso `_attuale_override` descrivono l'attuale.
+    Null indica il parametro di sistema. Questi campi sono restituiti nel pull,
+    non sono nuovi campi di scrittura nel sync ERP.
 
     La v1.5 (PQ 1.1.2) aggiunge `metriche.valore_ottimizzazione` nel pull:
     somma delle rendite attuali meno attribuibili dei soli immobili con esito Positivo,
@@ -1131,6 +1138,26 @@ components:
           type:
             - string
             - "null"
+        aliquota_imu_override:
+          type: [number, "null"]
+          description: Aliquota percentuale manuale IMU prevista; null usa il sistema.
+        moltiplicatore_imu_override:
+          type: [number, "null"]
+          description: Moltiplicatore manuale IMU prevista; null usa il sistema.
+        aliquota_imu_attuale_override:
+          type: [number, "null"]
+          description: Aliquota percentuale manuale IMU attuale, indipendente dalla prevista.
+        moltiplicatore_imu_attuale_override:
+          type: [number, "null"]
+          description: Moltiplicatore manuale IMU attuale, indipendente dalla prevista.
+        calcolo_imu:
+          type: [object, "null"]
+          additionalProperties: true
+          description: Dettaglio del calcolo IMU prevista, compresi status, aliquota e moltiplicatore.
+        calcolo_imu_attuale:
+          type: [object, "null"]
+          additionalProperties: true
+          description: Dettaglio del calcolo IMU attuale con parametri indipendenti.
         in_studio:
           type: boolean
         esito:

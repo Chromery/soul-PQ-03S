@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ErpSyncService } from "../src/erp-sync/erp-sync.service.js";
+import { ImuCalculator } from "../src/imu/imu-calculator.js";
 
 const dayBefore = new Date("2026-08-31T10:00:00.000Z");
 const presentationCreatedAt = new Date("2026-09-02T09:30:00.000Z");
@@ -124,6 +125,27 @@ function serviceFixture(withPresentation: boolean, outcome = "Positivo") {
   );
   return { service, findManyInput: () => findManyInput };
 }
+
+test("ERP pull exports independent current and forecast IMU amounts and parameters", async () => {
+  const study = studyFixture(false);
+  Object.assign(study.properties[0], { imuRateOverride: 0.5, imuMultiplierOverride: 80,
+    currentImuRateOverride: 0.9, currentImuMultiplierOverride: 70 });
+  const calculator = new ImuCalculator();
+  const service = new ErpSyncService({ feasibilityStudy: { findMany: async () => [study] } } as never,
+    {} as never, {} as never, {} as never, {} as never,
+    { calculate: calculator.calculate.bind(calculator) } as never, {} as never,
+    { get: (_name: string, fallback: string) => fallback } as never);
+  const result = await service.listModifiedStudies();
+  const property = result.studi[0].immobili[0];
+  assert.equal(property.imu_attuale, "661.50");
+  assert.equal(property.imu_prevista, "336.00");
+  assert.equal(property.aliquota_imu_attuale_override, 0.9);
+  assert.equal(property.moltiplicatore_imu_attuale_override, 70);
+  assert.equal(property.aliquota_imu_override, 0.5);
+  assert.equal(property.moltiplicatore_imu_override, 80);
+  assert.equal(property.calcolo_imu_attuale.status, "calculated");
+  assert.equal(result.studi[0].metriche.differenza_imu, "-325.50");
+});
 
 test("il sync ERP riconosce e riesporta Sospeso senza confonderlo con Neutro", async () => {
   const fixture = serviceFixture(false, "Sospeso");

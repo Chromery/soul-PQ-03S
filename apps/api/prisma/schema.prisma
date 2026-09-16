@@ -246,6 +246,8 @@ model Property {
   estimatedImu          Decimal?                @db.Decimal(14, 2)
   imuDiff               Decimal                 @db.Decimal(14, 2)
   imuRateOverride       Decimal?                @db.Decimal(7, 4)
+  currentImuRateOverride Decimal?               @db.Decimal(7, 4)
+  currentImuMultiplierOverride Decimal?         @db.Decimal(10, 4)
   imuMultiplierOverride Decimal?                @db.Decimal(10, 4)
   displayOrder          Int                     @default(0)
   outcome               String

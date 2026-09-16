@@ -23,6 +23,7 @@ import type {
   StudyGroupAnalysisDraft,
   StudyVersion,
 } from "../generated/prisma/client.js";
+import { imuOverrides, type ImuOverrides } from "../imu/imu-overrides.js";
 import { ImuService } from "../imu/imu.service.js";
 import type { ImuCalculation } from "../imu/imu.types.js";
 import { PriceListsService } from "../price-lists/price-lists.service.js";
@@ -601,7 +602,7 @@ export class ErpSyncService {
         ? Number(property.estimatedRendita)
         : estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
           ?? Number(property.estimatedRendita);
-      const currentCalculation = this.calculateImu(currentRendita, property);
+      const currentCalculation = this.calculateImu(currentRendita, property, true);
       const estimatedCalculation = estimatedRendita > 0 || property.hasStudy
         ? this.calculateImu(estimatedRendita, property)
         : null;
@@ -613,6 +614,7 @@ export class ErpSyncService {
         estimatedImu: calculatedAmount(estimatedCalculation)
           ?? (property.estimatedImu === null ? null : Number(property.estimatedImu)),
         estimatedCalculation,
+        currentCalculation,
       };
     });
     const currentImuTotal = sum(calculatedProperties.map((item) => item.currentImu ?? 0));
@@ -648,7 +650,7 @@ export class ErpSyncService {
         numero_immobili: study.properties.length,
         numero_immobili_categoria_d: study.properties.filter((property) => isCategoryD(property.categoria)).length,
       },
-      immobili: calculatedProperties.map(({ property, estimatedRendita, currentImu, estimatedImu, estimatedCalculation }) => ({
+      immobili: calculatedProperties.map(({ property, estimatedRendita, currentImu, estimatedImu, estimatedCalculation, currentCalculation }) => ({
         immobile_erp_id: property.id,
         foglio: property.foglio,
         particella: property.particella,
@@ -668,6 +670,9 @@ export class ErpSyncService {
         imu_attuale: currentImu === null ? null : currentImu.toFixed(2),
         imu_prevista: estimatedImu === null ? null : estimatedImu.toFixed(2),
         aliquota_imu_override: property.imuRateOverride === null ? null : Number(property.imuRateOverride),
+        aliquota_imu_attuale_override: property.currentImuRateOverride == null ? null : Number(property.currentImuRateOverride),
+        moltiplicatore_imu_attuale_override: property.currentImuMultiplierOverride == null ? null : Number(property.currentImuMultiplierOverride),
+        calcolo_imu_attuale: currentCalculation,
         moltiplicatore_imu_override: property.imuMultiplierOverride === null ? null : Number(property.imuMultiplierOverride),
         calcolo_imu: estimatedCalculation,
         scala: property.scaleDenominator,
@@ -695,17 +700,15 @@ export class ErpSyncService {
 
   private calculateImu(
     rendita: number,
-    property: Pick<Property, "categoria" | "comune" | "provincia" | "imuRateOverride" | "imuMultiplierOverride">,
+    property: Pick<Property, "categoria" | "comune" | "provincia"> & ImuOverrides,
+    current = false,
   ) {
     return this.imu.calculate({
       rendita,
       categoria: property.categoria,
       comune: property.comune,
       provincia: property.provincia,
-      rateOverridePercent: property.imuRateOverride === null ? null : Number(property.imuRateOverride),
-      cadastralMultiplierOverride: property.imuMultiplierOverride === null
-        ? null
-        : Number(property.imuMultiplierOverride),
+      ...imuOverrides(property, current),
     });
   }
 

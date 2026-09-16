@@ -5,6 +5,7 @@ import { documentTypePath, parseDocumentType } from "../document-types.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { DocumentType } from "../generated/prisma/enums.js";
 import { DocumentStorageService } from "../erp-sync/document-storage.service.js";
+import { imuOverrides, type ImuOverrides } from "../imu/imu-overrides.js";
 import { ImuService } from "../imu/imu.service.js";
 import type { ImuCalculation } from "../imu/imu.types.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -173,7 +174,7 @@ export class PropertiesService {
     const savedAt = new Date(payload.savedAt);
     const aiScaleDetectedAt = payload.aiScaleDetectedAt ? new Date(payload.aiScaleDetectedAt) : null;
     const totalEstimatedRendita = estimatedRenditaFromDraftPayload(payload, property.oneri);
-    const currentImuCalculation = this.calculateImu(Number(property.currentRendita), property);
+    const currentImuCalculation = this.calculateImu(Number(property.currentRendita), property, true);
     const estimatedImuCalculation = totalEstimatedRendita === null
       ? null
       : this.calculateImu(totalEstimatedRendita, property);
@@ -285,7 +286,7 @@ export class PropertiesService {
     };
     const propertyUpdates = group.properties.map((property) => {
       const estimatedRendita = allocations.get(property.id) ?? 0;
-      const currentImuCalculation = this.calculateImu(Number(property.currentRendita), property);
+      const currentImuCalculation = this.calculateImu(Number(property.currentRendita), property, true);
       const estimatedImuCalculation = this.calculateImu(estimatedRendita, property);
       const currentImu = calculatedAmount(currentImuCalculation)
         ?? (property.currentImu === null ? null : Number(property.currentImu));
@@ -394,7 +395,7 @@ export class PropertiesService {
     };
     const propertyUpdates = properties.map((property) => {
       const estimatedRendita = allocations.get(property.id) ?? 0;
-      const currentImuCalculation = this.calculateImu(Number(property.currentRendita), property);
+      const currentImuCalculation = this.calculateImu(Number(property.currentRendita), property, true);
       const estimatedImuCalculation = this.calculateImu(estimatedRendita, property);
       const currentImu = calculatedAmount(currentImuCalculation)
         ?? (property.currentImu === null ? null : Number(property.currentImu));
@@ -520,9 +521,11 @@ export class PropertiesService {
     const hasOutcome = Object.prototype.hasOwnProperty.call(input, "outcome");
     const hasImuRateOverride = Object.prototype.hasOwnProperty.call(input, "imuRateOverride");
     const hasImuMultiplierOverride = Object.prototype.hasOwnProperty.call(input, "imuMultiplierOverride");
+    const hasCurrentRate = Object.prototype.hasOwnProperty.call(input, "currentImuRateOverride");
+    const hasCurrentMultiplier = Object.prototype.hasOwnProperty.call(input, "currentImuMultiplierOverride");
     const hasOneri = Object.prototype.hasOwnProperty.call(input, "oneri");
     const hasNotes = Object.prototype.hasOwnProperty.call(input, "notes");
-    const hasImuOverride = hasImuRateOverride || hasImuMultiplierOverride;
+    const hasImuOverride = hasImuRateOverride || hasImuMultiplierOverride || hasCurrentRate || hasCurrentMultiplier;
     if (!hasOutcome && !hasImuOverride && !hasOneri && !hasNotes) {
       throw new BadRequestException("Nessuna modifica immobile supportata");
     }
@@ -543,6 +546,10 @@ export class PropertiesService {
         ? null
         : Number(existing.imuMultiplierOverride);
     const oneri = hasOneri ? validateOneri(input.oneri) : existing.oneri;
+    const currentImuRateOverride = hasCurrentRate ? validateImuRateOverride(input.currentImuRateOverride)
+      : existing.currentImuRateOverride == null ? null : Number(existing.currentImuRateOverride);
+    const currentImuMultiplierOverride = hasCurrentMultiplier ? validateImuMultiplierOverride(input.currentImuMultiplierOverride)
+      : existing.currentImuMultiplierOverride == null ? null : Number(existing.currentImuMultiplierOverride);
     const notes = hasNotes ? validatePropertyNotes(input.notes) : existing.notes;
     const property = await this.prisma.property.update({
       where: { id: propertyId },
@@ -550,6 +557,8 @@ export class PropertiesService {
         ...(hasOutcome ? { outcome } : {}),
         ...(hasImuRateOverride ? { imuRateOverride } : {}),
         ...(hasImuMultiplierOverride ? { imuMultiplierOverride } : {}),
+        ...(hasCurrentRate ? { currentImuRateOverride } : {}),
+        ...(hasCurrentMultiplier ? { currentImuMultiplierOverride } : {}),
         ...(hasOneri ? { oneri } : {}),
         ...(hasNotes ? { notes } : {}),
       },
@@ -558,10 +567,10 @@ export class PropertiesService {
       return { id: property.id, outcome: property.outcome, oneri: property.oneri, notes: property.notes };
     }
 
-    const calculationProperty = { ...property, imuRateOverride, imuMultiplierOverride };
+    const calculationProperty = { ...property, imuRateOverride, imuMultiplierOverride, currentImuRateOverride, currentImuMultiplierOverride };
     const estimatedRendita = estimatedRenditaFromAnalysisDraft(existing.analysisDraft, oneri)
       ?? Number(property.estimatedRendita);
-    const currentImuCalculation = this.calculateImu(Number(property.currentRendita), calculationProperty);
+    const currentImuCalculation = this.calculateImu(Number(property.currentRendita), calculationProperty, true);
     const estimatedImuCalculation = estimatedRendita > 0 || property.hasStudy
       ? this.calculateImu(estimatedRendita, calculationProperty)
       : null;
@@ -589,6 +598,8 @@ export class PropertiesService {
       diffPercent: percentageDiff(Number(property.currentRendita), estimatedRendita),
       imuRateOverride,
       imuMultiplierOverride,
+      currentImuRateOverride,
+      currentImuMultiplierOverride,
       currentImu,
       estimatedImu,
       imuDiff,
@@ -788,7 +799,7 @@ export class PropertiesService {
     );
     const currentImu = sum(
       properties.map((property) => {
-        return calculatedAmount(this.calculateImu(Number(property.currentRendita), property))
+        return calculatedAmount(this.calculateImu(Number(property.currentRendita), property, true))
           ?? (property.currentImu === null ? 0 : Number(property.currentImu));
       }),
     );
@@ -820,22 +831,15 @@ export class PropertiesService {
       categoria: string;
       comune: string;
       provincia: string | null;
-      imuRateOverride?: Prisma.Decimal | number | null;
-      imuMultiplierOverride?: Prisma.Decimal | number | null;
-    },
+    } & ImuOverrides,
+    current = false,
   ) {
     return this.imu.calculate({
       rendita,
       categoria: property.categoria,
       comune: property.comune,
       provincia: property.provincia,
-      rateOverridePercent: property.imuRateOverride === null || property.imuRateOverride === undefined
-        ? null
-        : Number(property.imuRateOverride),
-      cadastralMultiplierOverride:
-        property.imuMultiplierOverride === null || property.imuMultiplierOverride === undefined
-          ? null
-          : Number(property.imuMultiplierOverride),
+      ...imuOverrides(property, current),
     });
   }
 
