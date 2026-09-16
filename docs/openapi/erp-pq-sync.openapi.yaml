@@ -10,7 +10,7 @@ info:
     studi di fattibilita dall'ERP e permettere all'ERP di leggere le modifiche
     successive prodotte in PQ.
 
-    La v1.5.4 (PQ 1.1.8, staging) separa i parametri IMU attuale e prevista.
+    La v1.5.4 (PQ 1.1.8) separa i parametri IMU attuale e prevista.
     Gli override preesistenti sono copiati all'IMU attuale senza cambiare gli importi.
     `aliquota_imu_override` e `moltiplicatore_imu_override` descrivono la prevista;
     i nuovi campi con suffisso `_attuale_override` descrivono l'attuale.

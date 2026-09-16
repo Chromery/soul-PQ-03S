@@ -75,6 +75,7 @@ test("generated study and study-group snapshots freeze grouping, keep individual
   const fixture = serviceFixture();
   await fixture.service.createV3("study", ["3", "1", "2"]);
   const snapshot = structuredClone(fixture.snapshot());
+  assert.equal(snapshot.reductionBasis, "imu");
   assert.deepEqual(snapshot.immobili.map((row: any) => row.id), ["3", "1", "2"]);
   assert.equal(snapshot.tableRows.length, 2);
   assert.equal(snapshot.optimizationValue, 150.40);

@@ -23,6 +23,7 @@ test("draft patches retry conflicts without losing another tab's field and stay 
   let writes = 0;
   const api = service({ feasibilityStudy: { findUnique: async () => ({ properties: [{ id: "p1" }] }) },
     presentationDraft: { upsert: async (args: any) => { assert.equal(args.where.id, "study:s1"); },
+      findUnique: async () => structuredClone(current),
       findUniqueOrThrow: async () => structuredClone(current), updateMany: async (args: any) => {
         if (++writes === 1) { current = { revision: 2, overrides: { clientName: "Other tab" } }; return { count: 0 }; }
         assert.equal(args.where.revision, 2);
@@ -37,6 +38,21 @@ test("group draft accepts only group members and does not touch individual study
     presentationDraft: { findUnique: async (args: any) => { assert.equal(args.where.id, "group:g1"); return { overrides: { clientName: "Gruppo" }, revision: 2 }; } } });
   assert.deepEqual(await api.getDraft({ studyGroupId: "g1" }), { overrides: { clientName: "Gruppo" }, revision: 2 });
   await assert.rejects(api.patchDraft({ studyGroupId: "g1" }, { changes: { "foreign:indirizzo": "No" } }));
+});
+
+test("debounced patches may create a group and caption atomically, but not foreign groups", async () => {
+  let current = { revision: 0, overrides: {} as Record<string, string> };
+  const api = service({ feasibilityStudy: { findUnique: async () => ({ properties: [{ id: "p1" }, { id: "p2" }] }) },
+    presentationDraft: { findUnique: async () => structuredClone(current), findUniqueOrThrow: async () => structuredClone(current),
+      upsert: async () => {}, updateMany: async (args: any) => {
+        current = { revision: current.revision + 1, overrides: args.data.overrides }; return { count: 1 };
+      } } });
+  const result = await api.patchDraft({ studyId: "s1" }, { changes: {
+    "p1:presentationGroup": "manual:new", "p2:presentationGroup": "manual:new", "group:manual:new:indirizzo": "Complesso unico",
+  } });
+  assert.equal(result.overrides["group:manual:new:indirizzo"], "Complesso unico");
+  await assert.rejects(api.patchDraft({ studyId: "s1" }, { changes: { "group:manual:foreign:indirizzo": "No" } }));
+  assert.equal(current.revision, 1);
 });
 
 test("history lists all active snapshots, including those older than twenty", async () => {

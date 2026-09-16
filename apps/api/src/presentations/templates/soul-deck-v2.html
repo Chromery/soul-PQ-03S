@@ -326,6 +326,8 @@
   <script>
     const data = __SOUL_DECK_DATA__;
     if (data.version === 3) document.documentElement.classList.add("presentation-v3");
+    const usesImuReduction = data.version === 3 && data.reductionBasis === "imu";
+    if (usesImuReduction) document.querySelector("#properties-card thead th:last-child").textContent = "Riduzione IMU %";
     const euro = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const compactEuro = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
     const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[character]);
@@ -347,7 +349,9 @@
       const rentDiff = difference(item.renditaAttuale, item.renditaAttribuibile);
       const hasImu = Number.isFinite(item.imuAttuale) && Number.isFinite(item.imuOttenibile);
       const imuVariation = hasImu ? item.imuOttenibile - item.imuAttuale : null;
-      const reduction = item.renditaAttuale ? rentDiff / item.renditaAttuale : null;
+      const reduction = usesImuReduction
+        ? (hasImu && item.imuAttuale > 0 ? (item.imuAttuale - item.imuOttenibile) / item.imuAttuale : null)
+        : (item.renditaAttuale ? rentDiff / item.renditaAttuale : null);
       const imuClass = Number.isFinite(imuVariation) ? (imuVariation > 0 ? "bad" : imuVariation < 0 ? "good" : "") : "";
       const imuLabel = Number.isFinite(imuVariation)
         ? `${imuVariation > 0 ? "+" : imuVariation < 0 ? "−" : ""}${euro.format(Math.abs(imuVariation))}`
@@ -355,7 +359,10 @@
       return `<tr class="${item.memberIds?.length > 1 ? "grouped-property" : ""}"><td>${escapeHtml(item.societa)}</td><td>${escapeHtml(item.comune)}</td><td>${escapeHtml(item.indirizzo)}</td><td>${escapeHtml(item.foglioParticellaSub)}</td><td>${escapeHtml(item.categoria || "—")}</td><td>${euro.format(item.renditaAttuale)}</td><td>${euro.format(item.renditaAttribuibile)}</td><td>${euro.format(rentDiff)}</td><td class="${imuClass}">${imuLabel}</td><td>${percent(reduction)}</td></tr>`;
     }).join("");
     const totalRentDifference = currentRent - estimatedRent;
-    const totalReduction = currentRent ? totalRentDifference / currentRent : null;
+    const completeImu = data.immobili.every(item => Number.isFinite(item.imuAttuale) && Number.isFinite(item.imuOttenibile));
+    const totalReduction = usesImuReduction
+      ? (completeImu && currentImu > 0 ? annualSaving / currentImu : null)
+      : (currentRent ? totalRentDifference / currentRent : null);
     const totalImuVariation = estimatedImu - currentImu;
     const totalImuClass = totalImuVariation > 0 ? "bad" : totalImuVariation < 0 ? "good" : "";
     document.getElementById("property-totals").innerHTML = `<td colspan="5">Totale portafoglio</td><td>${euro.format(currentRent)}</td><td>${euro.format(estimatedRent)}</td><td>${euro.format(totalRentDifference)}</td><td class="${totalImuClass}">${totalImuVariation > 0 ? "+" : totalImuVariation < 0 ? "−" : ""}${euro.format(Math.abs(totalImuVariation))}</td><td>${percent(totalReduction)}</td>`;

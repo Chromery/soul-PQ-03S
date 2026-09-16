@@ -32,6 +32,8 @@ export type PresentationSnapshot = {
   tableRows?: PresentationPropertySnapshot[];
   // Absent on historical decks: do not reinterpret their original totals.
   optimizationValue?: number;
+  // Only new V3 decks use IMU reduction. Historical snapshots retain rent reduction.
+  reductionBasis?: "imu";
 };
 
 export type PresentationSummary = {

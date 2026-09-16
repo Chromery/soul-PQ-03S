@@ -82,7 +82,7 @@ import { CurrentOperator, useIdentity } from "./Auth";
 import { PropertyGroupingSuggestions } from "./PropertyGroupingSuggestions";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.8";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.9";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -5878,7 +5878,7 @@ function StudyGroupDetail({
           </button>
           <PresentationAction
             study={presentationSource}
-            draft={presentationDraft}
+            draft={presentationBaseline}
             version={3}
             endpointBase={`/study-groups/${encodeURIComponent(groupId)}/presentations`}
             onNotice={onNotice}
@@ -6795,7 +6795,7 @@ function mergePresentationDraft(baseline: PresentationDraft, overrides: Record<s
 function usePersistentPresentationDraft(endpoint: string, baseline: PresentationDraft, properties: PropertyItem[], onNotice: (message: string) => void) {
   const persistence = usePresentationDraftStore(`${API_BASE_URL}${endpoint}/draft`);
   const draft = useMemo(() => mergePresentationDraft(baseline, persistence.overrides), [baseline, persistence.overrides]);
-  const touched = new Set(Object.keys(persistence.overrides).filter(key => key === "clientName"
+  const touched = new Set(Object.keys(persistence.overrides).filter(key => key === "clientName" || key.startsWith("group:")
     || (!key.endsWith(":presentationGroup") && baseline.properties.some(property => key.startsWith(`${property.id}:`)))));
   function updateProperty(propertyId: string, field: PresentationPropertyField, value: string) {
     const source = properties.find(property => property.id === propertyId);
@@ -6835,6 +6835,28 @@ function PresentationSaveStatus({ persistence }: { persistence: ReturnType<typeo
 type PresentationGroupingSource = Pick<PropertyItem, "id" | "outcome" | "valuationGroupId">;
 type PresentationRowGroup = { key: string; members: PresentationPropertyDraft[]; property: PresentationPropertyDraft };
 
+const PRESENTATION_TEXT_FIELDS = ["societa", "comune", "indirizzo", "foglioParticellaSub", "categoria"] as const;
+function normalizePresentationCategory(value: string) {
+  return value.trim().toUpperCase().replace(/^([A-F])\s*\/?\s*(\d+)$/, "$1/$2");
+}
+
+// Recover only blank descriptive member fields at export, never financial values.
+// Group captions are separate overrides; originals and individual drafts stay intact.
+function presentationExportProperties(draft: PresentationDraft, baseline: PresentationDraft, sources: readonly PresentationGroupingSource[], overrides: Record<string, string>) {
+  const groupById = new Map(presentationRowGroups(draft.properties, sources, overrides)
+    .flatMap(group => group.members.map(member => [member.id, group] as const)));
+  return draft.properties.map(property => {
+    const group = groupById.get(property.id);
+    if (!group?.key.startsWith("group:")) return property;
+    const original = baseline.properties.find(member => member.id === property.id);
+    const result = { ...property };
+    for (const field of PRESENTATION_TEXT_FIELDS) if (!result[field].trim()) {
+      result[field] = original?.[field].trim() || group.property[field].trim();
+    }
+    return result;
+  });
+}
+
 function presentationRowGroups(properties: PresentationPropertyDraft[], sources: readonly PresentationGroupingSource[], overrides: Record<string, string>): PresentationRowGroup[] {
   const sourceById = new Map(sources.map(property => [property.id, property]));
   const groups = new Map<string, PresentationPropertyDraft[]>();
@@ -6846,7 +6868,14 @@ function presentationRowGroups(properties: PresentationPropertyDraft[], sources:
     members.push(property); groups.set(key, members);
   }
   return [...groups.entries()].map(([key, members]) => {
-    if (members.length === 1) return { key, members, property: members[0] };
+    const customize = (property: PresentationPropertyDraft) => {
+      const result = { ...property };
+      if (key.startsWith("group:")) for (const field of PRESENTATION_TEXT_FIELDS) {
+        result[field] = overrides[`${key}:${field}`] ?? result[field];
+      }
+      return result;
+    };
+    if (members.length === 1) return { key, members, property: customize(members[0]) };
     const property = { ...members[0], id: key };
     for (const field of PRESENTATION_PROPERTY_FIELDS) {
       if (["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(field)) {
@@ -6854,13 +6883,14 @@ function presentationRowGroups(properties: PresentationPropertyDraft[], sources:
         property[field] = values.some(value => value == null) ? "" : formatPresentationMoneyInput(
           values.reduce<number>((sum, value) => sum + Math.round(value! * 100), 0) / 100);
       } else {
-        const values = [...new Set(members.map(member => member[field].trim()).filter(Boolean))];
+        const values = [...new Set(members.map(member => field === "categoria"
+          ? normalizePresentationCategory(member[field]) : member[field].trim()).filter(Boolean))];
         const refs = field === "foglioParticellaSub" ? values.map(value => /^(.*? - Sub\. )(.+)$/.exec(value)) : [];
         property[field] = refs.length && refs.every(ref => ref && ref[1] === refs[0]?.[1])
           ? refs[0]![1] + refs.map(ref => ref![2]).join(", ") : values.join(" / ");
       }
     }
-    return { key, members, property };
+    return { key, members, property: customize(property) };
   });
 }
 
@@ -6905,6 +6935,10 @@ function PresentationGroupCells({ group, outcomes, persistence, sources = [] }: 
   function change(field: PresentationPropertyField, value: string | null) {
     const changes: Record<string, string | null> = {};
     const numeric = ["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(field);
+    if (!numeric) {
+      persistence.change({ [`${group.key}:${field}`]: value === null ? null : field === "categoria" ? normalizePresentationCategory(value) : value.trim() });
+      return;
+    }
     const amount = value === null ? null : presentationMoneyToCents(value, false);
     const shares = numeric && amount != null ? allocatePresentationTotal(amount,
       group.members.map(member => presentationMoneyToCents(member[field], false) ?? null),
@@ -6928,7 +6962,9 @@ function PresentationGroupCells({ group, outcomes, persistence, sources = [] }: 
     {PRESENTATION_PROPERTY_FIELDS.map(field => <td key={field} className="presentation-group-value">
       <PresentationGroupInput key={`${field}:${group.members.map(member => member.id).join(",")}`}
         field={field} value={group.property[field]} groupKey={group.key} disabled={!persistence.loaded}
-        modified={group.members.some(member => `${member.id}:${field}` in persistence.overrides)}
+        modified={PRESENTATION_TEXT_FIELDS.includes(field as typeof PRESENTATION_TEXT_FIELDS[number])
+          ? `${group.key}:${field}` in persistence.overrides
+          : group.members.some(member => `${member.id}:${field}` in persistence.overrides)}
         onCommit={value => change(field, value)} onReset={() => change(field, null)} />
     </td>)}
   </>;
@@ -6955,7 +6991,7 @@ function PresentationGroupInput({ field, value, groupKey, disabled, modified, on
   return <div className="presentation-input-with-override">
     <input value={input} disabled={disabled} maxLength={1000} inputMode={numeric ? "decimal" : "text"}
       aria-label={`${field} del ${groupKey}`} aria-invalid={invalid} className={invalid ? "invalid" : ""}
-      title="Modifica la bozza di tutti i membri del gruppo. Importi ripartiti proporzionalmente; Invio o uscita dal campo per salvare."
+      title={numeric ? "Importo ripartito tra i membri inclusi, solo nella bozza. Invio o uscita dal campo per salvare." : "Testo della sola riga unificata; i dati dei singoli immobili non cambiano. Invio o uscita dal campo per salvare."}
       onFocus={() => setEditing(true)} onChange={event => { setInput(event.target.value); setEditError(false); }}
       onBlur={() => { if (!commit()) { setInput(value); setEditing(false); setEditError(true); } }}
       onKeyDown={event => {
@@ -6963,7 +6999,7 @@ function PresentationGroupInput({ field, value, groupKey, disabled, modified, on
         if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setInput(value); setEditing(false); }
       }} />
     {modified && <button type="button" className="icon-button" disabled={disabled}
-      aria-label={`Ripristina ${field} del ${groupKey}`} title="Ripristina questo campo dai dati stima per tutti i membri"
+      aria-label={`Ripristina ${field} del ${groupKey}`} title={numeric ? "Ripristina il campo dai dati stima dei membri" : "Ripristina il testo composto dai membri del gruppo"}
       onClick={onReset}><RefreshCw size={12} /></button>}
     {editError && <small role="alert">Valore non valido: modifica non salvata.</small>}
   </div>;
@@ -7014,7 +7050,9 @@ function PresentationAction({
   const selectedDrafts = selectedPropertyIds
     .map((propertyId) => propertyDraftById.get(propertyId))
     .filter((property): property is PresentationPropertyDraft => Boolean(property));
-  const selectedPayloads = selectedDrafts
+  const selectedExportDrafts = presentationExportProperties(draft, sourceDraft, study.properties, persistence.overrides)
+    .filter(property => selectedPropertyIds.includes(property.id));
+  const selectedPayloads = selectedExportDrafts
     .map(presentationPropertyPayload)
     .filter((property): property is PresentationPropertyPayload => Boolean(property));
   const selectedOptimization = presentationOptimizationValue({ ...draft, properties: selectedDrafts }, study.properties);
@@ -7303,13 +7341,20 @@ function PresentationAction({
             </div>
             {selectionHasInvalidData && selectedPropertyIds.length > 0 && (
               <p className="presentation-validation-warning">
-                Uno o più campi selezionati non sono validi. Correggili nell’anteprima dati prima di generare.
+                {!draft.clientName.trim() && "Inserisci il nome del cliente. "}
+                {selectedExportDrafts.filter(property => !presentationPropertyPayload(property)).map(property => {
+                  const fields = selectionColumns.filter(({ key }) => key !== "outcome" &&
+                    (PRESENTATION_TEXT_FIELDS.includes(key as typeof PRESENTATION_TEXT_FIELDS[number])
+                      ? !property[key as PresentationPropertyField].trim()
+                      : presentationMoneyInputInvalid(property[key as PresentationPropertyField], key.startsWith("rendita"))));
+                  return <span key={property.id} style={{ display: "block" }}>Immobile {property.id} · {property.foglioParticellaSub}: correggi {fields.map(field => field.label).join(", ")} nell’anteprima dati.</span>;
+                })}
               </p>
             )}
 
             <PresentationGroupingToolbar groups={selectionGroups} selectedIds={selectedPropertyIds}
               persistence={{ ...persistence, loaded: persistence.loaded && !busy }} />
-            <p className="modal-note">I raggruppamenti valgono solo per la presentazione. Nel PDF vengono sommati soltanto gli immobili inclusi; espandi un gruppo per includerli o escluderli singolarmente. Modificando la riga del gruppo aggiorni solo i membri inclusi: testi uguali per tutti, importi ripartiti proporzionalmente (in assenza di valori, secondo le rendite attuali o in parti uguali). Invio o uscita dal campo per salvare.</p>
+            <p className="modal-note">I testi della riga unificata sono modificabili senza cambiare i singoli immobili. Gli importi modificati sono ripartiti tra i soli membri inclusi. I campi descrittivi vuoti dei membri usano i dati originali, oppure il testo del gruppo: non occorre cancellarli per evitare ripetizioni. Invio o uscita dal campo per salvare. La colonna percentuale del nuovo PDF mostra la riduzione IMU.</p>
 
             <div className="presentation-generator-table-wrap">
               <table className="presentation-preview-table presentation-generator-table"><thead><tr>
@@ -7496,7 +7541,7 @@ function PresentationDataPreview({
     }
     return sort.direction === "asc" ? comparison : -comparison;
   });
-  const totals = presentationDraftTotals(draft);
+  const totals = presentationDraftTotals({ ...draft, properties: presentationExportProperties(draft, baseline, sourceProperties, persistence.overrides) });
   const optimization = presentationOptimizationValue(draft, sourceProperties);
   const imuDifference = totals.imuAttuale - totals.imuOttenibile;
 
@@ -7580,9 +7625,9 @@ function PresentationDataPreview({
       <p className="presentation-preview-info">
         Se modifichi una rendita, la relativa IMU viene ricalcolata soltanto per la presentazione con
         aliquota e moltiplicatore della stima. Le aree e i valori salvati nell’editor non vengono modificati.
-        {" "}Puoi modificare anche la riga del gruppo: i testi vengono applicati ai membri e gli importi ripartiti proporzionalmente
-        (in assenza di valori, secondo le rendite attuali o in parti uguali). Invio o uscita dal campo per salvare.
-        Espandi il gruppo per modificare un singolo immobile; la freccia di ripristino recupera i valori della stima.
+        {" "}Indirizzo, categoria e altri testi della riga unificata sono indipendenti dai membri: modificali qui senza svuotare i singoli immobili.
+        Gli importi del gruppo sono ripartiti proporzionalmente (in assenza di valori, secondo le rendite attuali o in parti uguali).
+        I campi descrittivi vuoti dei membri usano nel PDF i dati originali, oppure il testo del gruppo. Invio o uscita dal campo per salvare; la freccia ripristina il valore automatico.
       </p>
 
       <PresentationGroupingToolbar groups={groups} selectedIds={selectedRows} persistence={persistence} onSelectionClear={() => setSelectedRows([])} />
@@ -7628,11 +7673,13 @@ function PresentationDataPreview({
                 {(["societa", "comune", "indirizzo", "foglioParticellaSub", "categoria"] as const).map((field) => (
                   <td key={field}>
                     <input
-                      className={!property[field].trim() ? "invalid" : ""}
+                      className={!property[field].trim() && !group.key.startsWith("group:") ? "invalid" : ""}
                       value={property[field]}
                       aria-label={`${field} per ${property.id}`}
                       disabled={!persistence.loaded}
-                      aria-invalid={!property[field].trim()}
+                      aria-invalid={!property[field].trim() && !group.key.startsWith("group:")}
+                      placeholder={group.key.startsWith("group:") ? baseline.properties.find(member => member.id === property.id)?.[field] || group.property[field] : undefined}
+                      title={group.key.startsWith("group:") ? "Se vuoto, il PDF usa il dato originale o il testo del gruppo. Per cambiare solo la riga unificata modifica i campi del gruppo." : undefined}
                       onChange={(event) => onPropertyFieldChange(property.id, field, event.target.value)}
                     />
                   </td>
@@ -8264,7 +8311,7 @@ function StudyDetail({
           </button>
           <PresentationAction
             study={study}
-            draft={presentationDraft}
+            draft={presentationBaseline}
             onNotice={onNotice}
             version={3}
           />

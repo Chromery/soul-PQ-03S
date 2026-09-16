@@ -14,7 +14,7 @@ import { StudiesService } from "../studies/studies.service.js";
 import { personalizeV3Cover } from "./v3-cover.js";
 import { mergeDraftChanges, validateDraftChanges } from "./presentation-draft.js";
 import { optimizationValue } from "./optimization-value.js";
-import { groupPresentationRows } from "./presentation-grouping.js";
+import { groupPresentationRows, presentationGroupKeys } from "./presentation-grouping.js";
 import type {
   PresentationPropertyInput,
   PresentationSnapshot,
@@ -261,6 +261,7 @@ export class PresentationsService implements OnModuleDestroy {
     const snapshot: PresentationSnapshot = {
       version,
       generatedAt: generatedAt.toISOString(),
+      ...(version === 3 ? { reductionBasis: "imu" as const } : {}),
       studio: {
         ...studio,
         company: clientName,
@@ -303,11 +304,11 @@ export class PresentationsService implements OnModuleDestroy {
 
   private async draftOwner(owner: PresentationOwner) {
     if (owner.studyId !== undefined) {
-      const study = await this.prisma.feasibilityStudy.findUnique({ where: { id: owner.studyId }, select: { properties: { select: { id: true } } } });
+      const study = await this.prisma.feasibilityStudy.findUnique({ where: { id: owner.studyId }, select: { properties: { select: { id: true, valuationGroupId: true } } } });
       if (!study) throw new NotFoundException("Studio non trovato");
       return { id: `study:${owner.studyId}`, properties: study.properties };
     }
-    const group = await this.prisma.studyGroup.findUnique({ where: { id: owner.studyGroupId }, select: { studies: { select: { properties: { select: { id: true } } } } } });
+    const group = await this.prisma.studyGroup.findUnique({ where: { id: owner.studyGroupId }, select: { studies: { select: { properties: { select: { id: true, valuationGroupId: true } } } } } });
     if (!group) throw new NotFoundException("Gruppo non trovato");
     return { id: `group:${owner.studyGroupId}`, properties: group.studies.flatMap(study => study.properties) };
   }
@@ -320,12 +321,31 @@ export class PresentationsService implements OnModuleDestroy {
 
   async patchDraft(owner: PresentationOwner, input: unknown) {
     const scope = await this.draftOwner(owner);
-    const changes = validateDraftChanges(input, new Set(scope.properties.map(property => property.id)));
+    const initial = await this.prisma.presentationDraft.findUnique({ where: { id: scope.id } });
+    const validate = (existing: Record<string, string>) => {
+      const ids = new Set(scope.properties.map(property => property.id));
+      const raw = input && typeof input === "object" ? (input as { changes?: Record<string, unknown> }).changes : undefined;
+      const groupingChanges: Record<string, string | null> = {};
+      if (raw && typeof raw === "object") for (const property of scope.properties) {
+        const key = `${property.id}:presentationGroup`;
+        if (Object.prototype.hasOwnProperty.call(raw, key)) Object.assign(groupingChanges,
+          validateDraftChanges({ changes: { [key]: raw[key] } }, ids));
+      }
+      // A debounced patch may create a manual group and its caption together.
+      const projected = mergeDraftChanges(existing, groupingChanges);
+      return validateDraftChanges(input, ids, new Set([
+        ...presentationGroupKeys(scope.properties, existing), ...presentationGroupKeys(scope.properties, projected),
+      ]));
+    };
+    validate((initial?.overrides ?? {}) as Record<string, string>);
     await this.prisma.presentationDraft.upsert({ where: { id: scope.id },
       create: { id: scope.id, ...owner, overrides: {} }, update: {} });
     // Field-level patches + compare-and-swap preserve edits to other fields/tabs.
     for (let attempt = 0; attempt < 8; attempt++) {
       const current = await this.prisma.presentationDraft.findUniqueOrThrow({ where: { id: scope.id } });
+      const existing = current.overrides as Record<string, string>;
+      // Validate group labels against this owner on every compare-and-swap retry.
+      const changes = validate(existing);
       const overrides = mergeDraftChanges(current.overrides as Record<string, string>, changes);
       const saved = await this.prisma.presentationDraft.updateMany({ where: { id: scope.id, revision: current.revision },
         data: { overrides, revision: { increment: 1 } } });
