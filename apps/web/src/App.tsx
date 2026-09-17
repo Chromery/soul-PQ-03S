@@ -82,7 +82,7 @@ import { CurrentOperator, useIdentity } from "./Auth";
 import { PropertyGroupingSuggestions } from "./PropertyGroupingSuggestions";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.9";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.10";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -6926,6 +6926,17 @@ function PresentationGroupingToolbar({ groups, selectedIds, persistence, onSelec
   </div>;
 }
 
+function PresentationReductionToggle({ scope, persistence }: {
+  scope: string; persistence: ReturnType<typeof usePresentationDraftStore>;
+}) {
+  return <label className="presentation-reduction-toggle" title="Se attivo, solo questa riga usa la riduzione IMU. Altrimenti usa la riduzione della rendita. Per i gruppi vale la scelta della riga unificata.">
+    <input type="checkbox" aria-label={`Considera % Rid. per IMU · ${scope}`}
+      disabled={!persistence.loaded} checked={persistence.overrides[`${scope}:reductionBasis`] === "imu"}
+      onChange={event => persistence.change({ [`${scope}:reductionBasis`]: event.target.checked ? "imu" : null })} />
+    <span>Considera % Rid. per IMU</span>
+  </label>;
+}
+
 function PresentationGroupCells({ group, outcomes, persistence, sources = [] }: {
   group: PresentationRowGroup; outcomes: Map<string, PropertyOutcome>;
   persistence: ReturnType<typeof usePresentationDraftStore>;
@@ -6958,7 +6969,7 @@ function PresentationGroupCells({ group, outcomes, persistence, sources = [] }: 
     persistence.change(changes);
   }
   return <>
-    <td>{values.size === 1 ? <OutcomeBadge outcome={[...values][0]} /> : <span>Esiti misti</span>}<small className="presentation-group-count">{group.members.length} {group.members.length === 1 ? "immobile" : "immobili"}</small></td>
+    <td>{values.size === 1 ? <OutcomeBadge outcome={[...values][0]} /> : <span>Esiti misti</span>}<small className="presentation-group-count">{group.members.length} {group.members.length === 1 ? "immobile" : "immobili"}</small><PresentationReductionToggle scope={group.key} persistence={persistence} /></td>
     {PRESENTATION_PROPERTY_FIELDS.map(field => <td key={field} className="presentation-group-value">
       <PresentationGroupInput key={`${field}:${group.members.map(member => member.id).join(",")}`}
         field={field} value={group.property[field]} groupKey={group.key} disabled={!persistence.loaded}
@@ -7354,7 +7365,7 @@ function PresentationAction({
 
             <PresentationGroupingToolbar groups={selectionGroups} selectedIds={selectedPropertyIds}
               persistence={{ ...persistence, loaded: persistence.loaded && !busy }} />
-            <p className="modal-note">I testi della riga unificata sono modificabili senza cambiare i singoli immobili. Gli importi modificati sono ripartiti tra i soli membri inclusi. I campi descrittivi vuoti dei membri usano i dati originali, oppure il testo del gruppo: non occorre cancellarli per evitare ripetizioni. Invio o uscita dal campo per salvare. La colonna percentuale del nuovo PDF mostra la riduzione IMU.</p>
+            <p className="modal-note">I testi della riga unificata sono modificabili senza cambiare i singoli immobili. Gli importi modificati sono ripartiti tra i soli membri inclusi. I campi descrittivi vuoti dei membri usano i dati originali, oppure il testo del gruppo: non occorre cancellarli per evitare ripetizioni. Invio o uscita dal campo per salvare. La colonna % RID. usa la rendita; attiva “Considera % Rid. per IMU” per cambiare la singola riga o il gruppo. Il totale portafoglio resta riferito alla rendita.</p>
 
             <div className="presentation-generator-table-wrap">
               <table className="presentation-preview-table presentation-generator-table"><thead><tr>
@@ -7394,7 +7405,7 @@ function PresentationAction({
                     />
                     </td>
                     {selectionColumns.map(({ key }) => <td key={key}>{key === "outcome"
-                      ? <><OutcomeBadge outcome={selectionOutcomes.get(property.id) ?? "Neutro"} />{incomplete && <small className="presentation-incomplete">Dati incompleti</small>}</>
+                      ? <><OutcomeBadge outcome={selectionOutcomes.get(property.id) ?? "Neutro"} />{incomplete && <small className="presentation-incomplete">Dati incompleti</small>}{group.members.length === 1 && <PresentationReductionToggle scope={group.key.startsWith("group:") ? group.key : property.id} persistence={{ ...persistence, loaded: persistence.loaded && !busy }} />}</>
                       : ["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(key)
                         ? formatPresentationDraftAmount(propertyDraft?.[key], "n.d.") : propertyDraft?.[key] || "—"}</td>)}
                   </tr>
@@ -7628,6 +7639,8 @@ function PresentationDataPreview({
         {" "}Indirizzo, categoria e altri testi della riga unificata sono indipendenti dai membri: modificali qui senza svuotare i singoli immobili.
         Gli importi del gruppo sono ripartiti proporzionalmente (in assenza di valori, secondo le rendite attuali o in parti uguali).
         I campi descrittivi vuoti dei membri usano nel PDF i dati originali, oppure il testo del gruppo. Invio o uscita dal campo per salvare; la freccia ripristina il valore automatico.
+        {" "}% RID. usa la riduzione della rendita: attiva “Considera % Rid. per IMU” per una singola riga o un gruppo.
+        Nei gruppi conta solo il flag della riga unificata; sciogliendoli ritrovi le scelte dei singoli immobili. Il totale portafoglio resta riferito alla rendita.
       </p>
 
       <PresentationGroupingToolbar groups={groups} selectedIds={selectedRows} persistence={persistence} onSelectionClear={() => setSelectedRows([])} />
@@ -7669,7 +7682,7 @@ function PresentationDataPreview({
               <tr key={property.id} data-property-id={property.id} className={group.members.length > 1 ? "presentation-group-member" : ""}>
                 <td><input type="checkbox" aria-label={`Seleziona ${property.indirizzo}`} disabled={!persistence.loaded}
                   checked={selectedRows.includes(property.id)} onChange={event => setSelectedRows(current => event.target.checked ? [...current, property.id] : current.filter(id => id !== property.id))} /></td>
-                <td><OutcomeBadge outcome={outcomes.get(property.id) ?? "Neutro"} /></td>
+                <td><OutcomeBadge outcome={outcomes.get(property.id) ?? "Neutro"} />{group.members.length === 1 && <PresentationReductionToggle scope={group.key.startsWith("group:") ? group.key : property.id} persistence={persistence} />}</td>
                 {(["societa", "comune", "indirizzo", "foglioParticellaSub", "categoria"] as const).map((field) => (
                   <td key={field}>
                     <input

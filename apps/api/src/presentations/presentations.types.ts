@@ -2,6 +2,7 @@ export type PresentationPropertySnapshot = {
   id: string;
   memberIds?: string[];
   outcome?: string;
+  reductionBasis?: "rent" | "imu";
   societa: string;
   comune: string;
   indirizzo: string;
@@ -32,8 +33,8 @@ export type PresentationSnapshot = {
   tableRows?: PresentationPropertySnapshot[];
   // Absent on historical decks: do not reinterpret their original totals.
   optimizationValue?: number;
-  // Only new V3 decks use IMU reduction. Historical snapshots retain rent reduction.
-  reductionBasis?: "imu";
+  // Preserve historical all-IMU/legacy rent decks; new decks freeze each row's choice.
+  reductionBasis?: "imu" | "per-row";
 };
 
 export type PresentationSummary = {

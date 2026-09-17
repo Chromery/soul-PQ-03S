@@ -75,7 +75,8 @@ test("generated study and study-group snapshots freeze grouping, keep individual
   const fixture = serviceFixture();
   await fixture.service.createV3("study", ["3", "1", "2"]);
   const snapshot = structuredClone(fixture.snapshot());
-  assert.equal(snapshot.reductionBasis, "imu");
+  assert.equal(snapshot.reductionBasis, "per-row");
+  assert.ok(snapshot.tableRows.every((row: any) => row.reductionBasis === "rent"));
   assert.deepEqual(snapshot.immobili.map((row: any) => row.id), ["3", "1", "2"]);
   assert.equal(snapshot.tableRows.length, 2);
   assert.equal(snapshot.optimizationValue, 150.40);
@@ -85,10 +86,12 @@ test("generated study and study-group snapshots freeze grouping, keep individual
   assert.equal(fixture.snapshot().studio.company, "Portafoglio");
   assert.equal(snapshot.tableRows.length, 2);
   assert.equal(fixture.snapshot().optimizationValue, snapshot.optimizationValue);
-  fixture.setOverrides({});
+  fixture.setOverrides({ "group:valuation:g1:reductionBasis": "imu", "3:reductionBasis": "imu" });
   await fixture.service.createV3("study", ["1", "3"]);
   assert.equal(fixture.snapshot().tableRows.length, 2);
   assert.equal(fixture.snapshot().immobili.length, 2);
+  assert.ok(fixture.snapshot().tableRows.every((row: any) => row.reductionBasis === "imu"));
+  assert.ok(snapshot.tableRows.every((row: any) => row.reductionBasis === "rent"));
 });
 
 test("grouped v3 renders one row per group and a complete six-page PDF", { skip: !existsSync("/usr/bin/chromium"), timeout: 90000 }, async () => {

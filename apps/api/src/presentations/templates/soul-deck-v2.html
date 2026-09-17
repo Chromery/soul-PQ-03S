@@ -327,7 +327,9 @@
     const data = __SOUL_DECK_DATA__;
     if (data.version === 3) document.documentElement.classList.add("presentation-v3");
     const usesImuReduction = data.version === 3 && data.reductionBasis === "imu";
+    const usesRowReduction = data.version === 3 && data.reductionBasis === "per-row";
     if (usesImuReduction) document.querySelector("#properties-card thead th:last-child").textContent = "Riduzione IMU %";
+    if (usesRowReduction) document.querySelector("#properties-card thead th:last-child").textContent = "% RID.";
     const euro = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const compactEuro = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
     const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[character]);
@@ -349,7 +351,7 @@
       const rentDiff = difference(item.renditaAttuale, item.renditaAttribuibile);
       const hasImu = Number.isFinite(item.imuAttuale) && Number.isFinite(item.imuOttenibile);
       const imuVariation = hasImu ? item.imuOttenibile - item.imuAttuale : null;
-      const reduction = usesImuReduction
+      const reduction = (usesImuReduction || (usesRowReduction && item.reductionBasis === "imu"))
         ? (hasImu && item.imuAttuale > 0 ? (item.imuAttuale - item.imuOttenibile) / item.imuAttuale : null)
         : (item.renditaAttuale ? rentDiff / item.renditaAttuale : null);
       const imuClass = Number.isFinite(imuVariation) ? (imuVariation > 0 ? "bad" : imuVariation < 0 ? "good" : "") : "";

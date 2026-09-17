@@ -261,7 +261,7 @@ export class PresentationsService implements OnModuleDestroy {
     const snapshot: PresentationSnapshot = {
       version,
       generatedAt: generatedAt.toISOString(),
-      ...(version === 3 ? { reductionBasis: "imu" as const } : {}),
+      ...(version === 3 ? { reductionBasis: "per-row" as const } : {}),
       studio: {
         ...studio,
         company: clientName,

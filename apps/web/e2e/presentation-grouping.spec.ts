@@ -41,6 +41,16 @@ for (const groupScope of [false, true]) test(`presentation grouping in ${groupSc
   const preview = page.locator("#presentation-data");
   const saved = () => expect(preview.getByRole("status")).toContainText("Modifiche salvate");
   await saved();
+  const groupFlag = preview.getByRole("checkbox", { name: "Considera % Rid. per IMU · group:valuation:original-group", exact: true });
+  const singleFlag = preview.getByRole("checkbox", { name: "Considera % Rid. per IMU · PG-3", exact: true });
+  await expect(groupFlag).not.toBeChecked(); await expect(singleFlag).not.toBeChecked();
+  for (const flag of [groupFlag, singleFlag]) expect(await flag.evaluate(input => {
+    const label = input.closest("label")!.getBoundingClientRect(), cell = input.closest("td")!.getBoundingClientRect();
+    return label.left >= cell.left && label.right <= cell.right;
+  })).toBe(true);
+  await groupFlag.check(); await singleFlag.check(); await saved();
+  await page.reload(); await saved();
+  await expect(groupFlag).toBeChecked(); await expect(singleFlag).toBeChecked();
   await expect(preview.locator("tbody tr")).toHaveCount(3);
   await expect(preview.locator(".presentation-group-row").getByRole("textbox", { name: /^foglioParticellaSub del/ })).toHaveValue(/Sub\. 1, 2/);
   await expect(preview.locator(".presentation-group-row").getByRole("textbox", { name: /^renditaAttuale del/ })).toHaveValue("300.30");
@@ -54,7 +64,7 @@ for (const groupScope of [false, true]) test(`presentation grouping in ${groupSc
   await saved(); await expect(preview.locator("tbody tr")).toHaveCount(4);
   await expect(amount).toHaveValue("110.10");
   await page.reload(); await saved(); await expect(preview.locator(".presentation-group-row")).toHaveCount(0);
-  for (const id of ["PG-1", "PG-3"]) await preview.locator(`[data-property-id="${id}"]`).getByRole("checkbox").check();
+  for (const id of ["PG-1", "PG-3"]) await preview.locator(`[data-property-id="${id}"]`).getByRole("checkbox", { name: /^Seleziona / }).check();
   await preview.getByRole("button", { name: "Raggruppa selezionati", exact: true }).click();
   await saved(); await page.reload(); await saved();
   await expect(preview.locator(".presentation-group-row").getByRole("textbox", { name: /^foglioParticellaSub del/ })).toHaveValue(/Sub\. 1, 3/);
@@ -62,6 +72,8 @@ for (const groupScope of [false, true]) test(`presentation grouping in ${groupSc
   await page.getByRole("button", { name: "Generazione Presentazione", exact: true }).click();
   const modal = page.getByRole("dialog", { name: "Generazione Presentazione", exact: true });
   await expect(modal.locator(".presentation-group-row")).toHaveCount(1);
+  const manualFlag = modal.locator(".presentation-group-row").getByRole("checkbox", { name: /^Considera % Rid/ });
+  await expect(manualFlag).not.toBeChecked(); await manualFlag.check(); await saved();
   await modal.getByRole("button", { name: /Espandi gruppo/ }).click();
   await modal.locator('[data-property-id="PG-3"]').getByRole("checkbox").uncheck();
   await modal.getByRole("button", { name: "Genera PDF v3", exact: true }).click();
@@ -69,10 +81,13 @@ for (const groupScope of [false, true]) test(`presentation grouping in ${groupSc
   expect(snapshots[0].propertyIds.sort()).toEqual(["PG-1", "PG-2"]);
   expect(snapshots[0].properties.find((property: any) => property.id === "PG-1").renditaAttuale).toBe(110.10);
   expect(snapshots[0].savedOverrides["PG-1:presentationGroup"]).toBe(snapshots[0].savedOverrides["PG-3:presentationGroup"]);
+  expect(snapshots[0].savedOverrides[`group:${overrides["PG-1:presentationGroup"]}:reductionBasis`]).toBe("imu");
   await modal.getByRole("button", { name: "Chiudi", exact: true }).last().click();
   page.once("dialog", dialog => dialog.accept());
   await preview.getByRole("button", { name: "Ripristina gruppi originali", exact: true }).click();
   await saved(); await expect(preview.locator(".presentation-group-row").getByRole("textbox", { name: /^foglioParticellaSub del/ })).toHaveValue(/Sub\. 1, 2/);
+  await expect(groupFlag).toBeChecked(); await expect(singleFlag).toBeChecked();
+  await singleFlag.uncheck(); await saved(); expect(overrides["PG-3:reductionBasis"]).toBeUndefined();
   await expect(preview.locator(".presentation-group-row").getByRole("textbox", { name: /^renditaAttuale del/ })).toHaveValue("310.30");
   expect(overrides["PG-1:renditaAttuale"]).toBe("110.10");
   expect(properties[0].valuationGroupId).toBe("original-group");
@@ -114,6 +129,7 @@ for (const groupScope of [false, true]) test(`presentation grouping in ${groupSc
   expect(snapshots.at(-1).properties.find((p: any) => p.id === "PG-1").renditaAttuale).toBe(50.01);
   expect(snapshots.at(-1).properties.find((p: any) => p.id === "PG-1").indirizzo).toBe("Via Roma 44");
   expect(snapshots.at(-1).savedOverrides["group:valuation:original-group:indirizzo"]).toBe("Complesso Via Roma 44");
+  expect(snapshots.at(-1).savedOverrides["group:valuation:original-group:reductionBasis"]).toBe("imu");
   expect(snapshots.at(-1).propertyIds).not.toContain("PG-2");
   expect(properties[0].categoria).toBe("D/7");
   expect(properties[0].currentRendita).toBe(100.10);
