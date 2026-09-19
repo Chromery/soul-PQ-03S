@@ -161,6 +161,28 @@ async function worker() {
           JSON.stringify({ file: job.doc, page: job.page, attempt, error }),
         );
         if (
+          /Invalid audit coverage|Truncated audit/.test(error) &&
+          job.batch.length > 1
+        ) {
+          const middle = Math.ceil(job.batch.length / 2);
+          const children = [job.batch.slice(0, middle), job.batch.slice(middle)]
+            .map((batch) => {
+              const contentHash = createHash("sha256")
+                .update(JSON.stringify({ batch, context: job.context }))
+                .digest("hex");
+              return {
+                ...job,
+                batch,
+                contentHash,
+                file: path.join(outDir, contentHash + ".json"),
+              };
+            })
+            .filter((child) => !fs.existsSync(child.file));
+          jobs.splice(cursor, 0, ...children);
+          error = null;
+          break;
+        }
+        if (
           process.env.PRICE_DEADLINE &&
           Date.now() >= Date.parse(process.env.PRICE_DEADLINE)
         )

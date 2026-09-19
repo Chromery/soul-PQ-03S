@@ -9,7 +9,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import type { PriceCatalog, PriceQuery } from "./price-rules.types.js";
-import { normalizePriceText, suggestPriceRules } from "./price-rules.engine.js";
+import {
+  normalizePriceText,
+  suggestPriceRules,
+  canonicalPriceProvince,
+  priceMunicipalityName,
+} from "./price-rules.engine.js";
 import { resolveFormapsTerritory } from "../formaps-territories/formaps-territory-resolver.js";
 
 export function priceCsvCell(value: unknown) {
@@ -54,7 +59,7 @@ export class PriceRulesService {
         "utf8",
       ),
     ).provinces.map(({ id, text }: { id: string; text: string }) => ({
-      id,
+      id: canonicalPriceProvince(id),
       text,
     }));
     for (const [id, text] of [
@@ -90,6 +95,7 @@ export class PriceRulesService {
         "SHA256",
         "Territorio",
         "Provincia",
+        "Comuni associati",
         "Epoca economica",
         "Pagina",
         "Voce",
@@ -108,6 +114,8 @@ export class PriceRulesService {
         "Scenario altezza proposto",
         "Valore dipendente da formula",
         "Regola di calcolo supportata",
+        "Oneri inclusi secondo fonte",
+        "Terreno incluso rilevato",
         "Motivi revisione",
       ],
     ];
@@ -118,6 +126,9 @@ export class PriceRulesService {
         d.id,
         d.territory,
         d.province,
+        (r.municipalities || (r.municipality ? [r.municipality] : [])).join(
+          " | ",
+        ),
         d.epoch,
         r.page,
         r.code,
@@ -137,7 +148,21 @@ export class PriceRulesService {
           ? `${r.referenceScenario.height} m - ${r.referenceScenario.description} (pag. ${r.referenceScenario.page})`
           : "",
         r.formulaDependent ? "si" : "no",
-        r.calculation ? JSON.stringify(r.calculation) : "",
+        r.calculation || r.areaBounds || r.heightAdjustment
+          ? JSON.stringify({
+              formula: r.calculation,
+              surface: r.areaBounds,
+              height: r.heightAdjustment,
+            })
+          : "",
+        (r.includesCharges ?? d.includesCharges) === null
+          ? "Da verificare"
+          : (r.includesCharges ?? d.includesCharges)
+            ? "si"
+            : "no",
+        r.includesLand || d.includesLand
+          ? "si"
+          : "Non rilevato; verificare fonte",
         r.reviewReasons.join(" | "),
       ]);
     }
@@ -146,12 +171,11 @@ export class PriceRulesService {
     );
   }
   context(province: string, municipality: string) {
-    const normalizedMunicipality = municipality
-      .replace(/\s*\([A-Z]{2}\)\s*$/i, "")
-      .trim();
+    const normalizedMunicipality = priceMunicipalityName(municipality);
     const knownProvince = this.provinces.find(
       (p) =>
-        normalizePriceText(p.id) === normalizePriceText(province) ||
+        normalizePriceText(p.id) ===
+          normalizePriceText(canonicalPriceProvince(province)) ||
         normalizePriceText(p.text) === normalizePriceText(province),
     );
     const resolved = resolveFormapsTerritory(
@@ -164,8 +188,11 @@ export class PriceRulesService {
         : null;
     // Fuzzy matches are never silently adopted for a financial reference.
     return {
-      province: safe?.provinceId || knownProvince?.id || null,
-      municipality: safe?.municipality || normalizedMunicipality,
+      province:
+        canonicalPriceProvince(safe?.provinceId || knownProvince?.id) || null,
+      municipality: priceMunicipalityName(
+        safe?.municipality || normalizedMunicipality,
+      ),
       strategy: safe
         ? resolved.strategy
         : knownProvince

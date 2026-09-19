@@ -45,10 +45,13 @@ export type PriceRule = {
   reviewReasons: string[];
   method: string;
   municipality?: string;
+  municipalities?: string[];
   zone?: string;
   reviewed?: boolean;
   includesCharges?: boolean;
   includesLand?: boolean;
+  areaBounds?: { minExclusive?: number; maxInclusive?: number };
+  heightAdjustment?: { base: number; percentPerMetre: number; note: string };
   referenceScenario?: { height: number; description: string; page: number };
   semanticReview?: "supported" | "review" | "pending" | "not-required";
   formulaDependent?: boolean;
@@ -78,6 +81,7 @@ export type PriceDocument = {
   epoch: string;
   includesCharges: boolean | null;
   includesLand?: boolean;
+  preferredForRegion?: boolean;
   historical: boolean;
   role: "price-list" | "supplement" | "context" | "calculator";
   pages: number;

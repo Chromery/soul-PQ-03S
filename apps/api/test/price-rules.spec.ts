@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { priceRuleLocation } from "../../web/src/price-rule-location.js";
 import {
   calculatePriceProposal,
   suggestPriceRules,
@@ -79,6 +80,48 @@ const catalog: PriceCatalog = {
     reviewRules: 0,
   },
 };
+
+test("price rules: grouped editors only prefill a shared locality, never the first property", () => {
+  assert.deepEqual(
+    priceRuleLocation([
+      { provincia: "MI", comune: "Milano" },
+      { provincia: "BG", comune: "Bergamo" },
+    ]),
+    { province: undefined, municipality: undefined, ambiguous: true },
+  );
+  assert.deepEqual(
+    priceRuleLocation([
+      { provincia: "MI", comune: "Milano" },
+      { provincia: "MI", comune: "Rho" },
+    ]),
+    { province: "MI", municipality: undefined, ambiguous: true },
+  );
+  assert.deepEqual(
+    priceRuleLocation([
+      { provincia: "MI", comune: "Milano" },
+      { provincia: "mi", comune: "MILANO" },
+    ]),
+    { province: "MI", municipality: "Milano", ambiguous: false },
+  );
+  assert.deepEqual(
+    priceRuleLocation([
+      {
+        provincia: "MI",
+        comune: "Milano",
+        formapsProvincia: "BG",
+        formapsComune: "Bergamo",
+      },
+    ]),
+    { province: "BG", municipality: "Bergamo", ambiguous: false },
+  );
+  assert.equal(
+    priceRuleLocation([
+      { provincia: "MI", comune: "Milano" },
+      { comune: "Milano" },
+    ]).municipality,
+    undefined,
+  );
+});
 
 test("price rules: Milano preserves base, charges and capped height correction", () => {
   assert.equal(calculatePriceProposal(rule, doc, {}).suggested, 165);
@@ -177,6 +220,33 @@ test("price rules: province and usage are mandatory constraints, no nearest-terr
   );
 });
 test("price rules: municipal prices and zones require location, filter others", () => {
+  for (const municipality of ["—", " (MI)", "Bergamo"])
+    assert.equal(
+      calculatePriceProposal(
+        { ...rule, municipalities: ["Milano", "Rho"] },
+        doc,
+        { municipality },
+      ).applicable,
+      false,
+    );
+  const multi = {
+    ...catalog,
+    rules: [{ ...rule, municipalities: ["Milano", "Rho"] }],
+  };
+  assert.equal(
+    suggestPriceRules(multi, { documentId: doc.id, municipality: "Rho" }).total,
+    1,
+  );
+  assert.equal(
+    suggestPriceRules(multi, { documentId: doc.id, municipality: "Bergamo" })
+      .total,
+    0,
+  );
+  assert.equal(
+    suggestPriceRules(multi, { documentId: doc.id }).items[0].proposal
+      .applicable,
+    false,
+  );
   const local = { ...catalog, rules: [{ ...rule, municipality: "Varese" }] };
   assert.equal(
     suggestPriceRules(local, { documentId: doc.id }).items[0].proposal
@@ -316,6 +386,55 @@ test("price rules: generated catalog integrity, source linkage and safe supporte
   assert.ok(milano.items.some((r) => r.valueMin === 165 && r.code === "2.4"));
 });
 
+test("price rules: worked examples and hydraulic component volumes stay quarantined", () => {
+  const generated: PriceCatalog = JSON.parse(
+    readFileSync(
+      new URL(
+        "../src/price-lists/data/catalog.generated.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  const ancona = generated.documents.find(
+    (d) => d.file === "Ancona PRONTUARIO_AN-2019.pdf",
+  )!;
+  const examples = generated.rules.filter(
+    (r) => r.documentId === ancona.id && [51, 53, 55, 56].includes(r.page),
+  );
+  assert.ok(examples.length > 0);
+  for (const r of examples)
+    assert.equal(
+      calculatePriceProposal(r, ancona, { height: 5 }).applicable,
+      false,
+      r.label,
+    );
+  const modena = generated.documents.find(
+    (d) => d.file === "Modena prontuario 2022.pdf",
+  )!;
+  const dam = generated.rules.find(
+    (r) => r.documentId === modena.id && r.label.startsWith("Diga in c.a."),
+  )!;
+  assert.ok(dam);
+  assert.equal(
+    calculatePriceProposal(dam, modena, { height: 5 }).applicable,
+    false,
+  );
+  const municipal = generated.rules.find(
+    (r) =>
+      r.documentId === modena.id &&
+      r.kind === "building" &&
+      r.label.includes("Comune di Maranello"),
+  )!;
+  assert.ok(municipal);
+  assert.equal(municipal.municipality?.toLowerCase(), "maranello");
+  assert.equal(
+    calculatePriceProposal(municipal, modena, { municipality: "Modena" })
+      .applicable,
+    false,
+  );
+});
+
 test("price rules: CSV review cannot inject spreadsheet formulas", () => {
   assert.equal(priceCsvCell('=HYPERLINK("x")'), '"\'=HYPERLINK(""x"")"');
   assert.equal(priceCsvCell(" @SUM(A1)"), '"\' @SUM(A1)"');
@@ -327,6 +446,20 @@ test("price rules: locality normalization does not silently adopt fuzzy towns", 
   assert.equal(service.context("Milano", "Milano (MI)").province, "MI");
   assert.equal(service.context("", "Bergamo").province, "BG");
   assert.equal(service.context("", "Comune inesistente xyz").province, null);
+  assert.deepEqual(service.context("CO", "COMO/sez.A").municipality, "COMO");
+  assert.equal(service.context("PS", "Pesaro").province, "PU");
+  assert.equal(service.context("PU", "Pesaro").province, "PU");
+  const historicalCode = {
+    ...catalog,
+    documents: [{ ...doc, province: "PS", region: "Marche" }],
+  };
+  assert.equal(suggestPriceRules(historicalCode, { province: "PU" }).total, 1);
+  const section = { ...catalog, rules: [{ ...rule, municipality: "Milano" }] };
+  assert.equal(
+    suggestPriceRules(section, { province: "MI", municipality: "MILANO/sez.A" })
+      .items[0].proposal.applicable,
+    true,
+  );
 });
 test("price rules: land-inclusive building cost cannot double count the editor lot", () => {
   assert.equal(
@@ -451,6 +584,7 @@ test("price rules: whole catalog suggestions never apply quarantined or unfinish
               Number.isFinite(item.proposal.suggested),
           );
           assert.ok(!item.municipality && !item.zone);
+          assert.ok(!item.municipalities?.length);
         }
         if (usage === "lotto") assert.equal(item.kind, "land");
         else assert.notEqual(item.kind, "land");
@@ -491,4 +625,80 @@ test("price rules: real Milano office prices do not include complete shopping ce
   assert.equal(bg.zone, "A");
   assert.ok(bg.items.some((r) => r.page === 49 && r.valueMin === 270));
   assert.ok(bg.items.every((r) => !r.zone || r.zone === "A"));
+});
+
+test("price rules: regional ordinary variants respect surface, height and documented edition priority", () => {
+  const regional = {
+    ...doc,
+    id: "b".repeat(64),
+    file: "regional.pdf",
+    province: null,
+    preferredForRegion: true,
+  };
+  const variant = {
+    ...rule,
+    documentId: regional.id,
+    code: "",
+    valueMin: 120,
+    areaBounds: { maxInclusive: 2000 },
+    heightAdjustment: { base: 5, percentPerMetre: 5, note: "Fonte pagina 16" },
+  };
+  assert.equal(
+    calculatePriceProposal(variant, regional, { area: 600, height: 7 })
+      .suggested,
+    132,
+  );
+  assert.equal(
+    calculatePriceProposal(variant, regional, { area: 2500 }).applicable,
+    false,
+  );
+  const combined = {
+    ...catalog,
+    documents: [{ ...doc, file: "provincial.pdf" }, regional],
+    rules: [rule, variant],
+  };
+  assert.equal(
+    suggestPriceRules(combined, { province: "MI", usage: "capannone" }).items[0]
+      .documentId,
+    regional.id,
+  );
+  assert.equal(
+    suggestPriceRules(combined, {
+      province: "MI",
+      usage: "capannone",
+      area: 2500,
+    }).items.length,
+    1,
+  );
+  assert.equal(
+    suggestPriceRules(combined, {
+      province: "MI",
+      usage: "capannone",
+      area: 2000,
+    }).items.length,
+    2,
+  );
+});
+
+test("price rules: concrete warehouses are not mistaken for sports facilities", () => {
+  const generated: PriceCatalog = JSON.parse(
+    readFileSync(
+      new URL(
+        "../src/price-lists/data/catalog.generated.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  const d = generated.documents.find((d) =>
+    d.file.endsWith("Prontuario FVG Categorie D-E_2024-vers1.2-dicem2025.pdf"),
+  )!;
+  const variants = generated.rules.filter(
+    (r) =>
+      r.documentId === d.id &&
+      r.page === 16 &&
+      /^(Capannone|Magazzino).*calcestruzzo/.test(r.label),
+  );
+  assert.equal(variants.length, 4);
+  assert.ok(variants.every((r) => r.usageIds.includes("capannone")));
 });

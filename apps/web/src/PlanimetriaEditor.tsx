@@ -58,6 +58,7 @@ import {
 import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { textOrientation } from "./pdf-orientation";
 import { PriceRuleModal, type PriceApplication, type PriceProvenance } from "./PriceRules";
+import { priceRuleLocation } from "./price-rule-location";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
@@ -11047,7 +11048,8 @@ export default function PlanimetriaEditor({
 
       {priceSuggestionAreaId && findSelectionById(priceSuggestionAreaId) && (() => {
         const area = findSelectionById(priceSuggestionAreaId)!;
-        return <PriceRuleModal key={area.id} province={property.formapsProvincia || property.provincia || undefined} municipality={property.formapsComune || property.comune} usage={area.usageId} currentRate={area.rate} hasCharges={area.oneri === true} hasAmountOverride={typeof area.amountOverride === "number"} onClose={() => setPriceSuggestionAreaId(null)} onApply={(application) => applyPriceSuggestion(area.id, application)} />;
+        const location = priceRuleLocation(valuationGroup?.properties ?? [property]);
+        return <PriceRuleModal key={area.id} province={location.province} municipality={location.municipality} locationNotice={location.ambiguous ? "Il gruppo non ha una località completa e univoca. Indica il territorio dell’area che stai valutando: non viene adottato quello del primo immobile." : undefined} usage={area.usageId} currentRate={area.rate} hasCharges={area.oneri === true} hasAmountOverride={typeof area.amountOverride === "number"} onClose={() => setPriceSuggestionAreaId(null)} onApply={(application) => applyPriceSuggestion(area.id, application)} />;
       })()}
 
       {clearPageConfirmOpen && (

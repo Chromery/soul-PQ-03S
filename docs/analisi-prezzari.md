@@ -64,17 +64,25 @@ Il motore gestisce le otto varianti della pagina con formule dichiarative, senza
 
 ### Altre distinzioni rilevanti
 
+- **Friuli Venezia Giulia, edizione regionale aggiornata a dicembre 2025:** le pagine 3 e 6 spiegano il passaggio dai quattro prontuari provinciali a un riferimento unico e definiscono esplicitamente il valore “ordinario”. Questa fonte ha precedenza nell’ordinamento, mantenendo consultabili le precedenti. A pagina PDF 16 il sistema conserva le varianti per struttura e superficie dei capannoni/magazzini e applica, se indicata l’altezza, il +5% per metro oltre H piano 5 m. Esempio: capannone metallico fino a 2.000 m², h 7 m → `120 × 1,10 = 132 €/m²`. Lo scostamento ammesso ±25% non viene applicato senza una motivazione tecnica.
+- **FVG, Appendice A:** le cinque coppie minimo/massimo delle zone del suolo sono lette con un parser strutturale verificato. Le coppie assenti `- / -` non spostano le colonne successive. Valuta, unità e biennio sono dichiarati a pagina PDF 3; il secondo controllo semantico resta obbligatorio. Le zone censuarie di Trieste restano varianti esplicite da scegliere, non vengono dedotte dal solo comune.
 - **Bari:** pagina 12 dichiara che i valori delle costruzioni comprendono già il suolo. La consultazione è possibile, ma l’applicazione diretta di queste voci è bloccata: aggiungere il lotto già previsto dall’editor produrrebbe una duplicazione. Serve una scelta metodologica esplicita del tecnico.
 - **Campobasso:** la pagina 19 dichiara analogamente l’inclusione dell’area di sedime nelle costruzioni, separando la pertinenza esterna. È applicata la stessa protezione. Anche le singole voci degli altri documenti vengono controllate per dichiarazioni esplicite di terreno incluso, senza confonderle con un’indicazione di ubicazione o con un’esclusione.
 - **Bologna:** gli esempi numerici sul calcolo dell’area eccedente non sono tariffe autonome; vengono esclusi dalle proposte applicabili.
+- **Ancona e altri esempi compilati:** titoli di esempi applicativi, modelli 2NB e tabelle di calcolo con vetustà non diventano tariffe autonome, anche quando cifra ed estratto sono corretti e il secondo controllo automatico li accetta. Questo controllo aggiuntivo deriva dalla revisione delle pagine 51–56 di Ancona.
+- **Modena:** i prezzi rurali distinti per comune vengono filtrati territorialmente anche se riguardano costruzioni e non terreno. Dighe, pozzi piezometrici e altre opere idrauliche al m³ non sono convertibili usando l’altezza di un edificio: restano esclusi dall’applicazione diretta.
 - **Varese e allegati territoriali:** le lunghe tabelle vengono suddivise in pagine e, quando necessario, frammenti con intestazioni di contesto. I valori del terreno riferiti a un comune non sono trattati come prezzi provinciali generici.
+- **Tariffe per elenchi di comuni:** tutti i comuni riconosciuti nell’elenco vengono associati alla voce (ad esempio i raggruppamenti di Ancona), non soltanto il primo. I nomi contenuti dentro un altro nome non generano false associazioni: Castelnuovo del Garda non implica automaticamente Garda.
+- **Codifiche territoriali:** i suffissi catastali `/sez.A`, `/sez.B`, ecc. non impediscono il confronto del comune; le sigle storiche PS/FO sono ricondotte a PU/FC. Non vengono inventate equivalenze per abbreviazioni ambigue dei comuni.
+- **Como, tabella territoriale:** il PDF All1 e l’Excel All3 contengono intervalli interi, spesso senza valuta ripetuta. La selezione delle pagine include anche queste tabelle. Le voci restano da riconciliare perché All4, pagina 3, distingue superficie del lotto per destinazioni produttive e volume edificato per destinazioni terziarie: non si assegna arbitrariamente €/m² a tutte le colonne. La cifra anomala 45931 è presente anche nell’originale e non viene corretta per supposizione.
 - **Bolzano e documenti storici:** conservazione della valuta originale; conversione lire/euro soltanto con il cambio fisso **1 euro = 1.936,27 lire**. Nessuna rivalutazione temporale automatica. Riferimento: [Commissione europea — Italy and the euro](https://economy-finance.ec.europa.eu/euro/eu-countries-and-euro/italy-and-euro_en).
 - **Napoli ACEN 2021:** costi edilizi contemporanei separati dai prontuari catastali; non resi direttamente applicabili come se fossero già ricondotti al biennio 1988–1989.
 - **Documenti scansionati:** l’OCR non viene confuso con testo nativo; il metodo di lettura resta visibile e la pagina originale è sempre accessibile.
 - **Lecco e codifiche PDF danneggiate:** la sola quantità di testo non basta. Il controllo di caratteri di controllo e glifi anomali ha identificato pagine apparentemente testuali ma illeggibili; sono state rilette con OCR, conservando il testo originale in cache.
 - **Catania, tabella 3:** i valori unitari centrali OMI sono riferimenti per un metodo di surrogazione, non prezzi di costruzione da copiare direttamente nell’area. Restano dati di consultazione, esclusi dall’applicazione automatica.
 - **Genova:** le tabelle di valori di mercato sono separate dai costi di costruzione anche quando l’unità è identica, €/m².
-- **Fogli Excel:** letti come documenti di supporto, senza eseguire formule, macro o collegamenti esterni. I risultati memorizzati delle formule non diventano tariffe autonome.
+- **Roma 1995:** i valori di mercato in lire per capannoni/edifici non diventano costi di costruzione solo perché convertibili in €/m². Queste voci rimangono escluse dall’applicazione diretta, anche quando il controllo numerico conferma la corretta estrazione.
+- **Fogli Excel:** letti senza eseguire formule, macro o collegamenti esterni. I risultati memorizzati delle formule non diventano tariffe autonome. La tabella statica Como All3 viene letta deterministicamente cella per cella, conservando coordinate e intervalli; le intestazioni incomplete impediscono di attribuire arbitrariamente valuta/unità e quindi di applicarla direttamente. Gli altri fogli, che sono calcolatori, restano documenti di supporto.
 - **Copie identiche:** accorpate per hash. In particolare i file denominati «Regione Piemonte 2021» e «Regione Piemonte 2025» hanno contenuto identico: il nome non prova l’esistenza di una nuova edizione.
 - **Oggetto della tariffa:** gli uffici all’interno di un capannone rimangono uffici; un centro commerciale che comprende anche uffici non viene consigliato come tariffa dei soli uffici. Terreno e sistemazioni esterne sono categorie di costo distinte.
 
@@ -88,9 +96,12 @@ L’estrazione ricava inoltre scenari di altezza da intervalli espliciti nelle c
 
 Non viene adottata automaticamente una provincia vicina se manca il prezzario del territorio. La scelta manuale di un documento è possibile, ma è dichiarata come tale. I nomi dei comuni risolti solo con somiglianza approssimativa non vengono accettati automaticamente.
 
+Altezza, luce e superficie non costituiscono un interprete universale di tutte le condizioni testuali: la conversione €/m³ è generale, mentre formule e fasce strutturate sono esplicite per i casi verificati. Se un parametro inserito non viene usato dalla regola, la conferma lo segnala. Gli altri requisiti e correttivi restano leggibili e sotto il controllo del tecnico.
+
 ## Garanzie nell’editor
 
 - Nessuna modifica all’apertura del pannello o alla selezione di una variante.
+- Nei gruppi viene precompilata soltanto la località condivisa da tutti gli immobili; se diversa o incompleta, il tecnico sceglie il territorio dell’area. I campi ereditati dal primo immobile non diventano automaticamente la località di tutto il PDF combinato.
 - Conferma obbligatoria di unità, condizioni, epoca e oneri prima di applicare.
 - Se la voce include già gli oneri e l’area ha una maggiorazione attiva, è richiesta conferma per rimuoverla.
 - Se l’area ha un totale manuale, è richiesta conferma per rimuoverlo e ricalcolare con il prezzo unitario.
@@ -102,6 +113,8 @@ Non viene adottata automaticamente una provincia vicina se manca il prezzario de
 
 L’inventario comprende **120 file**, di cui **112 PDF**, **4 XLSX** e **4 TXT**; i PDF unici sono **108**. I duplicati esatti portano a **116 fonti uniche complessive**. La matrice di copertura generata, con conteggi aggiornati per ogni documento, si trova in `docs/analisi-prezzari-copertura.md` ed è consultabile anche nella pagina Prezzari.
 
+Snapshot pubblicato il 19 settembre 2026: **31.349 voci**, **11.273 con secondo controllo superato**, **zero controlli pendenti** e **zero pagine candidate incomplete**. Le 3.635 pagine/blocchi comprendono 3.553 pagine PDF e 82 blocchi dei documenti di supporto. Un controllo superato non elimina le condizioni di applicazione: per esempio il comune o l’altezza possono ancora essere obbligatori.
+
 “Tutti i prezzari coperti” significa che ogni file è inventariato e passato nella pipeline appropriata, con gli eventuali limiti esposti. **Non equivale alla certificazione manuale di ogni cella di ogni tabella.** I documenti senza tariffe, i calcolatori, gli esempi e le voci da riconciliare rimangono visibili ma non vengono forzati in una proposta al m².
 
 La selezione delle pagine candidate usa indicatori di valuta/unità e tabelle numeriche, includendo le continuazioni prive di intestazione. Questo riduce le omissioni ma non dimostra la completezza semantica di tutte le varianti. Un confronto specialistico con Soul rimane necessario prima di promuovere il laboratorio in produzione.
@@ -109,6 +122,8 @@ La selezione delle pagine candidate usa indicatori di valuta/unità e tabelle nu
 ## Riproducibilità
 
 Originali: `00_prezzari2026/`, montati **in sola lettura** nell’API. Non sono incorporati in Git né copiati nel database. Il catalogo derivato versionato è `apps/api/src/price-lists/data/catalog.generated.json`.
+
+La versione del catalogo contiene anche un’impronta del contenuto: due revisioni dell’estrazione non vengono confuse solo perché generate nello stesso giorno. Questa versione viene conservata nella provenienza del prezzo applicato.
 
 Script in `scripts/prezzari/`:
 
@@ -119,8 +134,11 @@ Script in `scripts/prezzari/`:
 - `audit-rules.mjs`: secondo controllo semantico. I risultati sono riutilizzati soltanto se regole e contesto della fonte coincidono.
 - `build-catalog.mjs`: normalizzazione, riscontri deterministici, applicazione dei controlli semantici, catalogo e copertura.
 - `report-catalog.mjs`: matrice Markdown di copertura, duplicati, unità, destinazioni e limiti residui.
+- `refresh-catalog.mjs`: esegue costruzione → audit → ricostruzione; con `PRICE_REFRESH_ROUNDS` ripete il ciclo durante l’estrazione. Un audit incompleto rimane bloccato e riprendibile, senza impedire gli altri controlli. `PRICE_DEADLINE` limita temporalmente l’elaborazione.
 
 Usare `PRICE_CACHE_DIR` per un percorso persistente di cache. Gli script Node di elaborazione vanno eseguiti dalla radice del repository; gli script Poppler/Tesseract possono essere eseguiti nell’immagine API esistente con originali montati in sola lettura. Le credenziali NeuralWatt sono lette dall’ambiente locale e non scritte nei risultati. Limitare la concorrenza complessiva; l’estrazione gestisce ritardi e riprese in caso di rate limit.
+
+La cache di questa analisi è conservata localmente in `.cache/prezzari/` (esclusa da Git e dal contesto Docker), con testo/OCR, risposte strutturate e controlli. Per ricostruire il catalogo dalla cache, senza nuove chiamate LLM: `node scripts/prezzari/build-catalog.mjs`, poi `node scripts/prezzari/report-catalog.mjs`. Eseguire una sola costruzione alla volta. Gli originali e la cache vanno mantenuti per poter riprodurre e revisionare l’analisi; il solo catalogo Git non sostituisce gli originali.
 
 Ordine consigliato: estrazione nativa → OCR → documenti di supporto → estrazione regole → costruzione catalogo → audit → ricostruzione catalogo. Ripetere gli ultimi passaggi per le pagine incomplete o per gli originali modificati. Non è una procedura avviata da richieste web.
 
@@ -142,10 +160,10 @@ La validazione comprende test su filtri territoriali, unità, valuta, intervalli
 
 Verifiche eseguite sul laboratorio:
 
-- Suite API completa: **183 test superati**, inclusa la regressione delle presentazioni e dei flussi ERP esistenti.
-- Test mirati del motore prezzari: **17 superati**.
-- Test degli strumenti di estrazione e controllo: **6 superati**.
-- Browser autenticato in staging: **5 test superati** per accesso alle fonti, filtri Milano, formula Lecco, layout a 1366/1024/390 px e applicazione nell’editor con salvataggio, provenienza e annullamento.
+- Suite API completa: **187 test superati**, inclusa la regressione delle presentazioni e dei flussi ERP esistenti.
+- Test mirati del motore prezzari: **21 superati** (compresi nella suite API).
+- Test degli strumenti di estrazione e controllo: **11 superati**.
+- Browser autenticato in staging: **7 test superati** per accesso alle fonti, filtri Milano, formule Lecco/FVG, coefficienti percentuali, layout a 1366/1024/390 px e applicazione nell’editor con salvataggio, provenienza e annullamento.
 - Regressioni browser su layout dell’editor e taratura: **2 superate**.
 
 I conteggi dei test verificano il comportamento del software; non equivalgono alla verifica manuale di tutte le tariffe estratte.

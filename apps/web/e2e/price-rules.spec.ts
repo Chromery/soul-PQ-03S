@@ -130,6 +130,62 @@ test("Lecco formulas require the building surface and calculate the selected var
   );
 });
 
+test("regional FVG ordinary costs take precedence and apply only their documented corrections", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await clerk.signIn({ page, emailAddress: process.env.E2E_CLERK_USER_EMAIL! });
+  await page.goto("/prezzari");
+  await page.getByLabel("Provincia", { exact: true }).selectOption("UD");
+  await page.getByText("Caratteristiche e fonti", { exact: true }).click();
+  await page.getByLabel("Superficie di riferimento edificio (m²)").fill("600");
+  await page.getByLabel("Altezza equivalente (m)").fill("7");
+  await expect(page.locator(".price-results.is-loading")).toHaveCount(0);
+  await expect(page.locator(".price-card").first()).toContainText(
+    "dicem2025.pdf",
+  );
+  const metal = page.locator(".price-card").filter({
+    has: page.getByRole("heading", {
+      name: "Capannone superficie coperta ≤ 2000 m2, Hpiano ≤ 5 m, struttura metallica",
+      exact: true,
+    }),
+  });
+  await expect(metal.locator(".price-card-value>b")).toContainText("132");
+  await page.getByLabel("Superficie di riferimento edificio (m²)").fill("2500");
+  await expect(metal).toHaveCount(0);
+  const large = page.locator(".price-card").filter({
+    has: page.getByRole("heading", {
+      name: "Capannone superficie coperta > 2000 m2, Hpiano ≤ 5 m, struttura metallica",
+      exact: true,
+    }),
+  });
+  await expect(large.locator(".price-card-value>b")).toContainText("121");
+});
+
+test("percentage coefficients are shown as percentages, never euro prices", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await clerk.signIn({ page, emailAddress: process.env.E2E_CLERK_USER_EMAIL! });
+  const id = await page.evaluate(
+    async () =>
+      (await (await fetch("/api/price-rules/catalog")).json()).documents.find(
+        (d: any) => d.title === "allegato prontuario 2022 pistoia.pdf",
+      ).id,
+  );
+  await page.goto("/prezzari");
+  await page.getByText("Caratteristiche e fonti", { exact: true }).click();
+  await page.getByLabel("Documento specifico").selectOption(id);
+  await expect(page.locator(".price-card").first()).toBeVisible();
+  const value = page
+    .locator(".price-card")
+    .filter({ hasText: "Incidenza area" })
+    .first()
+    .locator(".price-card-value>strong");
+  await expect(value).toContainText("%");
+  await expect(value).not.toContainText("€");
+});
+
 test("editor price choice is explicit, avoids duplicate charges, persists provenance and supports undo", async ({
   page,
 }) => {

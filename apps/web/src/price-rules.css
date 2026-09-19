@@ -68,6 +68,12 @@
   font-size: 13px;
   min-width: 0;
 }
+.price-filter-note {
+  color: #627889;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 12px 0;
+}
 .price-browser button,
 .price-coverage button,
 .price-modal header button {

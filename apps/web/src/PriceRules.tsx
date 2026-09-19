@@ -157,6 +157,7 @@ export type PriceApplication = {
   provenance: PriceProvenance;
 };
 type BrowserProps = {
+  locationNotice?: string;
   province?: string;
   municipality?: string;
   usage?: string;
@@ -290,6 +291,7 @@ export function PriceRuleBrowser(props: BrowserProps) {
   }, [props.province, props.municipality]);
   useEffect(() => {
     const controller = new AbortController();
+    setCatalogError("");
     readJson<Catalog>("/api/price-rules/catalog", controller.signal)
       .then(setCatalog)
       .catch((e) => {
@@ -416,6 +418,11 @@ export function PriceRuleBrowser(props: BrowserProps) {
           </p>
         </div>
       </div>
+      {props.locationNotice && (
+        <p className="price-warning" role="status">
+          {props.locationNotice}
+        </p>
+      )}
       <div className="price-filters">
         <label>
           Provincia
@@ -425,6 +432,7 @@ export function PriceRuleBrowser(props: BrowserProps) {
             onChange={(e) => {
               locationTouched.current = true;
               setProvince(e.target.value);
+              setMunicipality("");
               setDocumentId("");
               setZone("");
             }}
@@ -531,7 +539,8 @@ export function PriceRuleBrowser(props: BrowserProps) {
               placeholder="Non nota"
             />
             <small>
-              Per le formule di Lecco: non è automaticamente l’area disegnata.
+              Formule di Lecco e fasce FVG: non è automaticamente l’area
+              disegnata.
             </small>
           </label>
           <label>
@@ -572,6 +581,11 @@ export function PriceRuleBrowser(props: BrowserProps) {
             <small>La scelta manuale sostituisce il filtro territoriale.</small>
           </label>
         </div>
+        <p className="price-filter-note">
+          I dati aggiuntivi entrano nei calcoli e nei filtri soltanto quando la
+          regola è già strutturata. Le altre condizioni restano da verificare
+          nella fonte.
+        </p>
         <div className="price-checks">
           <label>
             <input
@@ -731,12 +745,16 @@ export function PriceRuleBrowser(props: BrowserProps) {
                 {rule.valueMax !== null && rule.valueMax !== rule.valueMin
                   ? ` – ${number.format(rule.valueMax)}`
                   : ""}{" "}
-                {rule.currency === "EUR"
-                  ? "€"
-                  : rule.currency === "ITL"
-                    ? "₤"
-                    : "?"}
-                <span> / {unitLabel[rule.unit]}</span>
+                {rule.unit === "percent"
+                  ? "%"
+                  : rule.currency === "EUR"
+                    ? "€"
+                    : rule.currency === "ITL"
+                      ? "₤"
+                      : "?"}
+                {rule.unit !== "percent" && (
+                  <span> / {unitLabel[rule.unit]}</span>
+                )}
               </strong>
               {rule.proposal.suggested !== null && rule.proposal.applicable ? (
                 <>

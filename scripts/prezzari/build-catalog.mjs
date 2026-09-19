@@ -9,6 +9,11 @@ import {
   completeBatch,
   heightScenario,
   includesLandInConditions,
+  matchingMunicipalities,
+  workedExamplePage,
+  nonBuildingVolume,
+  comoTerritorialCells,
+  fvgLandRows,
 } from "./lib.mjs";
 const cache = process.env.PRICE_CACHE_DIR || ".cache/prezzari";
 const promptHash = process.env.PRICE_PROMPT_HASH || "1d514faae90a";
@@ -45,6 +50,7 @@ const normalize = (s) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+const canonicalProvince = (code) => ({ PS: "PU", FO: "FC" })[code] || code;
 const usages = new Set([
   "capannone",
   "uffici",
@@ -116,13 +122,14 @@ for (const source of inventory) {
       : source.file.startsWith("Ascoli Piceno/")
         ? "Ascoli Piceno"
         : "Da verificare");
-  const province =
+  const province = canonicalProvince(
     provinces.find(
       (p) =>
         normalize(p.text) === normalize(territory) ||
         (territory === "Pesaro e Urbino" && p.id === "PU") ||
         (territory === "Massa-Carrara" && p.id === "MS"),
-    )?.id || (territory === "Bolzano" ? "BZ" : null);
+    )?.id || (territory === "Bolzano" ? "BZ" : null),
+  );
   const valid = batches.filter(
     (b) =>
       b.sha256 === source.sha256 &&
@@ -137,16 +144,58 @@ for (const source of inventory) {
     (a.extractedAt || "").localeCompare(b.extractedAt || ""),
   ))
     for (const n of batch.targetPages) pageFamily.set(n, batch._family);
-  const selected = valid.filter((b) =>
+  let selected = valid.filter((b) =>
     b.targetPages.some((n) => pageFamily.get(n) === b._family),
   );
-  const analyzed = new Set(
+  let analyzed = new Set(
     selected.flatMap((b) => {
       const parent = batches.find((p) => p._file === b._family && p.split);
       if (parent && !completeBatch(parent, batchIndex)) return [];
       return b.targetPages.filter((n) => pageFamily.get(n) === b._family);
     }),
   );
+  if (source.file === "Como/AGEDP-CO_145334_2025_1466_All3.xlsx") {
+    for (const page of raw.pages)
+      pageFamily.set(page.page, "structured-static-cells");
+    selected = raw.pages.map((page) => ({
+      _family: "structured-static-cells",
+      targetPages: [page.page],
+      rules: comoTerritorialCells(page.text).map((rule) => ({
+        ...rule,
+        page: page.page,
+      })),
+      notes: [
+        "Tabella statica estratta cella per cella, senza eseguire formule. Valuta, unità e intestazioni incomplete restano da verificare.",
+      ],
+      priceEpoch: "Da verificare con le note metodologiche All4",
+      includesCharges: null,
+    }));
+    analyzed = new Set(raw.pages.map((page) => page.page));
+  }
+  if (
+    source.file.endsWith("Prontuario FVG Categorie D-E_2024-Appendice A.pdf")
+  ) {
+    for (const page of raw.pages)
+      pageFamily.set(page.page, "structured-fvg-land");
+    selected = raw.pages
+      .filter((page) => page.page >= 3)
+      .map((page) => ({
+        _family: "structured-fvg-land",
+        targetPages: [page.page],
+        rules: fvgLandRows(page.text).map((rule) => ({
+          ...rule,
+          page: page.page,
+        })),
+        notes: [
+          "Tabella min/max estratta deterministicamente per le cinque zone, con unità e biennio esplicitati a pagina PDF 3. Le voci passano comunque il secondo controllo semantico.",
+        ],
+        priceEpoch: "1988-1989",
+        includesCharges: null,
+      }));
+    analyzed = new Set(
+      raw.pages.filter(candidatePage).map((page) => page.page),
+    );
+  }
   const notes = [
     ...new Set(
       selected
@@ -172,11 +221,13 @@ for (const source of inventory) {
       source.file,
     )
       ? "context"
-      : /\.xlsx$/i.test(source.file)
-        ? "calculator"
-        : /allegato|appendice|valori.*aree|zone dei comuni/i.test(source.file)
-          ? "supplement"
-          : "price-list";
+      : source.file === "Como/AGEDP-CO_145334_2025_1466_All3.xlsx"
+        ? "supplement"
+        : /\.xlsx$/i.test(source.file)
+          ? "calculator"
+          : /allegato|appendice|valori.*aree|zone dei comuni/i.test(source.file)
+            ? "supplement"
+            : "price-list";
   const document = {
     id: source.sha256,
     sha256: source.sha256,
@@ -215,6 +266,24 @@ for (const source of inventory) {
     document.includesCharges = false;
     document.notes.push(
       "Pagina 2: soli costi di costruzione; terreno, spese tecniche, oneri e profitto da aggiungere. Pagina 6: formule di interpolazione sulla superficie e maggiorazioni di altezza distinte per copertura.",
+    );
+  }
+  if (
+    source.file.endsWith(
+      "Prontuario FVG Categorie D-E_2024-vers1.2-dicem2025.pdf",
+    )
+  ) {
+    document.preferredForRegion = true;
+    document.notes.push(
+      "Pagine 3 e 6: riferimento regionale unificato successivo ai quattro prontuari provinciali del 2019; valori ordinari esplicitamente dichiarati, non medie inventate dal sistema.",
+    );
+  }
+  if (
+    source.file.endsWith("Prontuario FVG Categorie D-E_2024-Appendice A.pdf")
+  ) {
+    document.preferredForRegion = true;
+    document.notes.push(
+      "Appendice territoriale del riferimento regionale unificato 2025; pagina 3: valori in €/m² riferiti al biennio 1988-1989 e all’intero lotto.",
     );
   }
   if (source.file === "Bari.pdf") {
@@ -355,7 +424,7 @@ for (const source of inventory) {
         usageIds = ["custom"];
       if (
         ["building", "site-work"].includes(kind) &&
-        /agricol|zootecn|allevamento|stalla|stalle|fienil|camp[oi] da golf|campegg|roulotte|camper|campo da gioco|campi da gioco|tennis|calc[ie]|rugby|bocce|solarium|pista di pattinaggio/.test(
+        /agricol|zootecn|allevamento|stalla|stalle|fienil|camp[oi] da golf|campegg|roulotte|camper|campo da gioco|campi da gioco|tennis|\bcalcio\b|\bcalcetto\b|rugby|bocce|solarium|pista di pattinaggio/.test(
           destination,
         )
       )
@@ -363,11 +432,32 @@ for (const source of inventory) {
       if (kind === "site-work" && usageIds.every((u) => u === "lotto"))
         usageIds = ["sistemazione-esterna"];
       if (kind === "land") usageIds = ["lotto"];
-      if (kind === "building" && /valore\s+di\s+mercato/i.test(page.text))
+      if (
+        kind === "building" &&
+        /valor[ei]\s+(?:di\s+)?mercato/i.test(
+          `${page.text} ${r.label} ${r.qualifiers || ""}`,
+        )
+      )
         review.push(
           "La pagina usa valori di mercato: verificare l’approccio estimativo, non applicare direttamente come costo di costruzione.",
         );
       const qualifiers = compact(r.qualifiers).slice(0, 3500);
+      if (
+        /Como\/AGEDP-CO_145334_2025_1466_All[13]\.(?:pdf|xlsx)$/.test(
+          source.file,
+        )
+      )
+        review.push(
+          "Tabella territoriale di Como: destinazione/colonna e unità da riconciliare con All4 pagina 3 (superficie lotto per produttivo, volume edificato per terziario). Non presumere €/m² per ogni colonna.",
+        );
+      if (workedExamplePage(page.text))
+        review.push(
+          "Pagina di esempio o modello di stima compilato: non tariffa autonoma.",
+        );
+      if (unit === "m3" && nonBuildingVolume(r.label))
+        review.push(
+          "Volume di un’opera o componente, non volume dell’edificio: non convertire con l’altezza dell’area.",
+        );
       if (
         /esempio|simulazione|ipotesi di stima/i.test(`${r.label} ${qualifiers}`)
       )
@@ -400,8 +490,11 @@ for (const source of inventory) {
       ].join("|");
       if (fingerprints.has(key)) continue;
       fingerprints.add(key);
-      let municipality;
-      if (kind === "land") {
+      let municipality, municipalities;
+      if (
+        kind === "land" ||
+        /\bcomun[ei]\b/i.test(`${r.label} ${qualifiers}`)
+      ) {
         const regional = {
           Piemonte: ["AL", "AT", "BI", "CN", "NO", "TO", "VB", "VC"],
           Veneto: ["BL", "PD", "RO", "TV", "VE", "VI", "VR"],
@@ -409,18 +502,24 @@ for (const source of inventory) {
         };
         const scope = province ? [province] : regional[document.region] || [];
         const names = provinces
-          .filter((p) => scope.includes(p.id))
+          .filter((p) => scope.includes(canonicalProvince(p.id)))
           .flatMap((p) => p.comuni || [])
+          .map((c) => ({
+            ...c,
+            text: c.text.replace(/\/\s*sez\.\s*[A-Z0-9_]+\s*$/i, ""),
+          }))
           .filter((c) => !c.text.includes("/"))
           .sort((a, b) => b.text.length - a.text.length);
-        municipality = names.find((c) =>
-          (" " + normalize(r.label) + " ").includes(
-            " " + normalize(c.text) + " ",
-          ),
-        )?.text;
+        const labelMatches = matchingMunicipalities(
+          r.label,
+          names.map((c) => c.text),
+        );
+        if (labelMatches.length === 1) municipality = labelMatches[0];
+        else if (labelMatches.length > 1) municipalities = labelMatches;
         if (
           !municipality &&
-          !/altri comuni|diversi da|esclus[oi]/i.test(
+          !municipalities &&
+          !/altri comuni|restanti comuni|diversi da|esclus[oi]|eccetto|tranne|ad eccezione/i.test(
             `${r.label} ${qualifiers}`,
           )
         ) {
@@ -455,6 +554,7 @@ for (const source of inventory) {
         reviewReasons: review,
         method: page.method,
         municipality,
+        municipalities,
         includesLand:
           kind === "building" && includesLandInConditions(qualifiers),
       };
@@ -462,6 +562,24 @@ for (const source of inventory) {
         /\b(?:cs|cu|costo(?: unitario)?)\s*=|\d\s*\+\s*\d\s*[*×]\s*\(/i.test(
           `${rule.quote} ${rule.qualifiers}`,
         );
+      if (
+        document.preferredForRegion &&
+        rule.page === 16 &&
+        rule.kind === "building" &&
+        rule.unit === "m2" &&
+        /^(Capannone|Magazzino) superficie coperta/.test(rule.label)
+      ) {
+        const threshold = rule.label.startsWith("Capannone") ? 2000 : 1000;
+        const above = /superficie coperta >/.test(rule.label);
+        rule.areaBounds = above
+          ? { minExclusive: threshold }
+          : { maxInclusive: threshold };
+        rule.heightAdjustment = {
+          base: 5,
+          percentPerMetre: 5,
+          note: "FVG, pagina PDF 16: +5% per ogni metro oltre H piano 5 m. Valore ordinario; lo scostamento per finiture, struttura o impianti non viene applicato automaticamente.",
+        };
+      }
       if (
         source.file === "Lecco.pdf" &&
         rule.page === 6 &&
@@ -547,8 +665,9 @@ for (const source of inventory) {
           page: 8,
         };
       if (
-        rule.kind === "land" &&
+        ["land", "building", "site-work"].includes(rule.kind) &&
         !rule.municipality &&
+        !rule.municipalities?.length &&
         !rule.zone &&
         /\bcomun[ei]\b|zona OMI|localit/i.test(
           `${rule.label} ${rule.qualifiers}`,
@@ -652,7 +771,12 @@ for (const d of documents) {
   ).length;
 }
 const result = {
-  version: "2026-09-19.1",
+  version:
+    "2026-09-19.1+" +
+    hash({ promptHash, auditHash, documents, rules, bergamoZones }).slice(
+      0,
+      12,
+    ),
   generatedAt: new Date().toISOString(),
   model: "deepseek-v4-flash",
   promptHash,

@@ -16,6 +16,17 @@ export function normalizePriceText(value: string) {
 }
 const round = (value: number) =>
   Math.round((value + Number.EPSILON) * 100) / 100;
+export const priceMunicipalityName = (value?: string) =>
+  (value || "")
+    .replace(/\s*\([A-Z]{2}\)\s*$/i, "")
+    .replace(/\/\s*sez\.\s*[A-Z0-9_]+\s*$/i, "")
+    .trim();
+export const canonicalPriceProvince = (value?: string | null) => {
+  const code = value?.toUpperCase() || "";
+  return ({ PS: "PU", FO: "FC" } as Record<string, string>)[code] || code;
+};
+const normalizeMunicipality = (value?: string) =>
+  normalizePriceText(priceMunicipalityName(value));
 
 export function calculatePriceProposal(
   rule: PriceRule,
@@ -36,7 +47,12 @@ export function calculatePriceProposal(
   const supported =
     rule.unit === "m2" ||
     (rule.unit === "m3" && rule.volumeKind === "building");
-  if (rule.semanticReview !== "supported")
+  if (
+    rule.semanticReview !== "supported" &&
+    supported &&
+    ["building", "land", "site-work"].includes(rule.kind) &&
+    !["context", "calculator"].includes(document.role)
+  )
     missingInputs.push(
       rule.semanticReview === "review"
         ? "Seconda verifica automatica non superata: voce consultabile, non applicabile."
@@ -46,6 +62,29 @@ export function calculatePriceProposal(
     missingInputs.push(
       "La voce dipende da una formula non ancora automatizzata: il valore base non è il prezzo finale.",
     );
+  if (rule.heightAdjustment) {
+    const adjustment = rule.heightAdjustment;
+    if (query.height === undefined)
+      assumptions.push(
+        `Scenario base con H piano fino a ${adjustment.base} m; altezza reale non ancora nota.`,
+      );
+    else if (query.height > adjustment.base) {
+      const increase =
+        ((query.height - adjustment.base) * adjustment.percentPerMetre) / 100;
+      factor *= 1 + increase;
+      formula += ` × (1 + ${round(increase * 100)}%)`;
+    }
+    assumptions.push(adjustment.note);
+  }
+  if (
+    rule.areaBounds &&
+    query.area !== undefined &&
+    ((rule.areaBounds.minExclusive !== undefined &&
+      query.area <= rule.areaBounds.minExclusive) ||
+      (rule.areaBounds.maxInclusive !== undefined &&
+        query.area > rule.areaBounds.maxInclusive))
+  )
+    missingInputs.push("Superficie fuori dall’intervallo previsto dalla voce");
   if (rule.calculation) {
     const c = rule.calculation;
     calculatedBase = c.base;
@@ -90,8 +129,17 @@ export function calculatePriceProposal(
       "La superficie inserita è quella di riferimento del fabbricato nella tabella, non automaticamente quella dell’area disegnata.",
     );
   }
-  if (rule.municipality && !query.municipality)
-    missingInputs.push("Comune necessario per una voce territoriale specifica");
+  const towns =
+    rule.municipalities || (rule.municipality ? [rule.municipality] : []);
+  if (towns.length) {
+    const town = normalizeMunicipality(query.municipality);
+    if (!town)
+      missingInputs.push(
+        "Comune necessario per una voce territoriale specifica",
+      );
+    else if (!towns.some((name) => normalizeMunicipality(name) === town))
+      missingInputs.push("Comune non compatibile con questa voce territoriale");
+  }
   if (rule.zone && !query.zone)
     missingInputs.push(
       "Zona necessaria: indica il comune o scegli la zona documentata",
@@ -161,8 +209,30 @@ export function calculatePriceProposal(
     assumptions.push(
       "Altri correttivi, maggiorazioni o esclusioni descritti nella voce non sono applicati automaticamente, salvo quelli esplicitati nella formula.",
     );
+  if (query.area !== undefined && !rule.areaBounds && !rule.calculation)
+    assumptions.push(
+      "La superficie inserita non attiva una formula o un filtro dimensionale per questa voce: verifica la fascia nella fonte.",
+    );
+  if (
+    query.span !== undefined &&
+    !(document.file === "Milano.pdf" && rule.code === "2.4")
+  )
+    assumptions.push(
+      "La luce strutturale inserita non è interpretata automaticamente per questa voce: verifica il limite nella fonte.",
+    );
+  if (
+    query.height !== undefined &&
+    rule.unit === "m2" &&
+    !rule.heightAdjustment &&
+    !rule.calculation &&
+    !(document.file === "Milano.pdf" && ["2.4", "2.5"].includes(rule.code))
+  )
+    assumptions.push(
+      "L’altezza inserita non modifica automaticamente questo costo al m²: eventuali fasce o correttivi restano da verificare.",
+    );
   const applicable =
     supported &&
+    rule.semanticReview === "supported" &&
     rule.evidence === "exact" &&
     rule.currency !== "unknown" &&
     ["building", "land", "site-work"].includes(rule.kind) &&
@@ -191,16 +261,15 @@ export function calculatePriceProposal(
 
 export function suggestPriceRules(catalog: PriceCatalog, query: PriceQuery) {
   const documents = new Map(catalog.documents.map((d) => [d.id, d]));
-  const province =
+  const province = canonicalPriceProvince(
       (query.documentId ? documents.get(query.documentId)?.province : null) ||
-      query.province?.toUpperCase(),
+        query.province,
+    ),
     region = regionForProvince(province);
   const search = normalizePriceText(query.search || "")
     .split(" ")
     .filter(Boolean);
-  const municipality = normalizePriceText(
-    (query.municipality || "").replace(/\s*\([A-Z]{2}\)\s*$/i, ""),
-  );
+  const municipality = normalizeMunicipality(query.municipality);
   const zone =
     query.zone ||
     (province === "BG" ? catalog.bergamoZones[municipality] : undefined);
@@ -212,7 +281,7 @@ export function suggestPriceRules(catalog: PriceCatalog, query: PriceQuery) {
         !query.documentId &&
         (!province ||
           !(
-            doc.province === province ||
+            canonicalPriceProvince(doc.province) === province ||
             (!doc.province && doc.region === region)
           ))
       )
@@ -232,13 +301,26 @@ export function suggestPriceRules(catalog: PriceCatalog, query: PriceQuery) {
         `${rule.label} ${rule.code} ${rule.qualifiers}`,
       );
       if (!search.every((word) => content.includes(word))) return [];
+      const ruleMunicipalities =
+        rule.municipalities || (rule.municipality ? [rule.municipality] : []);
       if (
-        rule.municipality &&
+        ruleMunicipalities.length &&
         municipality &&
-        normalizePriceText(rule.municipality) !== municipality
+        !ruleMunicipalities.some(
+          (name) => normalizePriceText(name) === municipality,
+        )
       )
         return [];
       if (rule.zone && zone && rule.zone !== zone) return [];
+      if (
+        rule.areaBounds &&
+        query.area !== undefined &&
+        ((rule.areaBounds.minExclusive !== undefined &&
+          query.area <= rule.areaBounds.minExclusive) ||
+          (rule.areaBounds.maxInclusive !== undefined &&
+            query.area > rule.areaBounds.maxInclusive))
+      )
+        return [];
       if (
         rule.calculation &&
         query.area !== undefined &&
@@ -266,13 +348,19 @@ export function suggestPriceRules(catalog: PriceCatalog, query: PriceQuery) {
         if (rule.valueMin !== expected) return [];
       }
       const reasons: string[] = [
-        doc.province === province
+        canonicalPriceProvince(doc.province) === province
           ? "Provincia corrispondente"
           : query.documentId
             ? "Documento scelto manualmente"
             : "Prezzario regionale",
       ];
-      let score = doc.province === province ? 100 : 70;
+      let score = canonicalPriceProvince(doc.province) === province ? 100 : 70;
+      if (doc.preferredForRegion) {
+        score += 45;
+        reasons.push(
+          "Riferimento regionale unificato più recente: relazione con i precedenti provinciali verificata nella fonte",
+        );
+      }
       if (query.usage) {
         reasons.push("Destinazione compatibile; verificare la variante");
         score += 50;
@@ -281,7 +369,7 @@ export function suggestPriceRules(catalog: PriceCatalog, query: PriceQuery) {
         reasons.push("La fonte descrive una variante ordinaria o media");
         score += 8;
       }
-      if (rule.municipality && municipality) {
+      if (ruleMunicipalities.length && municipality) {
         reasons.push("Comune corrispondente");
         score += 30;
       }
@@ -317,6 +405,13 @@ export function suggestPriceRules(catalog: PriceCatalog, query: PriceQuery) {
       if (rule.semanticReview === "pending") score -= 50;
       if (rule.evidence !== "exact") score -= 100;
       if (rule.kind === "adjustment" || rule.kind === "equipment") score -= 30;
+      if (
+        !(
+          rule.unit === "m2" ||
+          (rule.unit === "m3" && rule.volumeKind === "building")
+        )
+      )
+        score -= 35;
       return [
         {
           ...rule,

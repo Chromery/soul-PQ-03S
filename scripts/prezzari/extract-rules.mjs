@@ -4,7 +4,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { candidatePage, hash, completeBatch } from "./lib.mjs";
+import {
+  candidatePage,
+  hash,
+  completeBatch,
+  onlyPageFurniture,
+} from "./lib.mjs";
 const require = createRequire(path.resolve("package.json"));
 const env = {
   ...(fs.existsSync(".env")
@@ -155,6 +160,13 @@ for (const source of inventory) {
     continue;
   seen.add(source.sha256);
   if (/docfa esempio|relazioni di calcolo/i.test(source.file)) continue;
+  // Workbook formulas/cached results are read by the safe supporting reader,
+  // not interpreted as autonomous price rules. Como static cells use the builder.
+  if (source.format === "xlsx") continue;
+  if (source.file.endsWith("Prontuario FVG Categorie D-E_2024-Appendice A.pdf"))
+    continue;
+  // Extracted deterministically by build-catalog, with unresolved units quarantined.
+  if (source.file === "Como/AGEDP-CO_145334_2025_1466_All3.xlsx") continue;
   const doc = JSON.parse(
     fs.readFileSync(path.join(cache, source.sha256 + ".json")),
   );
@@ -224,6 +236,25 @@ async function worker() {
       if (!saved.split && saved.contentHash === job.contentHash) continue;
     }
     const started = Date.now();
+    if (
+      job.fragment &&
+      job.batch.every((page) => onlyPageFurniture(page.text))
+    ) {
+      atomicWrite(job.file, {
+        source: job.source.file,
+        sha256: job.source.sha256,
+        targetPages: job.batch.map((page) => page.page),
+        contentHash: job.contentHash,
+        model: "deterministic-empty-fragment",
+        promptHash,
+        extractedAt: new Date().toISOString(),
+        rules: [],
+        notes: [
+          "Frammento composto esclusivamente da numero di pagina o intestazione editoriale, senza unità monetarie o prezzi.",
+        ],
+      });
+      continue;
+    }
     let error;
     for (let attempt = 0; attempt < 3; attempt++)
       try {
@@ -240,13 +271,16 @@ async function worker() {
               model,
               temperature: 0,
               response_format: { type: "json_object" },
-              max_tokens: 12000,
+              max_tokens: (job.fragmentDepth || 0) >= 3 ? 24000 : 12000,
               messages: [
                 { role: "system", content: prompt },
                 {
                   role: "user",
                   content:
-                    `FILE: ${job.source.file}\n${job.context}\n` +
+                    `FILE: ${job.source.file}\nCONTESTO (non estrarre prezzi da questa sezione):\n${job.context}\nFINE CONTESTO\n` +
+                    (job.fragment
+                      ? "Questo TARGET è soltanto un FRAMMENTO della pagina: estrai SOLO i prezzi materialmente presenti nel frammento seguente, non quelli delle altre righe della stessa pagina nel contesto. Se il frammento contiene soltanto intestazioni senza prezzi, restituisci rules: [].\n"
+                      : "") +
                     job.batch
                       .map(
                         (p) =>
@@ -277,7 +311,10 @@ async function worker() {
         const parsed = JSON.parse(
           raw.replace(/^\s*```(?:json)?\s*/, "").replace(/\s*```\s*$/, ""),
         );
-        if (!Array.isArray(parsed.rules)) throw Error("Missing rules");
+        if (!Array.isArray(parsed.rules))
+          throw Error(
+            "Missing rules; keys=" + Object.keys(parsed).slice(0, 8).join(","),
+          );
         atomicWrite(job.file, {
           source: job.source.file,
           sha256: job.source.sha256,
@@ -285,6 +322,7 @@ async function worker() {
           contentHash: job.contentHash,
           model,
           promptHash,
+          fragmentProtocol: job.fragment ? 2 : undefined,
           usage: body.usage,
           extractedAt: new Date().toISOString(),
           ...parsed,
@@ -319,7 +357,7 @@ async function worker() {
             setTimeout(resolve, Math.min(60000, 4000 * 2 ** attempt)),
           );
         if (
-          error === "Truncated response" &&
+          /Truncated response|Missing rules/.test(error) &&
           (job.batch.length > 1 || (job.fragmentDepth || 0) < 3)
         ) {
           const previousLength = jobs.length;
