@@ -19,3 +19,4 @@ Calcolo Rendita/
 backups/
 feedback logs/
 apps/api/src/generated/prisma
+.cache/prezzari/

@@ -57,6 +57,7 @@ import {
 } from "./lotValuation";
 import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { textOrientation } from "./pdf-orientation";
+import { PriceRuleModal, type PriceApplication, type PriceProvenance } from "./PriceRules";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
@@ -302,6 +303,7 @@ type Region = {
 };
 
 type AreaSelection = {
+  priceProvenance?: PriceProvenance;
   id: string;
   page: number;
   usageId: UsageId;
@@ -337,6 +339,7 @@ type DocumentSource =
   | { kind: "upload"; fileName: string };
 
 type SavedSelection = {
+  priceProvenance?: PriceProvenance;
   id: string;
   page: number;
   usageId: UsageId;
@@ -1585,6 +1588,7 @@ export default function PlanimetriaEditor({
   const [leftPanelOpen, setLeftPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.left));
   const [rightPanelOpen, setRightPanelOpen] = useState(() => readPanelState(PANEL_STORAGE_KEYS.right));
   const [priceListDropdownOpen, setPriceListDropdownOpen] = useState(false);
+  const [priceSuggestionAreaId, setPriceSuggestionAreaId] = useState<string | null>(null);
   const [scaleModalOpen, setScaleModalOpen] = useState(false);
   const [scaleModalSheetSize, setScaleModalSheetSize] = useState<SheetSize>(() => readEditorPreferences().scale.sheetSize);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
@@ -3089,6 +3093,7 @@ export default function PlanimetriaEditor({
         height: saved.region.height,
       };
       const selection: AreaSelection = {
+        priceProvenance: saved.priceProvenance,
         id: saved.id,
         page: saved.page,
         usageId: saved.usageId,
@@ -3177,6 +3182,7 @@ export default function PlanimetriaEditor({
     const selectionsToSave = Array.from(runtimeRef.current.selectionsByPage.values())
       .flat()
       .map<SavedSelection>((selection) => ({
+        priceProvenance: selection.priceProvenance,
         id: selection.id,
         page: selection.page,
         usageId: selection.usageId,
@@ -5006,6 +5012,7 @@ export default function PlanimetriaEditor({
       selection.customUsageLabel = customLabel;
       selection.color = color;
       selection.rate = rate;
+      selection.priceProvenance = undefined;
       selection.opacity = opacity;
       selection.region = region;
       selection.bitmap = createTintedCanvas(region, color, opacity);
@@ -5920,6 +5927,7 @@ export default function PlanimetriaEditor({
     selection.customUsageLabel = undefined;
     selection.color = usage.color;
     selection.rate = usage.rate;
+    selection.priceProvenance = undefined;
     selection.bitmap = createTintedCanvas(selection.region, usage.color, selection.opacity);
     redrawMasks();
     setStatus(`Area aggiornata: ${usage.label}`);
@@ -5937,6 +5945,7 @@ export default function PlanimetriaEditor({
     selection.customUsageLabel = preset.label;
     selection.color = preset.color;
     selection.rate = preset.rate;
+    selection.priceProvenance = undefined;
     selection.bitmap = createTintedCanvas(selection.region, preset.color, selection.opacity);
     setActiveUsage(CUSTOM_USAGE_ID);
     setActiveCustomUsageId(preset.id);
@@ -5971,6 +5980,7 @@ export default function PlanimetriaEditor({
     selection.customUsageLabel = preset.label;
     selection.color = preset.color;
     selection.rate = preset.rate;
+    selection.priceProvenance = undefined;
     selection.bitmap = createTintedCanvas(selection.region, preset.color, selection.opacity);
     setActiveUsage(CUSTOM_USAGE_ID);
     setActiveCustomUsageId(preset.id);
@@ -6064,6 +6074,7 @@ export default function PlanimetriaEditor({
       selection.customUsageLabel = customPreset?.label;
       selection.color = usage.color;
       selection.rate = usage.rate;
+      selection.priceProvenance = undefined;
       selection.bitmap = createTintedCanvas(selection.region, usage.color, selection.opacity);
     });
     if (customPreset) {
@@ -6093,6 +6104,7 @@ export default function PlanimetriaEditor({
       selection.customUsageLabel = preset.label;
       selection.color = preset.color;
       selection.rate = preset.rate;
+      selection.priceProvenance = undefined;
       selection.bitmap = createTintedCanvas(selection.region, preset.color, selection.opacity);
     });
     setActiveUsage(CUSTOM_USAGE_ID);
@@ -6151,6 +6163,7 @@ export default function PlanimetriaEditor({
     recordUndoState();
     targetSelections.forEach((selection) => {
       selection.rate = nextRate;
+      selection.priceProvenance = undefined;
     });
     setStatus(`Valore unitario aggiornato per ${targetSelections.length} aree`);
     markDirty();
@@ -6302,6 +6315,20 @@ export default function PlanimetriaEditor({
     }
   }
 
+  function applyPriceSuggestion(id: string, application: PriceApplication) {
+    const selection = findSelectionById(id);
+    if (!selection || !Number.isFinite(application.rate) || application.rate < 0) return;
+    recordUndoState();
+    selection.rate = application.rate;
+    selection.priceProvenance = application.provenance;
+    if (application.removeCharges) selection.oneri = false;
+    if (application.clearAmountOverride) selection.amountOverride = null;
+    setPriceSuggestionAreaId(null);
+    setStatus("Prezzo da prezzario applicato all’area. Salva per conservarlo; Indietro per annullare.");
+    markDirty();
+    bumpRevision();
+  }
+
   function changeSelectionRate(id: string, rawValue: string) {
     const parsed = parseNumberInput(rawValue);
     if (parsed === null) {
@@ -6316,6 +6343,7 @@ export default function PlanimetriaEditor({
       if (selection.rate === nextRate) return selection.rate;
       recordUndoState();
       selection.rate = nextRate;
+      selection.priceProvenance = undefined;
       setStatus("Valore area aggiornato");
       markDirty();
       bumpRevision();
@@ -9680,6 +9708,7 @@ export default function PlanimetriaEditor({
                                   <div className="area-table-value-cell compact">
                                     <input
                                       key={`${selection.id}-table-rate-${selection.rate}`}
+                                      aria-label={`Prezzo unitario area ${index + 1}`}
                                       className="area-value-input"
                                       type="text"
                                       inputMode="decimal"
@@ -9696,6 +9725,7 @@ export default function PlanimetriaEditor({
                                         }
                                       }}
                                     />
+                                    <button type="button" className="price-suggest-trigger" aria-label={`Suggerisci prezzo per area ${index + 1}`} title="Cerca nel prezzario" onClick={(event) => { event.stopPropagation(); setPriceSuggestionAreaId(selection.id); }}><Sparkles size={14}/></button>
                                   </div>
                                 </td>
                                 <td>
@@ -10840,7 +10870,9 @@ export default function PlanimetriaEditor({
                                       }}
                                     />
                                     <span className="area-value-unit">€/m2</span>
+                                    <button type="button" className="price-suggest-trigger" aria-label={`Suggerisci prezzo per area ${index + 1}`} title="Cerca nel prezzario" onClick={(event) => { event.stopPropagation(); setPriceSuggestionAreaId(selection.id); }}><Sparkles size={14}/></button>
                                   </dd>
+                                  {selection.priceProvenance?.rate === selection.rate && <span className="price-provenance" title={selection.priceProvenance.label}><Sparkles size={11}/> Da prezzario · pag. {selection.priceProvenance.page}</span>}
                                 </div>
                                 <div>
                                   <dt>Valore destinazione</dt>
@@ -11012,6 +11044,11 @@ export default function PlanimetriaEditor({
           </div>
         </div>
       )}
+
+      {priceSuggestionAreaId && findSelectionById(priceSuggestionAreaId) && (() => {
+        const area = findSelectionById(priceSuggestionAreaId)!;
+        return <PriceRuleModal key={area.id} province={property.formapsProvincia || property.provincia || undefined} municipality={property.formapsComune || property.comune} usage={area.usageId} currentRate={area.rate} hasCharges={area.oneri === true} hasAmountOverride={typeof area.amountOverride === "number"} onClose={() => setPriceSuggestionAreaId(null)} onApply={(application) => applyPriceSuggestion(area.id, application)} />;
+      })()}
 
       {clearPageConfirmOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setClearPageConfirmOpen(false)}>

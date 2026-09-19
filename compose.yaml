@@ -93,12 +93,14 @@ services:
       NEURALWATT_TERRITORY_MATCH_TIMEOUT_MS: ${NEURALWATT_TERRITORY_MATCH_TIMEOUT_MS:-25000}
       CHROMIUM_EXECUTABLE_PATH: ${CHROMIUM_EXECUTABLE_PATH:-/usr/bin/chromium}
       IMU_DOCUMENT_LIBRARY_DIR: /var/lib/soul-pq/imu-delibere
+      PRICE_RULE_SOURCE_DIR: /var/lib/soul-pq/price-list-sources
     ports:
       - "${API_PORT:-3000}:3000"
     volumes:
       - ./backups/postgres:/backups/postgres
       - imu_delibere_cache:/var/lib/soul-pq/imu-delibere
       - erp_audit_logs:/var/lib/soul-pq/erp-audit
+      - ./00_prezzari2026:/var/lib/soul-pq/price-list-sources:ro
     healthcheck:
       test:
         [

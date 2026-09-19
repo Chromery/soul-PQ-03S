@@ -80,6 +80,7 @@ import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
 import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperience";
 import { CurrentOperator, useIdentity } from "./Auth";
 import { PropertyGroupingSuggestions } from "./PropertyGroupingSuggestions";
+import { PriceRuleLab } from "./PriceRules";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.10";
@@ -732,6 +733,7 @@ type PlanAreaDraftState = {
 
 type AppRoute =
   | { view: "dashboard" }
+  | { view: "priceRules" }
   | { view: "studies" }
   | { view: "properties" }
   | { view: "analysis" }
@@ -754,6 +756,7 @@ function routeFromLocation(): AppRoute {
 
   const parts = window.location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
   if (parts.length === 0) return { view: "dashboard" };
+  if (parts[0] === "prezzari") return { view: "priceRules" };
   if (parts[0] === "studi" && parts.length === 1) return { view: "studies" };
   if (parts[0] === "studi" && parts[1] && parts.length === 2) {
     return { view: "study", studyId: parts[1] };
@@ -780,6 +783,8 @@ function routeFromLocation(): AppRoute {
 
 function pathForRoute(route: AppRoute) {
   switch (route.view) {
+    case "priceRules":
+      return "/prezzari";
     case "dashboard":
       return "/";
     case "studies":
@@ -809,6 +814,8 @@ function pathForRoute(route: AppRoute) {
 
 function navSectionForRoute(route: AppRoute) {
   switch (route.view) {
+    case "priceRules":
+      return "Prezzari";
     case "dashboard":
     case "study":
     case "studies":
@@ -3586,6 +3593,10 @@ function App() {
     markRead: markActivitiesRead,
   };
 
+  if (route.view === "priceRules") {
+    return <Shell query={query} setQuery={handleGlobalQuery} toast={toast} activeSection="Prezzari" onNavigate={navigate} activityFeed={activityFeed}><PriceRuleLab/></Shell>;
+  }
+
   if (route.view === "editor" && editorStudy && editorProperty) {
     return (
       <Shell
@@ -4790,7 +4801,7 @@ function Shell({
 
   return (
     <div
-      className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${editorMode ? "editor-shell" : ""}`}
+      className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${editorMode ? "editor-shell" : ""} ${activeSection === "Prezzari" ? "price-lab-shell" : ""}`}
     >
       <aside className="sidebar">
         <div className="brand-row">
@@ -4819,6 +4830,12 @@ function Shell({
             icon={<Building2 size={21} />}
             label="Immobili"
             onClick={() => onNavigate({ view: "properties" })}
+          />
+          <NavItem
+            active={activeSection === "Prezzari"}
+            icon={<FileText size={21} />}
+            label="Prezzari"
+            onClick={() => onNavigate({ view: "priceRules" })}
           />
           <NavItem
             active={activeSection === "Analisi"}

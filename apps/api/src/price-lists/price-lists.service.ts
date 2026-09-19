@@ -197,7 +197,7 @@ function provinceCodeFromAddress(address?: string | null) {
   return match ? match[1] : "";
 }
 
-function regionForProvince(province?: string | null) {
+export function regionForProvince(province?: string | null) {
   return PROVINCE_REGIONS[normalizeProvinceCode(province)];
 }
 

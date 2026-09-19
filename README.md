@@ -4,6 +4,10 @@ Soul Prospect Qualifier is an internal web application for Soul employees who ma
 
 The product helps operators review feasibility studies imported from Soul's ERP, inspect the related real estate assets, open their cadastral documents, and use a planimetria editor to select areas and assign a `destinazione d'uso`.
 
+## Price-list laboratory — `analisi-prezzari`
+
+This experimental branch adds the authenticated `/prezzari` catalogue and operator-confirmed price suggestions in the editor. It is deployed to **staging only**, not production. See [design, source analysis and safeguards](docs/analisi-prezzari.md) and the [generated coverage matrix](docs/analisi-prezzari-copertura.md). Source documents remain local and read-only; the derived catalogue is versioned.
+
 ## Current Scope
 
 This repository contains the operational frontend and its initial persistence backend.

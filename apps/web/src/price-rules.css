@@ -1,0 +1,692 @@
+.price-lab {
+  padding: 28px;
+  max-width: 1600px;
+  margin: auto;
+  color: #183349;
+}
+.price-lab-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  padding: 38px 42px;
+  border-radius: 22px;
+  background: linear-gradient(120deg, #082e51, #006b94 68%, #00a2b8);
+  color: white;
+  box-shadow: 0 12px 35px #00354a15;
+}
+.price-lab-eyebrow {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 11px;
+  font-weight: 750;
+  opacity: 0.8;
+}
+.price-lab-hero h1 {
+  font-size: clamp(24px, 3vw, 36px);
+  letter-spacing: -0.04em;
+  margin: 14px 0;
+}
+.price-lab-hero p {
+  max-width: 710px;
+  line-height: 1.65;
+  margin: 0;
+  color: #d4eaf4;
+}
+.price-lab-hero > svg {
+  flex: none;
+  opacity: 0.3;
+}
+.price-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: #e1eaf0;
+  border: 1px solid #e1eaf0;
+  border-radius: 16px;
+  overflow: hidden;
+  margin: 22px 0;
+}
+.price-stats > div {
+  background: white;
+  padding: 21px 24px;
+  display: grid;
+  gap: 5px;
+}
+.price-stats strong {
+  font-size: 26px;
+  color: #07557a;
+}
+.price-stats span {
+  color: #627889;
+  font-size: 12px;
+}
+.price-browser {
+  font-size: 13px;
+  min-width: 0;
+}
+.price-browser button,
+.price-coverage button,
+.price-modal header button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #cddde6;
+  background: white;
+  border-radius: 9px;
+  padding: 9px 12px;
+  color: #174864;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.price-browser button:hover,
+.price-coverage button:hover {
+  background: #eef8fa;
+  border-color: #89c0d0;
+}
+.price-browser button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.price-browser input,
+.price-browser select {
+  font: inherit;
+  color: #183349;
+  border: 1px solid #ccdae2;
+  border-radius: 8px;
+  background: white;
+  padding: 10px;
+  width: 100%;
+  min-width: 0;
+}
+.price-browser input:focus,
+.price-browser select:focus,
+.price-browser button:focus-visible,
+.price-coverage button:focus-visible {
+  outline: 3px solid #33b4d74d;
+  outline-offset: 2px;
+}
+.price-browser input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: #007795;
+}
+.price-explainer {
+  display: flex;
+  gap: 13px;
+  padding: 18px 20px;
+  background: #edf7fa;
+  border: 1px solid #d4eaf0;
+  border-radius: 13px;
+  margin: 20px 0;
+  color: #255a72;
+}
+.price-explainer > svg {
+  flex: none;
+}
+.price-explainer p {
+  margin: 5px 0 0;
+  line-height: 1.6;
+  color: #4c7082;
+}
+.price-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1.3fr;
+  gap: 14px;
+  align-items: start;
+}
+.price-filters > label {
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 650;
+  min-width: 0;
+}
+.price-filters small {
+  font-weight: 400;
+  line-height: 1.45;
+  color: #687f8e;
+}
+.price-filter-search > div {
+  position: relative;
+}
+.price-filter-search svg {
+  position: absolute;
+  left: 10px;
+  top: 12px;
+  color: #668294;
+}
+.price-filter-search input {
+  padding-left: 33px;
+}
+.price-advanced {
+  border-bottom: 1px solid #dde7ed;
+  padding: 14px 0;
+  margin-bottom: 10px;
+}
+.price-advanced summary,
+.price-coverage summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #315d77;
+  font-weight: 650;
+}
+.price-advanced[open] > .price-filters {
+  margin-top: 18px;
+}
+.price-checks {
+  display: flex;
+  gap: 25px;
+  flex-wrap: wrap;
+  margin-top: 17px;
+}
+.price-checks label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.price-results-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  margin: 23px 0 14px;
+  font-weight: 650;
+}
+.price-results-heading small {
+  color: #728494;
+  font-weight: 400;
+  text-align: right;
+}
+.price-results {
+  display: grid;
+  gap: 12px;
+  transition: opacity 0.15s;
+}
+.price-results.is-loading {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.price-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 230px;
+  background: white;
+  border: 1px solid #dbe6ec;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 2px 6px #0e345406;
+}
+.price-card.is-selected {
+  border: 2px solid #0088a7;
+  box-shadow: 0 5px 20px #00778e12;
+}
+.price-card-content {
+  padding: 20px 23px;
+  min-width: 0;
+}
+.price-card-tags {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: #526e81;
+}
+.price-card-tags span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #eff4f7;
+  border-radius: 5px;
+  padding: 4px 6px;
+}
+.price-card-tags .price-match {
+  background: #e2f6f1;
+  color: #08785e;
+}
+.price-card h3 {
+  font-size: 15px;
+  line-height: 1.4;
+  margin: 12px 0 8px;
+  overflow-wrap: anywhere;
+}
+.price-conditions {
+  color: #5b7180;
+  line-height: 1.65;
+  margin: 0;
+  font-size: 12px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.price-card-source {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 15px;
+  color: #748591;
+  font-size: 11px;
+}
+.price-card-source > span {
+  overflow-wrap: anywhere;
+}
+.price-card-source button {
+  margin-left: auto;
+  flex: none;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+.price-evidence {
+  margin-top: 12px;
+  font-size: 11px;
+  color: #60798b;
+}
+.price-evidence summary {
+  cursor: pointer;
+}
+.price-evidence li {
+  line-height: 1.6;
+}
+.price-evidence blockquote {
+  margin: 10px 0;
+  padding: 12px;
+  border-left: 3px solid #bcdde9;
+  background: #f4f8fa;
+  color: #284f67;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.price-card-value {
+  background: #f7fafc;
+  border-left: 1px solid #e1eaf0;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  justify-content: center;
+}
+.price-card-value > small {
+  color: #738996;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.price-card-value > strong {
+  font-size: 15px;
+  line-height: 1.5;
+}
+.price-card-value > strong > span,
+.price-card-value > b > span {
+  font-size: 11px;
+  font-weight: 400;
+}
+.price-card-value > b {
+  font-size: 24px;
+  letter-spacing: -0.03em;
+  color: #086584;
+}
+.price-card-value .price-select {
+  margin-top: 5px;
+}
+.price-unavailable {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #8d6b24;
+}
+.price-warning {
+  color: #916411 !important;
+}
+.price-error {
+  background: #fff1ed;
+  color: #9c3525;
+  padding: 15px;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  align-items: center;
+  margin: 15px 0;
+}
+.price-empty {
+  text-align: center;
+  padding: 45px 20px;
+  background: #f7fafc;
+  border: 1px dashed #cbdce5;
+  border-radius: 15px;
+  color: #698392;
+}
+.price-empty svg {
+  color: #83b0c0;
+}
+.price-empty h3 {
+  color: #2d5a74;
+  font-size: 18px;
+}
+.price-empty p {
+  max-width: 540px;
+  margin: auto;
+  line-height: 1.7;
+}
+.price-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 20px;
+  font-size: 12px;
+}
+.price-confirmation {
+  border: 2px solid #007b99;
+  background: #f0fbfb;
+  border-radius: 14px;
+  padding: 22px;
+  margin-top: 18px;
+}
+.price-confirmation > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #056a82;
+}
+.price-confirmation h3 {
+  margin: 0;
+  font-size: 15px;
+  flex: 1;
+}
+.price-confirmation strong {
+  flex: none;
+}
+.price-confirmation > div > button {
+  border: 0;
+  background: transparent;
+  padding: 4px;
+}
+.price-confirmation p,
+.price-confirmation li {
+  line-height: 1.65;
+  font-size: 12px;
+}
+.price-formula {
+  font-family: monospace;
+  background: white;
+  padding: 10px;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.price-confirmation label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 12px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.price-confirmation .price-apply {
+  background: #006b87;
+  border-color: #006b87;
+  color: white;
+  margin-top: 10px;
+}
+.price-document-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #f5f7fb;
+  border-radius: 10px;
+  padding: 15px;
+  margin-top: 15px;
+}
+.price-document-info > div {
+  flex: 1;
+  min-width: 0;
+}
+.price-document-info p {
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 5px 0;
+}
+.price-document-info > svg {
+  flex: none;
+}
+.price-coverage {
+  margin: 30px 0;
+  padding: 22px;
+  background: white;
+  border: 1px solid #dbe6ec;
+  border-radius: 14px;
+  font-size: 12px;
+}
+.price-coverage > p {
+  color: #6c8190;
+  line-height: 1.7;
+}
+.price-table-scroll {
+  overflow: auto;
+  max-height: 520px;
+}
+.price-coverage table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 700px;
+}
+.price-coverage th,
+.price-coverage td {
+  text-align: left;
+  padding: 13px;
+  border-bottom: 1px solid #e6eef2;
+  max-width: 420px;
+  overflow-wrap: anywhere;
+}
+.price-coverage th {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #6d8390;
+  background: #f7fafb;
+  position: sticky;
+  top: 0;
+}
+.price-coverage small {
+  display: block;
+  margin-top: 5px;
+  color: #80909c;
+}
+.price-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  background: #001a36a6;
+  backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+}
+.price-modal {
+  background: #f8fbfd;
+  border-radius: 20px;
+  width: min(1180px, 100%);
+  max-height: 94dvh;
+  overflow: auto;
+  box-shadow: 0 30px 100px #00152b80;
+  overscroll-behavior: contain;
+}
+.price-modal > header {
+  padding: 24px 28px;
+  background: linear-gradient(115deg, #0b3556, #006b94);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.price-modal h2 {
+  margin: 7px 0 0;
+  font-size: 22px;
+}
+.price-modal > header > button {
+  background: #ffffff15;
+  color: white;
+  border-color: #ffffff35;
+}
+.price-modal > .price-browser {
+  padding: 0 28px 28px;
+}
+.price-suggest-trigger {
+  border: 1px solid #badce6 !important;
+  background: #ebf8fc !important;
+  color: #007291 !important;
+  padding: 4px !important;
+  border-radius: 6px !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  cursor: pointer;
+  width: 25px;
+  height: 25px;
+}
+.price-suggest-trigger:hover {
+  background: #d4f1f9 !important;
+}
+.price-provenance {
+  font-size: 10px;
+  color: #087e8e;
+  display: block;
+  margin-top: 4px;
+}
+.price-provenance svg {
+  vertical-align: middle;
+  margin-right: 3px;
+}
+@media (max-width: 1000px) {
+  .price-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .price-lab {
+    padding: 18px;
+  }
+  .price-lab-hero {
+    padding: 27px;
+  }
+  .price-card {
+    grid-template-columns: minmax(0, 1fr) 205px;
+  }
+  .price-stats > div {
+    padding: 17px;
+  }
+  .price-results-heading small {
+    max-width: 190px;
+  }
+}
+@media (max-width: 640px) {
+  .price-lab {
+    padding: 10px;
+  }
+  .price-lab-hero {
+    padding: 25px;
+  }
+  .price-lab-hero > svg {
+    display: none;
+  }
+  .price-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .price-filters {
+    grid-template-columns: 1fr;
+  }
+  .price-card {
+    grid-template-columns: 1fr;
+  }
+  .price-card-value {
+    border-left: 0;
+    border-top: 1px solid #e1eaf0;
+  }
+  .price-modal-backdrop {
+    padding: 7px;
+  }
+  .price-modal > .price-browser {
+    padding: 0 15px 18px;
+  }
+  .price-modal > header {
+    padding: 18px;
+  }
+  .price-confirmation > div {
+    flex-wrap: wrap;
+  }
+  .price-confirmation h3 {
+    min-width: 70%;
+  }
+  .price-results-heading {
+    display: block;
+  }
+  .price-results-heading small {
+    display: block;
+    max-width: none;
+    text-align: left;
+    margin-top: 7px;
+  }
+}
+.price-lab-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  color: #647d8c;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.price-lab-actions button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #cbdee8;
+  background: white;
+  color: #166486;
+  font: inherit;
+  font-weight: 650;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+.price-lab-actions button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.price-lab,
+.price-modal {
+  font-family: Inter, Arial, sans-serif;
+}
+@media (max-width: 980px) {
+  .app-shell.price-lab-shell,
+  .app-shell.price-lab-shell.sidebar-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .price-lab-shell .sidebar,
+  .price-lab-shell .content-shell {
+    min-width: 0;
+  }
+  .price-lab-shell .nav {
+    min-width: 0;
+    overflow-x: auto;
+  }
+}
+@media (max-width: 680px) {
+  .price-lab-shell .topbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .price-lab-shell .global-search {
+    width: 100%;
+    max-width: 100%;
+  }
+  .price-lab-shell .brand {
+    min-width: 0;
+  }
+}
