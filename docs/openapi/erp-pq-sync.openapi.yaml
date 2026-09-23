@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Soul Prospect Qualifier - ERP/PQ Sync API
-  version: 1.5.4
+  version: 1.5.5
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -651,7 +651,12 @@ components:
             - "null"
           format: date-time
           description: |
-            Data dell'ultimo cambio di esito. Se `stato_studio` cambia e il campo
+            Data e ora dell'ultimo cambio di esito. Da PQ 1.1.11 il database conserva
+            anche ore, minuti, secondi e millisecondi. Inviare ISO 8601 con fuso
+            esplicito (Z oppure offset, ad esempio 2026-09-23T15:42:18.456+02:00).
+            Il pull restituisce lo stesso istante in UTC, non la mezzanotte del giorno.
+            I vecchi valori salvati come sola data non recuperano l'orario perduto.
+            Se `stato_studio` cambia e il campo
             e assente o null, PQ salva automaticamente la data corrente. Se lo
             stato non cambia, il campo assente o null conserva la data esistente
             (da PQ 1.0.7). Un nuovo studio non Aperta senza data riceve la data corrente.
@@ -1024,7 +1029,12 @@ components:
             - string
             - "null"
           format: date-time
-          description: Data dell'ultimo cambio di esito dello studio.
+          description: >-
+            Istante dell'ultimo cambio di esito, ISO 8601 UTC con millisecondi (da PQ 1.1.11).
+            L'ERP deve conservarlo come datetime, senza troncarlo a data, e convertire
+            il fuso solo per visualizzarlo. Gli orari storici precedentemente persi
+            non sono ricostruiti; le date legacy conservano la mezzanotte UTC.
+          example: "2026-09-23T13:42:18.456Z"
         data_prossimo_appuntamento:
           type:
             - string
