@@ -19,6 +19,8 @@ export type PresentationPropertyInput = PresentationPropertySnapshot;
 export type PresentationSnapshot = {
   version: 1 | 2 | 3;
   generatedAt: string;
+  // Opt-in, frozen per deck. Historical presentations keep the original columns.
+  showImuColumns?: boolean;
   studio: {
     id: string;
     company: string;

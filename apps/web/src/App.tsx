@@ -83,7 +83,7 @@ import { CurrentOperator, useIdentity } from "./Auth";
 import { PropertyGroupingSuggestions } from "./PropertyGroupingSuggestions";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.11";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.12";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -6823,6 +6823,19 @@ function usePersistentPresentationDraft(endpoint: string, baseline: Presentation
     updatePresentationPropertyField: updateProperty, resetPresentationPropertyField: resetProperty, resetPresentationDraft: reset };
 }
 
+function PresentationImuColumnsOption({ persistence, disabled = false }: {
+  persistence: ReturnType<typeof usePresentationDraftStore>; disabled?: boolean;
+}) {
+  return <label className="presentation-imu-columns-option">
+    <input type="checkbox" checked={persistence.overrides.showImuColumns === "true"}
+      disabled={disabled || !persistence.loaded}
+      onChange={event => persistence.change({ showImuColumns: event.target.checked ? "true" : null })} />
+    <span><strong>Mostra IMU attuale e IMU prevista nel PDF</strong>
+      <small>Aggiunge le due colonne per tutti gli immobili e i gruppi inclusi, usando gli importi modificabili qui sotto.</small>
+    </span>
+  </label>;
+}
+
 function PresentationSaveStatus({ persistence }: { persistence: ReturnType<typeof usePresentationDraftStore> }) {
   return <p className={`presentation-save-status ${persistence.status}`} role="status">
     {persistence.status === "loading" ? "Caricamento modifiche salvate…"
@@ -7341,6 +7354,7 @@ function PresentationAction({
               Seleziona gli immobili da includere. I contenuti e gli importi arrivano dall’anteprima editabile presente nella pagina corrente.
             </p>
             <PresentationSaveStatus persistence={persistence} />
+            {isV3 && <PresentationImuColumnsOption persistence={persistence} disabled={busy} />}
 
             <div className="presentation-selection-toolbar">
               <strong>{selectedPropertyIds.length}/{study.properties.length} selezionati</strong>
@@ -7633,6 +7647,7 @@ function PresentationDataPreview({
       </label>
 
       <PresentationSaveStatus persistence={persistence} />
+      <PresentationImuColumnsOption persistence={persistence} />
 
       <p className="presentation-preview-info">
         Se modifichi una rendita, la relativa IMU viene ricalcolata soltanto per la presentazione con
