@@ -7,3 +7,5 @@
 - Nessuna migrazione database. Rilascio solo da main, senza includere analisi-prezzari né modificare lo staging.
 
 Verifiche: validazione delle opzioni, default e compatibilità storica, snapshot studio/gruppo, aggregazione, valori mancanti/zero, sei pagine PDF e prove visuali con nomi lunghi/importi elevati. Test browser del flusso salvato aggiornato (richiede credenziali di staging; non eseguito in produzione).
+
+Esito: **171/171 test backend superati**, senza test saltati; build API e web completate. Backup PostgreSQL preventivo e avvio di produzione senza seed dei dati demo.
