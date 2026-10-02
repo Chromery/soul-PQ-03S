@@ -1,0 +1,155 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><title>PQ — Guida alla migrazione VPS</title><link rel="stylesheet" href="report.css"></head><body>
+<section class="page">
+<p class="eyebrow">SOUL · PROSPECT QUALIFIER / RUNBOOK DI CONSEGNA</p>
+<h1>Migrazione sulla<br>VPS del cliente</h1>
+<p>2 ottobre 2026 · Baseline applicativa 1.2.1<br>Riservato — procedura per il tecnico incaricato</p>
+<div class="hero"><h2>Trasferire il sistema, non soltanto il codice.</h2><p>Un clone Git e un dump non contengono tutti i dati. Occorre conservare allegati, fonti dei prezzari, identità Clerk e configurazione dei servizi esterni, evitando che due database di produzione ricevano scritture contemporaneamente.</p></div>
+<h3>Scelta consigliata</h3><p>Mantenere inizialmente <b>pq-soul.rainailab.com</b> e l'applicazione Clerk di produzione esistente. Spostare prima la VPS; trasferire titolarità degli account con continuità. Un cambio dominio è un progetto aggiuntivo: coinvolge Clerk, CORS, ERP ed estensione browser.</p>
+<div class="grid"><div class="card"><b>Sorgente attuale</b><br>Worktree main<br>Progetto soul-prospect-qualifier<br>PostgreSQL 17 · Docker Compose</div><div class="card"><b>Destinazione proposta</b><br>Clone indipendente /srv/soul-pq<br>Stessa release e PostgreSQL 17<br>Origine privata dietro TLS/tunnel</div></div>
+<div class="note warn"><b>Questa guida non significa che la migrazione sia stata eseguita.</b> Servono accesso alla VPS cliente, account assegnati e una finestra concordata con Soul e l'integratore ERP. I comandi sono per il tecnico: verificarne host, percorsi e nomi prima dell'esecuzione.</div>
+<p class="small">Non copiare da solo <code>Dashboard-generale-03S-main</code> pensando che sia un repository autonomo: il suo .git rimanda al worktree principale. Usare un nuovo clone o trasferire un archivio di release verificato.</p>
+</section>
+<section class="page">
+<p class="eyebrow">01 / INVENTARIO</p><h2>Cosa deve arrivare sulla nuova VPS</h2>
+<table><tr><th>Componente</th><th>Dove si trova / azione</th></tr>
+<tr><td>Codice, template, font, catalogo</td><td>Repository Git. Fissare commit/release verificati, non semplicemente la futura punta di main. Catalogo derivato e template V3 sono versionati.</td></tr>
+<tr><td>Database</td><td>Volume <code>soul-prospect-qualifier_postgres_data</code>. Trasferire con pg_dump/pg_restore, non copia a caldo del volume. Include studi, stime, geometrie, bozze e snapshot presentazioni.</td></tr>
+<tr><td>Allegati e prezzari caricati</td><td>S3/B2. I record DB contengono chiavi di oggetti, non i file. Preservare tutti gli oggetti referenziati, compresi quelli legacy dei prezzari, e il loro checksum.</td></tr>
+<tr><td>Fonti del motore prezzari</td><td><code>00_prezzari2026/</code>, esclusa da Git, circa 153 MiB. Copia separata; mount read-only in API. Non sostituirla con il solo catalogo JSON.</td></tr>
+<tr><td>Audit ERP</td><td>Volume <code>soul-prospect-qualifier_erp_audit_logs</code>. Richieste sanitizzate, retention applicativa 10 giorni / 256 MiB. Copiare preservando file e date; non pubblicare.</td></tr>
+<tr><td>Documenti IMU</td><td>Volume <code>soul-prospect-qualifier_imu_delibere_cache</code>. Trasferire anche se oggi piccolo o vuoto.</td></tr>
+<tr><td>Backup storici</td><td><code>backups/postgres/</code> e namespace remoto produzione. Conservare almeno il dump finale verificato e il periodo di rollback concordato. Non considerare .part validi.</td></tr>
+<tr><td>Utenti e autorizzazioni</td><td>Identità, inviti e metadata in Clerk; preferenze collegate agli ID utenti nel DB. Il dump SQL non ricrea gli utenti Clerk.</td></tr>
+<tr><td>Configurazione / infrastruttura</td><td>.env privato, DNS/tunnel Cloudflare, credenziali storage/ERP/NeuralWatt, accesso GitHub, policy backup e monitoraggio.</td></tr></table>
+<div class="note">Misure osservate: DB circa 53 MB, dump circa 9,3 MiB, audit circa 32 MiB. Il volume totale remoto non è stato inventariato esaustivamente: misurarlo prima di stimare tempi e costo del trasferimento.</div>
+<p>Per lo staging creare progetto Compose, database, Clerk e segreti distinti. <b>Non clonare l'identità di produzione come account di test.</b> Includere dati reali nello staging soltanto nel perimetro concordato e con accessi limitati.</p>
+</section>
+<section class="page">
+<p class="eyebrow">02 / TITOLARITÀ E SEGRETI</p><h2>Decisioni da chiudere prima del fermo</h2>
+<table><tr><th>Servizio</th><th>Passaggio richiesto</th></tr>
+<tr><td>Clerk</td><td>Trasferire l'applicazione esistente al workspace aziendale, assegnare amministratori e fatturazione. Il trasferimento supportato conserva utenti, chiavi, impostazioni e domini. Non creare un'app vuota per sostituire le chiavi: perderebbe la continuità delle identità e dei grant PQ.</td></tr>
+<tr><td>GitHub</td><td>Accesso al repository e diritto di manutenzione al cliente; chiave deploy a privilegi minimi. Consegnare commit, sorgenti, lockfile, documenti e licenze.</td></tr>
+<tr><td>Cloudflare / DNS</td><td>Concordare chi controlla il dominio e il tunnel. Se resta un sottodominio rainailab.com, documentare la dipendenza dal proprietario della zona. Nuova credenziale tunnel protetta e origin privata.</td></tr>
+<tr><td>B2/S3</td><td>Trasferire proprietà/fatturazione o copiare in un bucket cliente. Separare chiavi staging/produzione e limitare permessi. Non escludere inconsapevolmente prezzari legacy e backup dai permessi necessari.</td></tr>
+<tr><td>ERP e NeuralWatt</td><td>Token ERP dedicati per ambiente, ruotati con l'integratore. Credenziale e quota NeuralWatt sotto controllo cliente; verificare i modelli configurati con una richiesta di collaudo concordata.</td></tr></table>
+<h3>Configurazione di produzione da verificare</h3>
+<ul><li><code>APP_ENV=production</code>; Clerk <code>pk_live_</code>/<code>sk_live_</code>; <code>PQ_AUTOMATION_SECRET</code> assente.</li><li><code>CLERK_AUTHORIZED_PARTIES</code> e <code>CORS_ORIGIN</code>: origini HTTPS esplicite, coerenti con il dominio pubblico.</li><li><code>POSTGRES_PASSWORD</code> casuale; stessa password in <code>DATABASE_URL_DOCKER</code>, host <code>postgres</code>. Non cambiare solo .env su un DB già inizializzato.</li><li><code>ERP_SYNC_TOKEN</code> obbligatorio, concordato; <code>S3_KEY_PREFIX=erp</code> e <code>BACKUP_REMOTE_PREFIX=backups/postgres</code> per conservare le chiavi correnti. Un cambio prefisso richiede anche migrazione dei riferimenti.</li><li>Port mapping <code>DB_PORT=127.0.0.1:5432</code>, <code>API_PORT=127.0.0.1:3001</code>, <code>WEB_PORT=127.0.0.1:8080</code>.</li></ul>
+<p class="small">Segreti tramite vault o canale cifrato; file .env 0600, cartella privata. Nessuna chiave in Git, PDF, chat o screenshot. Verificare MFA e recupero account. [<a href="https://clerk.com/docs/guides/dashboard/overview">Clerk: trasferimento applicazioni</a>] [<a href="https://www.backblaze.com/docs/en/cloud-storage-application-keys">B2: restrizioni delle chiavi</a>]</p>
+</section>
+<section class="page">
+<p class="eyebrow">03 / PREPARAZIONE DESTINAZIONE</p><h2>Preparare senza spostare il traffico</h2>
+<p><b>Dimensionamento iniziale suggerito:</b> 4 vCPU, 8 GB RAM, 80–100 GB SSD per la sola produzione, con margine per Chromium e build. Non è un benchmark o una garanzia di capacità; rivalutare con concorrenza reale, allegati e retention. Staging aggiuntivo richiede ulteriore margine.</p>
+<ol><li>Installare un sistema operativo supportato, Docker Engine e Compose v2, Git, Node 22 per il preflight. Aggiornamenti OS, SSH a chiave e firewall verificati. PostgreSQL/API non devono essere esposti a Internet.</li><li>Preparare /srv/soul-pq e /srv/pq-migration con proprietario tecnico corretto; la seconda cartella deve avere permessi 0700. I dump sono dati riservati.</li><li>Clonare il repository con autenticazione del cliente e fissare il commit della release approvata. Il codice correttivo 1.2.1 è nel commit <code>66130dc</code>; usare il commit di consegna successivo se include solo documentazione.</li></ol>
+<pre>git clone --branch main --single-branch \
+  https://github.com/Chromery/soul-PQ-03S.git /srv/soul-pq
+cd /srv/soul-pq
+git log -1 --oneline
+git status --short
+# Verificare il commit approvato prima della build.
+chmod 600 .env
+node scripts/deployment-preflight.mjs .env
+docker compose -p soul-prospect-qualifier build api web postgres-backup</pre>
+<p>Il file .env deve essere già stato trasferito/configurato in modo protetto. Copiare prima anche <code>00_prezzari2026/</code>, altrimenti il preflight fallisce correttamente. Non copiare node_modules, cache npm, build locali, file di test o credenziali dell'automazione.</p>
+<h3>Trasferimenti preliminari</h3><p>Copiare fonti e, se necessario, oggetti S3 mentre la sorgente è operativa; verificarli con checksum. Fare poi una verifica differenziale finale durante il fermo. Usare operazioni di copia, non sync con cancellazione. Se si mantiene lo stesso bucket, verificare che la nuova chiave possa leggere e scrivere solo quanto previsto.</p>
+<div class="note warn">Non avviare ancora l'API con un DB di produzione copiato e credenziali esterne reali: i lavori in background possono produrre scritture. La preparazione è distinta dal cutover. Sulla VPS nuova non serve replicare l'architettura Git worktree del vecchio server.</div>
+</section>
+<section class="page">
+<p class="eyebrow">04 / FINESTRA DI MIGRAZIONE — SORGENTE</p><h2>Congelare e acquisire il punto finale</h2>
+<p>Concordare il fermo con Soul e l'ERP; completare o annullare con criterio lavori in corso, notificare indisponibilità e impedire nuovi sync. L'ERP deve conservare/reinviare gli eventi pendenti secondo una procedura concordata.</p>
+<p><b>SORGENTE ATTUALE, non sulla VPS nuova:</b> usare la configurazione effettiva di produzione. Prima di fermare servizi verificare progetto, branch e nomi con i comandi sotto. Il database resta avviato.</p>
+<pre>cd /home/debian/dev/Dashboard-generale-03S-main
+git branch --show-current
+docker compose -p soul-prospect-qualifier ps
+docker compose -p soul-prospect-qualifier stop web api postgres-backup
+umask 077
+mkdir -p /home/debian/pq-migration-20261002
+docker compose -p soul-prospect-qualifier exec -T postgres \
+  pg_dump -U soul -d soul_pq -Fc \
+  &gt; /home/debian/pq-migration-20261002/production-final.dump
+docker compose -p soul-prospect-qualifier exec -T postgres \
+  pg_restore -l \
+  &lt; /home/debian/pq-migration-20261002/production-final.dump</pre>
+<p>Se dump o verifica falliscono, <b>fermarsi</b>. Non usare un file parziale. Per l'esecuzione automatizzata aggiungere gestione esplicita degli exit code, non concatenare comandi ignorando gli errori.</p>
+<h3>Archiviare i due volumi non SQL</h3>
+<pre>docker run --rm --network none \
+  --mount type=volume,source=soul-prospect-qualifier_erp_audit_logs,target=/data,readonly \
+  --entrypoint tar postgres:17-alpine -C /data -czf - . \
+  &gt; /home/debian/pq-migration-20261002/erp-audit.tgz
+docker run --rm --network none \
+  --mount type=volume,source=soul-prospect-qualifier_imu_delibere_cache,target=/data,readonly \
+  --entrypoint tar postgres:17-alpine -C /data -czf - . \
+  &gt; /home/debian/pq-migration-20261002/imu-delibere.tgz
+cd /home/debian/pq-migration-20261002
+sha256sum production-final.dump erp-audit.tgz imu-delibere.tgz &gt; SHA256SUMS</pre>
+<p class="small">Prima verificare i nomi con docker volume inspect: un nome errato potrebbe creare un volume vuoto. Cartella e data sono un esempio: usare un percorso nuovo per la finestra effettiva e non sovrascrivere backup precedenti.</p>
+</section>
+<section class="page">
+<p class="eyebrow">05 / TRASFERIMENTO E RIPRISTINO — DESTINAZIONE</p><h2>Ripristinare su un DB nuovo e vuoto</h2>
+<p>Trasferire via SSH/SFTP gli artefatti finali in <code>/srv/pq-migration/</code> sulla VPS cliente; mantenere accesso 0700 e file 0600. Copiare le fonti prezzari nel clone e verificare checksum e oggetti remoti. Il vecchio ambiente resta fermo alle scritture.</p>
+<pre>cd /srv/pq-migration
+sha256sum -c SHA256SUMS
+cd /srv/soul-pq
+node scripts/deployment-preflight.mjs .env
+docker compose -p soul-prospect-qualifier up -d postgres
+docker compose -p soul-prospect-qualifier exec -T postgres \
+  psql -U soul -d soul_pq -Atc \
+  "SELECT count(*) FROM pg_tables WHERE schemaname='public';"</pre>
+<div class="note warn"><b>Il conteggio deve essere 0 e il container deve essere sulla VPS NUOVA.</b> Se non è vuoto, fermarsi e capire perché. Non usare --clean o DROP per “far funzionare” la procedura. Non iniziare con seed o migrazioni prima di ripristinare il dump completo.</div>
+<pre>docker compose -p soul-prospect-qualifier exec -T postgres \
+  pg_restore -U soul -d soul_pq --no-owner --no-privileges \
+  --single-transaction --exit-on-error \
+  &lt; /srv/pq-migration/production-final.dump</pre>
+<p>Verificare exit code e conteggi rispetto allo snapshot finale, non ai conteggi storici del report. I ruoli del DB sono creati dal nuovo ambiente; la password viene dalla sua configurazione. Il dump custom contiene SQL: trattarlo come input fidato e riservato.</p>
+<h3>Ripristino audit e documenti IMU</h3>
+<pre>docker volume create soul-prospect-qualifier_erp_audit_logs
+docker volume create soul-prospect-qualifier_imu_delibere_cache
+docker run --rm -i --network none \
+  --mount type=volume,source=soul-prospect-qualifier_erp_audit_logs,target=/data \
+  --entrypoint tar postgres:17-alpine -C /data -xzf - \
+  &lt; /srv/pq-migration/erp-audit.tgz
+# Ripetere con volume ..._imu_delibere_cache e imu-delibere.tgz.</pre>
+<p class="small">Anche i volumi devono essere nuovi/vuoti. Estrarre solo archivi propri verificati; non estrarre contenuti non fidati sulla root dell'host. [<a href="https://www.postgresql.org/docs/17/app-pgrestore.html">PostgreSQL 17: ripristino e sicurezza</a>]</p>
+</section>
+<section class="page">
+<p class="eyebrow">06 / AVVIO E CAMBIO TRAFFICO</p><h2>Una sola produzione scrivente</h2>
+<p>Verificare che la vecchia API sia ferma e che file e DB siano allo stesso punto finale. La nuova immagine applica le migrazioni senza seed. Eseguire prima il comando esplicito per poter controllare l'esito, quindi avviare.</p>
+<pre>cd /srv/soul-pq
+docker compose -p soul-prospect-qualifier run --rm --no-deps api \
+  npm run db:migrate:deploy --workspace @soul/api
+docker compose -p soul-prospect-qualifier up -d api web
+docker compose -p soul-prospect-qualifier ps
+curl --fail http://127.0.0.1:8080/api/health
+curl -I http://127.0.0.1:8080/</pre>
+<p>Conservare output delle migrazioni e health check senza dump delle variabili d'ambiente. Verificare log API per errori di DB/S3/Clerk, non solo la pagina iniziale. Il prezzario può completare abbinamenti mancanti in background; non esegue stime automatiche.</p>
+<h3>Cloudflare / proxy HTTPS</h3>
+<ul><li>Il tecnico responsabile della zona instrada il dominio pubblico verso il nuovo tunnel/origin su <code>127.0.0.1:8080</code>; DB e API restano privati.</li><li><b>Non avviare contemporaneamente due connettori dello stesso tunnel diretti a database diversi.</b> Cloudflare può distribuire il traffico tra connettori: non è un meccanismo di migrazione sequenziale.</li><li>Preparare una rotta/tunnel dedicato e commutare in modo controllato; verificare che il vecchio connettore non possa ricevere traffico scrivente. Non fermare un servizio condiviso con altri siti senza verificarne le route.</li><li>Se si cambia hostname: configurare Clerk, DNS/TLS, origini autorizzate, ERP ed estensione prima del collaudo. Non disabilitare l'autenticazione per aggirare un problema di dominio.</li></ul>
+<h3>Avviare il backup e verificarlo</h3>
+<pre>docker compose -p soul-prospect-qualifier up -d postgres-backup
+docker compose -p soul-prospect-qualifier run --rm --no-deps \
+  -e BACKUP_ONCE=true postgres-backup</pre>
+<p>Richiedere exit code 0, dump leggibile e oggetto effettivamente presente nel namespace remoto di produzione. Verificare orario 03:00 Europe/Rome e retention locale 14 giorni; quella remota dipende dalla policy del provider.</p>
+<p class="small">[<a href="https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/tunnel-availability/deploy-replicas/">Cloudflare: repliche dei tunnel</a>] [<a href="https://clerk.com/docs/guides/development/deployment/changing-domains">Clerk: cambio dominio</a>]</p>
+</section>
+<section class="page">
+<p class="eyebrow">07 / COLLAUDO E ROLLBACK</p><h2>Accettare o tornare indietro, senza perdere dati</h2>
+<table><tr><th>Verifica</th><th>Esito atteso</th></tr>
+<tr><td>Release / login</td><td>Versione concordata, Clerk live; accesso reale di admin e operatore, ruoli/nome corretti. Nessuna identità di automazione in produzione.</td></tr>
+<tr><td>Dati e documenti</td><td>Conteggi coerenti con dump finale; aprire studio, planimetria, allegati e fonti prezzari. Verificare alcuni checksum documentali, non solo i nomi file.</td></tr>
+<tr><td>Flussi applicativi</td><td>Con Soul, su un elemento di collaudo concordato: nota/salvataggio, editor, IMU, gruppo e PDF V3, bozza/storico. Verificare su Chrome Windows del cliente e Safari.</td></tr>
+<tr><td>ERP</td><td>Con integratore: sync controllato, ID, appuntamento, note, esito con data/ora e presentazione già creata. Richiesta senza token: 401; nessun evento perso nel fermo.</td></tr>
+<tr><td>Servizi e backup</td><td>NeuralWatt, documenti S3 e render PDF funzionanti; backup remoto fresco e prova di restore in ambiente isolato.</td></tr>
+<tr><td>Consegna</td><td>Ora UTC del cutover, owner, commit, checksum del dump, checklist firmata ed eventuali anomalie. Riaprire sync/operatività solo dopo accettazione.</td></tr></table>
+<h3>Rollback prima di nuove scritture utente</h3><p>Fermare la nuova API e il nuovo worker backup; ripristinare la rotta all'origin vecchia e riavviare i servizi precedenti. Verificare che il nuovo ambiente non resti raggiungibile. Considerare anche eventuali scritture dei job in background: valutare se debbano essere riportate indietro.</p>
+<h3>Rollback dopo nuove scritture</h3><p><b>Non riaccendere semplicemente il vecchio DB.</b> Fermare i due ingressi, acquisire un dump finale della destinazione e concordare ripristino inverso o correzione in avanti. Conciliare eventi ERP e allegati nuovi. Reindirizzare il traffico a una copia vecchia senza recuperare le modifiche comporta perdita di dati.</p>
+<div class="note warn"><b>Mai:</b> docker compose down -v; seed demo in produzione; copia a caldo della directory PG; restore sopra un database in uso; cancellazione del server vecchio prima del termine di rollback; due API attive su DB divergenti.</div>
+<p>Conservare vecchia VPS e backup protetti per una finestra concordata, ad esempio 7–14 giorni, poi rimuovere i dati con autorizzazione del titolare. Non è una prescrizione normativa: retention e cancellazione vanno definite dal cliente.</p>
+</section>
+<section class="page">
+<p class="eyebrow">08 / ESERCIZIO E CHECKLIST FINALE</p><h2>Dopo la migrazione</h2>
+<ul><li><b>Monitoraggio:</b> disponibilità HTTPS/health, crescita spazio e log, RAM/swap, code di lavoro, errori ERP/NeuralWatt, certificati e stato connettore.</li><li><b>Allarmi iniziali:</b> backup non riuscito o assente da oltre 24–26 ore, disco oltre 80%, riavvii ripetuti, aumento anomalo 401/403/5xx. Soglie da adattare, destinatari reali e prova di ricezione obbligatoria.</li><li><b>Restore periodico:</b> dump e campione allegati in ambiente isolato, senza token ERP/live o invio a sistemi esterni. Registrare tempi di recupero osservati; definire RPO/RTO aziendali.</li><li><b>Aggiornamenti:</b> pianificare PDF.js e runtime, audit OS/container, isolamento Chromium e dipendenze residue del report. Non usare npm audit fix --force alla cieca.</li><li><b>Accessi:</b> rimuovere tecnici non più incaricati, ruotare credenziali condivise dopo il collaudo coordinato, attivare MFA e recupero account; custodia vault sotto controllo cliente.</li><li><b>Backup:</b> cifratura/permessi, versioning e lifecycle del provider verificati. Il DB non contiene allegati né Clerk: prevedere protezione anche di questi componenti.</li></ul>
+<h3>Verbale da completare</h3>
+<table><tr><th>Campo</th><th>Da compilare</th></tr><tr><td>VPS / owner / reperibilità</td><td>_____________________________________</td></tr><tr><td>Dominio / tunnel / account provider</td><td>_____________________________________</td></tr><tr><td>Commit / release / checksum dump</td><td>_____________________________________</td></tr><tr><td>Cutover UTC / fine rollback</td><td>_____________________________________</td></tr><tr><td>Esito collaudo Soul + ERP</td><td>_____________________________________</td></tr><tr><td>Rischi accettati e scadenze</td><td>_____________________________________</td></tr></table>
+<p class="small">Riferimenti: <a href="https://docs.docker.com/engine/network/port-publishing/">Docker: porte pubblicate</a> · <a href="https://www.postgresql.org/docs/17/app-pgrestore.html">PostgreSQL 17: restore</a> · <a href="https://clerk.com/docs/guides/dashboard/overview">Clerk: proprietà applicazioni</a> · <a href="https://www.backblaze.com/docs/en/cloud-storage-application-keys">B2: chiavi</a> · <a href="https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/tunnel-availability/">Cloudflare: tunnel</a>.</p>
+<hr class="rule"><p><b>Documenti collegati:</b> Safety &amp; Feature Review 2 ottobre 2026; README, AGENTS.md, Swagger autenticato e sorgenti di questa guida in <code>docs/handover/</code>.</p>
+</section>
+</body></html>

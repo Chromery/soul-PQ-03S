@@ -1,0 +1,33 @@
+@page { size: A4; margin: 17mm 16mm 18mm; }
+* { box-sizing: border-box; }
+body { margin: 0; color: #263c50; font: 10pt/1.45 Arial, sans-serif; }
+.page { break-after: page; }
+.page:last-child { break-after: auto; }
+.eyebrow { color: #007b9c; font-size: 8pt; text-transform: uppercase; letter-spacing: 1.8px; font-weight: 700; margin: 0 0 8mm; }
+h1 { color: #06334e; font-size: 32pt; line-height: 1.12; letter-spacing: -1px; margin: 0 0 6mm; }
+h2 { color: #06334e; font-size: 21pt; line-height: 1.2; margin: 0 0 6mm; }
+h3 { color: #006b94; font-size: 12pt; margin: 5mm 0 2mm; }
+p { margin: 0 0 3mm; }
+ul,ol { margin: 2mm 0 4mm; padding-left: 5mm; }
+li { margin-bottom: 1.5mm; }
+.hero { background: linear-gradient(135deg,#06334e,#007caa); color: white; padding: 9mm; border-radius: 4mm; margin: 8mm 0; }
+.hero h2 { color: white; font-size: 19pt; }
+.hero p:last-child { margin: 0; }
+.note { border-left: 3px solid #08a1b5; background: #edf7fa; padding: 3mm 4mm; margin: 4mm 0; }
+.warn { border-left-color: #bf7b11; background: #fff7e6; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin: 5mm 0; }
+.card { background: #f2f6f8; padding: 4mm; border-radius: 2mm; }
+.number { font-size: 23pt; color: #006b94; font-weight: 700; }
+table { width: 100%; border-collapse: collapse; font-size: 9pt; margin: 4mm 0; }
+th { text-align: left; padding: 2.3mm; color: #06334e; background: #e6f1f5; }
+td { padding: 2.3mm; vertical-align: top; border-bottom: 1px solid #dae5eb; }
+tr { break-inside: avoid; }
+.small { font-size: 8.5pt; color: #516879; }
+.ok { color: #007a62; font-weight: 700; }
+.pending { color: #98600d; font-weight: 700; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #eef3f6; padding: 3mm; font: 8pt/1.45 monospace; border-radius: 2mm; margin: 3mm 0; }
+code { font-size: 8.3pt; overflow-wrap: anywhere; }
+a { color: #006b94; overflow-wrap: anywhere; }
+.rule { border: 0; border-top: 1px solid #d8e5ed; margin: 6mm 0; }
+.finding { margin-bottom: 4mm; }
+.finding h3 { margin-top: 3mm; }

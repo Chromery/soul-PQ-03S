@@ -76,3 +76,5 @@ Non cambiare `POSTGRES_PASSWORD` nel solo `.env` su un DB esistente: occorre anc
 PDF.js 3.11.174 è mantenuto per compatibilità con i disegni catastali; il caricamento disabilita `isEvalSupported`. Rimane una dipendenza obsoleta da sostituire con una migrazione testata su Chrome Windows e Safari. L'immagine API include tool di sviluppo; l'audit npm non equivale alla prova di sfruttabilità e non sostituisce un audit OS.
 
 Consulta i due PDF di consegna in `deliverables/handover-2026-10-02/` (artefatti locali; non pubblicati nel frontend) e i sorgenti in `docs/handover/`.
+
+Per rigenerarli in un ambiente con Chromium e le dipendenze installate: `node scripts/render-handover-pdfs.mjs`. Il renderer verifica che ogni pagina rientri nell'area stampabile A4. Il contenuto descrive la review del 2 ottobre 2026: aggiornare evidenze e data prima di usarlo per una nuova consegna.
