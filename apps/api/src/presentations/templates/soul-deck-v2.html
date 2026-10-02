@@ -174,6 +174,26 @@
     .properties-card.ultra td { padding-top: 4px; padding-bottom: 4px; font-size: 8.5px; }
     .properties-card.ultra td strong { font-size: 9px; }
     .properties-card.ultra td small { display: none; }
+    /* Optional V3 columns: keep currency values on one line without changing legacy decks. */
+    html.presentation-v3.imu-columns .property-col-company { width: 10%; }
+    html.presentation-v3.imu-columns .property-col-municipality { width: 7%; }
+    html.presentation-v3.imu-columns .property-col-address { width: 11%; }
+    html.presentation-v3.imu-columns .property-col-cadastral { width: 15%; }
+    html.presentation-v3.imu-columns .property-col-category { width: 4%; }
+    html.presentation-v3.imu-columns .property-col-current-rent,
+    html.presentation-v3.imu-columns .property-col-estimated-rent,
+    html.presentation-v3.imu-columns .property-col-current-imu,
+    html.presentation-v3.imu-columns .property-col-estimated-imu,
+    html.presentation-v3.imu-columns .property-col-rent-difference { width: 8%; }
+    html.presentation-v3.imu-columns .property-col-imu-difference { width: 9%; }
+    html.presentation-v3.imu-columns .property-col-reduction { width: 4%; }
+    html.presentation-v3.imu-columns .properties-card th { font-size: 9px; padding-left: 5px; padding-right: 5px; }
+    html.presentation-v3.imu-columns .properties-card td { font-size: 10px; padding-left: 5px; padding-right: 5px; }
+    html.presentation-v3.imu-columns .properties-card td:nth-child(n+6),
+    html.presentation-v3.imu-columns .properties-card tfoot td:not(:first-child) { white-space: nowrap; overflow-wrap: normal; }
+    html.presentation-v3.imu-columns .properties-card.ultra td { font-size: 8.5px; }
+    html.presentation-v3.imu-columns .properties-card.ultra th { font-size: 8px; }
+    html.presentation-v3.imu-columns .metric { min-width: 0; }
     .bottom-grid { display: grid; grid-template-columns: minmax(0, 39fr) minmax(0, 61fr); gap: 16px; margin-top: 16px; min-height: 460px; }
     .bottom-grid > section { height: 100%; }
     .summary-body { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; gap: 0; height: calc(100% - 46px); }
@@ -326,6 +346,14 @@
   <script>
     const data = __SOUL_DECK_DATA__;
     if (data.version === 3) document.documentElement.classList.add("presentation-v3");
+    const showImuColumns = data.version === 3 && data.showImuColumns === true;
+    if (showImuColumns) {
+      document.documentElement.classList.add("imu-columns");
+      document.querySelector("#properties-card .property-col-estimated-rent").insertAdjacentHTML("afterend",
+        '<col class="property-col-current-imu"><col class="property-col-estimated-imu">');
+      document.querySelector("#properties-card thead th:nth-child(7)").insertAdjacentHTML("afterend",
+        '<th>IMU attuale</th><th>IMU prevista</th>');
+    }
     const usesImuReduction = data.version === 3 && data.reductionBasis === "imu";
     const usesRowReduction = data.version === 3 && data.reductionBasis === "per-row";
     if (usesImuReduction) document.querySelector("#properties-card thead th:last-child").textContent = "Riduzione IMU %";
@@ -342,6 +370,11 @@
     const estimatedRent = sum("renditaAttribuibile");
     const currentImu = sum("imuAttuale");
     const estimatedImu = sum("imuOttenibile");
+    const optionalEuro = value => Number.isFinite(value) ? euro.format(value) : "n.d.";
+    const imuCells = (current, estimated) => showImuColumns
+      ? `<td>${optionalEuro(current)}</td><td>${optionalEuro(estimated)}</td>` : "";
+    // Missing values do not contribute to totals; an entirely unknown column stays n.d.
+    const knownImuTotal = field => data.immobili.some(item => Number.isFinite(item[field])) ? sum(field) : null;
     const annualSaving = currentImu - estimatedImu;
     const tenYearSaving = annualSaving * 10;
     document.querySelectorAll("[data-client]").forEach((element) => element.textContent = data.studio.company);
@@ -358,7 +391,7 @@
       const imuLabel = Number.isFinite(imuVariation)
         ? `${imuVariation > 0 ? "+" : imuVariation < 0 ? "−" : ""}${euro.format(Math.abs(imuVariation))}`
         : "n.d.";
-      return `<tr class="${item.memberIds?.length > 1 ? "grouped-property" : ""}"><td>${escapeHtml(item.societa)}</td><td>${escapeHtml(item.comune)}</td><td>${escapeHtml(item.indirizzo)}</td><td>${escapeHtml(item.foglioParticellaSub)}</td><td>${escapeHtml(item.categoria || "—")}</td><td>${euro.format(item.renditaAttuale)}</td><td>${euro.format(item.renditaAttribuibile)}</td><td>${euro.format(rentDiff)}</td><td class="${imuClass}">${imuLabel}</td><td>${percent(reduction)}</td></tr>`;
+      return `<tr class="${item.memberIds?.length > 1 ? "grouped-property" : ""}"><td>${escapeHtml(item.societa)}</td><td>${escapeHtml(item.comune)}</td><td>${escapeHtml(item.indirizzo)}</td><td>${escapeHtml(item.foglioParticellaSub)}</td><td>${escapeHtml(item.categoria || "—")}</td><td>${euro.format(item.renditaAttuale)}</td><td>${euro.format(item.renditaAttribuibile)}</td>${imuCells(item.imuAttuale, item.imuOttenibile)}<td>${euro.format(rentDiff)}</td><td class="${imuClass}">${imuLabel}</td><td>${percent(reduction)}</td></tr>`;
     }).join("");
     const totalRentDifference = currentRent - estimatedRent;
     const completeImu = data.immobili.every(item => Number.isFinite(item.imuAttuale) && Number.isFinite(item.imuOttenibile));
@@ -367,7 +400,7 @@
       : (currentRent ? totalRentDifference / currentRent : null);
     const totalImuVariation = estimatedImu - currentImu;
     const totalImuClass = totalImuVariation > 0 ? "bad" : totalImuVariation < 0 ? "good" : "";
-    document.getElementById("property-totals").innerHTML = `<td colspan="5">Totale portafoglio</td><td>${euro.format(currentRent)}</td><td>${euro.format(estimatedRent)}</td><td>${euro.format(totalRentDifference)}</td><td class="${totalImuClass}">${totalImuVariation > 0 ? "+" : totalImuVariation < 0 ? "−" : ""}${euro.format(Math.abs(totalImuVariation))}</td><td>${percent(totalReduction)}</td>`;
+    document.getElementById("property-totals").innerHTML = `<td colspan="5">Totale portafoglio</td><td>${euro.format(currentRent)}</td><td>${euro.format(estimatedRent)}</td>${imuCells(knownImuTotal("imuAttuale"), knownImuTotal("imuOttenibile"))}<td>${euro.format(totalRentDifference)}</td><td class="${totalImuClass}">${totalImuVariation > 0 ? "+" : totalImuVariation < 0 ? "−" : ""}${euro.format(Math.abs(totalImuVariation))}</td><td>${percent(totalReduction)}</td>`;
     const propertiesCard = document.getElementById("properties-card");
     if (tableItems.length > 5) propertiesCard.classList.add("compact");
     if (tableItems.length > 9) propertiesCard.classList.add("ultra");
@@ -413,7 +446,28 @@
     document.getElementById("next").addEventListener("click", () => show(active + 1));
     document.addEventListener("keydown", (event) => { if (event.key === "ArrowLeft") show(active - 1); if (event.key === "ArrowRight") show(active + 1); });
     const assets = [...document.images].map((image) => image.complete ? Promise.resolve() : new Promise((resolve) => { image.onload = image.onerror = resolve; }));
-    Promise.all([document.fonts.ready, ...assets]).then(() => { const marker = document.createElement("span"); marker.id = "assets-ready"; marker.hidden = true; document.body.append(marker); });
+    Promise.all([document.fonts.ready, ...assets]).then(() => {
+      if (showImuColumns) {
+        // Extra columns can make long company/address labels taller. Keep the whole
+        // table and summary inside slide 5, including dense grouped portfolios.
+        const slide = document.querySelector(".economics"), summary = slide.querySelector(".bottom-grid");
+        const fit = () => {
+          propertiesCard.style.zoom = "1";
+          const available = slide.clientHeight - parseFloat(getComputedStyle(slide).paddingBottom)
+            - propertiesCard.offsetTop - summary.offsetHeight - parseFloat(getComputedStyle(summary).marginTop);
+          if (available > 0 && propertiesCard.offsetHeight > available)
+            propertiesCard.style.zoom = String(available / propertiesCard.offsetHeight);
+          slide.querySelectorAll(".metric strong").forEach(amount => {
+            amount.style.fontSize = "";
+            if (amount.scrollWidth > amount.clientWidth)
+              amount.style.fontSize = `${parseFloat(getComputedStyle(amount).fontSize) * amount.clientWidth / amount.scrollWidth}px`;
+          });
+        };
+        fit();
+        window.addEventListener("resize", fit);
+      }
+      const marker = document.createElement("span"); marker.id = "assets-ready"; marker.hidden = true; document.body.append(marker);
+    });
   </script>
 </body>
 </html>

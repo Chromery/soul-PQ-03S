@@ -223,8 +223,15 @@ Regole:
   assente o null, la data gia salvata viene conservata (da PQ 1.0.7); un valore non nullo
   esplicito puo aggiornarla. Anche un nuovo studio importato con esito diverso da Aperta
   riceve automaticamente la data corrente se l'ERP non fornisce una data.
-  Il cambio esito dall'interfaccia PQ registra automaticamente la data, visibile nel dettaglio
-  dello studio e restituita nel sync come `data_esito`.
+  Da PQ **1.1.11**, il cambio esito registra l'istante completo (millisecondi inclusi),
+  conservato in PostgreSQL come `timestamptz(3)`. Nel dettaglio PQ viene mostrato
+  con ore, minuti e secondi nel fuso `Europe/Rome`; `data_esito` nel sync resta
+  ISO 8601 UTC, ad esempio `2026-09-23T13:42:18.456Z` (15:42:18 in Italia in estate).
+  L'ERP deve inviare un timestamp con `Z` o offset e conservarlo come datetime:
+  non troncare a `YYYY-MM-DD` e non aggiungere manualmente due ore (l'offset cambia
+  con l'ora legale). Per compatibilita, le date senza orario rimangono accettate
+  come mezzanotte UTC. I vecchi valori gia salvati nel campo `DATE` conservano il
+  giorno e la precedente rappresentazione API; l'orario perso non viene inventato.
 
 ### 2. Lettura modifiche PQ da ERP
 

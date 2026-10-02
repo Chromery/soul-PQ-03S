@@ -261,7 +261,8 @@ export class PresentationsService implements OnModuleDestroy {
     const snapshot: PresentationSnapshot = {
       version,
       generatedAt: generatedAt.toISOString(),
-      ...(version === 3 ? { reductionBasis: "per-row" as const } : {}),
+      ...(version === 3 ? { reductionBasis: "per-row" as const,
+        showImuColumns: (savedDraft?.overrides as Record<string, unknown> | undefined)?.showImuColumns === "true" } : {}),
       studio: {
         ...studio,
         company: clientName,

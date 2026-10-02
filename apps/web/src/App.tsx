@@ -3,6 +3,7 @@ import { useAuth } from "@clerk/react";
 import type { ReactNode } from "react";
 import { usePresentationDraftStore } from "./presentation-draft-store";
 import { allocatePresentationTotal } from "./presentation-group-allocation";
+import { formatStudyOutcomeDate } from "./study-outcome-date";
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -83,7 +84,7 @@ import { PropertyGroupingSuggestions } from "./PropertyGroupingSuggestions";
 import { PriceRuleLab } from "./PriceRules";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.10";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.1.12";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -6324,7 +6325,7 @@ function StudyRows({
                   <SummaryStat icon={<Factory size={16} />} label="Rendita categoria D" value={formatEuro(study.catDRendita)} />
                   <SummaryStat icon={<RefreshCw size={16} />} label="Importato ERP" value={formatDate(study.importedAt)} />
                   <SummaryStat icon={<CalendarDays size={16} />} label="Data creazione" value={formatDate(study.createdAt)} />
-                  <SummaryStat icon={<CheckCircle2 size={16} />} label="Data esito" value={formatDate(study.concludedAt)} />
+                  <SummaryStat icon={<CheckCircle2 size={16} />} label="Data e ora esito (Italia)" value={formatStudyOutcomeDate(study.concludedAt)} />
                   <SummaryStat icon={<BriefcaseBusiness size={16} />} label="Commerciale" value={study.commercialOwner} />
                   <SummaryStat icon={<UserRound size={16} />} label="Responsabile tecnico" value={study.technicalOwner} />
                 </div>
@@ -6837,6 +6838,19 @@ function usePersistentPresentationDraft(endpoint: string, baseline: Presentation
   return { presentationDraft: draft, presentationTouchedFields: touched, presentationPersistence: persistence,
     updatePresentationClientName: (value: string) => persistence.change({ clientName: value }),
     updatePresentationPropertyField: updateProperty, resetPresentationPropertyField: resetProperty, resetPresentationDraft: reset };
+}
+
+function PresentationImuColumnsOption({ persistence, disabled = false }: {
+  persistence: ReturnType<typeof usePresentationDraftStore>; disabled?: boolean;
+}) {
+  return <label className="presentation-imu-columns-option">
+    <input type="checkbox" checked={persistence.overrides.showImuColumns === "true"}
+      disabled={disabled || !persistence.loaded}
+      onChange={event => persistence.change({ showImuColumns: event.target.checked ? "true" : null })} />
+    <span><strong>Mostra IMU attuale e IMU prevista nel PDF</strong>
+      <small>Aggiunge le due colonne per tutti gli immobili e i gruppi inclusi, usando gli importi modificabili qui sotto.</small>
+    </span>
+  </label>;
 }
 
 function PresentationSaveStatus({ persistence }: { persistence: ReturnType<typeof usePresentationDraftStore> }) {
@@ -7357,6 +7371,7 @@ function PresentationAction({
               Seleziona gli immobili da includere. I contenuti e gli importi arrivano dall’anteprima editabile presente nella pagina corrente.
             </p>
             <PresentationSaveStatus persistence={persistence} />
+            {isV3 && <PresentationImuColumnsOption persistence={persistence} disabled={busy} />}
 
             <div className="presentation-selection-toolbar">
               <strong>{selectedPropertyIds.length}/{study.properties.length} selezionati</strong>
@@ -7649,6 +7664,7 @@ function PresentationDataPreview({
       </label>
 
       <PresentationSaveStatus persistence={persistence} />
+      <PresentationImuColumnsOption persistence={persistence} />
 
       <p className="presentation-preview-info">
         Se modifichi una rendita, la relativa IMU viene ricalcolata soltanto per la presentazione con
@@ -8318,7 +8334,7 @@ function StudyDetail({
               onChange={(status) => void handleStatusChange(status)}
             />
             <span className="study-outcome-date" aria-label="Data esito studio">
-              <CalendarDays size={14} aria-hidden="true" /> Data esito: {formatDate(study.concludedAt)}
+              <CalendarDays size={14} aria-hidden="true" /> Data e ora esito (Italia): {formatStudyOutcomeDate(study.concludedAt)}
             </span>
           </div>
           <h1>{study.company}</h1>

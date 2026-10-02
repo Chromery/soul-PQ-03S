@@ -53,10 +53,14 @@ for (const group of [false, true]) test(`presentation ${group ? "group" : "study
   const preview = page.locator("#presentation-data");
   const address = preview.getByRole("textbox", { name: "indirizzo per HISTORY-3", exact: true });
   const saved = () => expect(preview.getByRole("status")).toContainText("Modifiche salvate");
+  const imuColumns = preview.getByRole("checkbox", { name: /Mostra IMU attuale e IMU prevista/ });
+  await expect(imuColumns).not.toBeChecked();
+  await imuColumns.check(); await saved();
   await address.fill("Via modificata 44");
   await preview.getByLabel("Cliente mostrato in copertina").fill("Cliente personalizzato");
   await saved();
   await page.reload(); await expect(address).toHaveValue("Via modificata 44");
+  await expect(imuColumns).toBeChecked();
   await expect(preview.getByLabel("Cliente mostrato in copertina")).toHaveValue("Cliente personalizzato");
   properties[3].address = "Indirizzo ERP aggiornato";
   properties[4].address = "Via ERP non modificata";
@@ -71,6 +75,10 @@ for (const group of [false, true]) test(`presentation ${group ? "group" : "study
   await expect(page.getByRole("button", { name: /Creazione presentazione v2|Genera presentazione$/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Generazione Presentazione", exact: true }).click();
   const modal = page.getByRole("dialog", { name: "Generazione Presentazione", exact: true });
+  const modalImuColumns = modal.getByRole("checkbox", { name: /Mostra IMU attuale e IMU prevista/ });
+  await expect(modalImuColumns).toBeChecked();
+  await modalImuColumns.uncheck(); await saved();
+  await expect(imuColumns).not.toBeChecked();
   for (const width of [1280, 768]) {
     await page.setViewportSize({ width, height: 900 });
     const box = await modal.boundingBox();

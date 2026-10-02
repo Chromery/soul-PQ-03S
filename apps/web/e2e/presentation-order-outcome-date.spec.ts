@@ -30,7 +30,7 @@ test("presentation rows sort by outcome and columns without mixing edits; study 
     if (pathname === `/api/studies/${study.id}` && route.request().method() === "PATCH") {
       const patch = route.request().postDataJSON(); writes.push(patch);
       study.status = patch.status;
-      study.concludedAt = "2026-09-09T10:30:00Z";
+      study.concludedAt = "2026-09-09T10:30:45.123Z";
       return route.fulfill({ json: study });
     }
     if (!["GET", "HEAD", "OPTIONS"].includes(route.request().method())) writes.push(pathname);
@@ -54,12 +54,14 @@ test("presentation rows sort by outcome and columns without mixing edits; study 
   for (const status of ["Positiva", "Negativa", "Annullata", "Sospesa", "Aperta"]) {
     await page.getByRole("combobox", { name: "Modifica stato studio di fattibilità", exact: true }).selectOption(status);
     await expect(page.getByLabel("Data esito studio", { exact: true })).toContainText("09/09/2026");
+    await expect(page.getByLabel("Data esito studio", { exact: true })).toContainText("12:30:45");
     await expect(page.getByRole("combobox", { name: "Modifica stato studio di fattibilità", exact: true })).toBeEnabled();
   }
   expect(writes).toEqual(["Positiva", "Negativa", "Annullata", "Sospesa", "Aperta"].map(status => ({ status })));
   expect(properties.map(p => p.id)).toEqual(["ORDER-0", "ORDER-1", "ORDER-2", "ORDER-3", "ORDER-4"]);
   await page.reload();
   await expect(page.getByLabel("Data esito studio", { exact: true })).toContainText("09/09/2026");
+  await expect(page.getByLabel("Data esito studio", { exact: true })).toContainText("12:30:45");
   await page.goto("/gruppi-studio/ORDER-GROUP");
   await expect.poll(rowIds).toEqual(["ORDER-3", "ORDER-4", "ORDER-2", "ORDER-1", "ORDER-0"]);
   await table.getByRole("button", { name: "Esito", exact: true }).click();

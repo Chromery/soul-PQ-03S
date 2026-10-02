@@ -9113,6 +9113,10 @@ button.activity-item {
 .presentation-save-status.saving, .presentation-save-status.loading { color: #006b94; }
 .presentation-save-status.error { color: #b42318; }
 .presentation-save-status button { margin-left: 12px; text-decoration: underline; }
+.presentation-imu-columns-option { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; margin: 12px 0; border: 1px solid #cfe1ea; border-radius: 8px; background: #f4f9fc; cursor: pointer; }
+.presentation-imu-columns-option input { flex: 0 0 auto; width: 16px; height: 16px; margin-top: 2px; accent-color: #006b94; }
+.presentation-imu-columns-option strong { display: block; font-size: 13px; }
+.presentation-imu-columns-option small { display: block; margin-top: 4px; color: #536878; line-height: 1.4; }
 .presentation-generator-table-wrap { overflow: auto; max-height: 48vh; border: 1px solid var(--border, #dfe5ec); border-radius: 10px; }
 .presentation-generator-table { min-width: 1450px; width: 100%; table-layout: auto; }
 .presentation-generator-table th:nth-child(n) { width: auto; white-space: nowrap; }
