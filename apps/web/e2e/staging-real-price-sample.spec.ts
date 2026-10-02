@@ -17,9 +17,12 @@ test("real staging sample keeps plans, groups and saved areas usable for price s
     const properties = studies.flatMap((s: any) => s.properties.map((p: any) => ({ ...p, studyId: s.id })));
     const fileChecks = [];
     for (const study of studies) {
-      const property = study.properties.find((p: any) => p.documentUrls?.planimetria);
-      if (!property) throw Error("Sample study without a plan");
-      const response = await fetch(property.documentUrls.planimetria);
+      // Two source studies intentionally exercise manual estimates without a plan.
+      const property = study.properties.find((p: any) => p.documentUrls?.planimetria)
+        ?? study.properties.find((p: any) => Object.values(p.documentUrls ?? {}).some(Boolean));
+      if (!property) throw Error("Sample study without any attachment");
+      const url = property.documentUrls.planimetria ?? Object.values(property.documentUrls).find(Boolean);
+      const response = await fetch(url as string);
       const bytes = new Uint8Array(await response.arrayBuffer());
       fileChecks.push({ status: response.status, pdf: new TextDecoder().decode(bytes.slice(0, 5)) === "%PDF-" });
     }
@@ -29,7 +32,8 @@ test("real staging sample keeps plans, groups and saved areas usable for price s
       const draft = await get(`/api/property-valuation-groups/${id}/analysis-draft`);
       const response = await fetch(`/api/property-valuation-groups/${id}/documents/planimetria/download`);
       const bytes = new Uint8Array(await response.arrayBuffer());
-      groupChecks.push({ hasAreas: draft?.selections?.length > 0, status: response.status,
+      groupChecks.push({ hasPlan: properties.some((p: any) => p.valuationGroupId === id && p.documentUrls?.planimetria),
+        hasAreas: draft?.selections?.length > 0, status: response.status,
         pdf: new TextDecoder().decode(bytes.slice(0, 5)) === "%PDF-" });
     }
     const property = properties.find((p: any) => p.id === "sample-20261002-property-1571806");
@@ -43,7 +47,12 @@ test("real staging sample keeps plans, groups and saved areas usable for price s
   expect(result.fileChecks).toHaveLength(15);
   for (const file of result.fileChecks) expect(file).toEqual({ status: 200, pdf: true });
   expect(result.groupChecks).toHaveLength(3);
-  for (const group of result.groupChecks) expect(group).toEqual({ hasAreas: true, status: 200, pdf: true });
+  expect(result.groupChecks.filter((group: any) => group.hasPlan)).toHaveLength(2);
+  for (const group of result.groupChecks) {
+    expect(group.hasAreas).toBe(true);
+    expect(group.status).toBe(group.hasPlan ? 200 : 404);
+    expect(group.pdf).toBe(group.hasPlan);
+  }
   expect(result.areaCount).toBeGreaterThan(0);
   expect(result.draftProperty).toBe(result.property.id);
   expect(result.documentUrl).toContain(`/api/properties/${result.property.id}/`);
