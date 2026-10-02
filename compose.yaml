@@ -1,7 +1,14 @@
 name: soul-prospect-qualifier
 
+x-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
+    logging: *bounded-logging
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
@@ -9,7 +16,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-soul}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-soul_dev_password}
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "${DB_PORT:-127.0.0.1:5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-soul} -d ${POSTGRES_DB:-soul_pq}"]
       interval: 5s
@@ -19,6 +26,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   postgres-backup:
+    logging: *bounded-logging
     build:
       context: .
       dockerfile: docker/postgres-backup/Dockerfile
@@ -46,6 +54,10 @@ services:
         condition: service_healthy
 
   api:
+    logging: *bounded-logging
+    init: true
+    security_opt:
+      - no-new-privileges:true
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -62,6 +74,7 @@ services:
       VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:-}
       CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:-}
       CLERK_JWT_KEY: ${CLERK_JWT_KEY:-}
+      PQ_AUTOMATION_SECRET: ${PQ_AUTOMATION_SECRET:-}
       S3_ENDPOINT: ${S3_ENDPOINT:-}
       S3_REGION: ${S3_REGION:-us-west-004}
       S3_BUCKET: ${S3_BUCKET:-}
@@ -95,7 +108,7 @@ services:
       IMU_DOCUMENT_LIBRARY_DIR: /var/lib/soul-pq/imu-delibere
       PRICE_RULE_SOURCE_DIR: /var/lib/soul-pq/price-list-sources
     ports:
-      - "${API_PORT:-3000}:3000"
+      - "${API_PORT:-127.0.0.1:3000}:3000"
     volumes:
       - ./backups/postgres:/backups/postgres
       - imu_delibere_cache:/var/lib/soul-pq/imu-delibere
@@ -115,6 +128,7 @@ services:
         condition: service_healthy
 
   web:
+    logging: *bounded-logging
     build:
       context: .
       dockerfile: apps/web/Dockerfile
@@ -124,7 +138,7 @@ services:
         VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:-}
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-8080}:80"
+      - "${WEB_PORT:-127.0.0.1:8080}:80"
     depends_on:
       api:
         condition: service_healthy

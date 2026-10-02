@@ -1,5 +1,5 @@
 import { PDFDocument, degrees } from "pdf-lib";
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { clerk } from "@clerk/testing/playwright";
 import { createHash } from "node:crypto";
 

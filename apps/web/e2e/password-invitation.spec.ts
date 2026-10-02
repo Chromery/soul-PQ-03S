@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { setupClerkTestingToken } from "@clerk/testing/playwright";
 
 test("invitation password guidance matches Clerk and accepts a compliant password", async ({ page, request }) => {

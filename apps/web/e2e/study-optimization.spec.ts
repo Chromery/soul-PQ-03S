@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { clerk } from "@clerk/testing/playwright";
 
 test("study optimization matches presentation totals, signs, edits and responsive cards", async ({ page }) => {

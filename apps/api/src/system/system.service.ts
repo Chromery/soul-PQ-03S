@@ -30,7 +30,7 @@ export class SystemService {
     const [latestBackup, database] = await Promise.all([this.latestBackup(), this.databaseStats()]);
     return {
       generatedAt: new Date().toISOString(),
-      environment: this.config.get<string>("NODE_ENV", "development"),
+      environment: this.config.get<string>("APP_ENV", "development"),
       database,
       storage: this.storageStatus(),
       backup: {
@@ -70,7 +70,15 @@ export class SystemService {
       await fs.mkdir(backupDir, { recursive: true });
       const fileName = `${this.databaseName()}-${timestamp()}.dump`;
       const localPath = path.join(backupDir, fileName);
-      await this.runPgDump(localPath);
+      const partialPath = `${localPath}.part`;
+      try {
+        await this.runPgDump(partialPath);
+        await fs.chmod(partialPath, 0o600);
+        await fs.rename(partialPath, localPath);
+      } catch (error) {
+        await fs.unlink(partialPath).catch(() => {});
+        throw error;
+      }
       const stat = await fs.stat(localPath);
       const remoteKey = this.remoteKey(fileName);
       const uploaded = await this.uploadBackup(localPath, remoteKey, stat.size);

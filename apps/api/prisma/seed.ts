@@ -6,6 +6,9 @@ import { PrismaClient } from "../src/generated/prisma/client.js";
 import { DocumentType } from "../src/generated/prisma/enums.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
+if (process.env.APP_ENV === "production") {
+  throw new Error("Seed dimostrativo vietato in produzione. Usare migrazioni e ripristino del backup.");
+}
 process.env.DATABASE_URL ??= localDatabaseUrl();
 
 type SeedProperty = {

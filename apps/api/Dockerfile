@@ -39,4 +39,4 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-ita \
   && rm -rf /var/lib/apt/lists/*
 EXPOSE 3000
-CMD ["sh", "-c", "npm run db:migrate:deploy --workspace @soul/api && npm run db:seed --workspace @soul/api && npm run start --workspace @soul/api"]
+CMD ["sh", "-c", "npm run db:migrate:deploy --workspace @soul/api && exec node apps/api/dist/main.js"]

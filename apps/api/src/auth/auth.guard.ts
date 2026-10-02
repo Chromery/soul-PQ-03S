@@ -14,7 +14,7 @@ export class AuthGuard implements CanActivate {
     const targets = [context.getHandler(), context.getClass()];
     if (this.reflector.getAllAndOverride("pq.externalAuthentication", targets)) return true;
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    request.pqUser = await this.auth.authenticate(request);
+    request.pqUser ??= await this.auth.authenticate(request);
     if (this.reflector.getAllAndOverride("pq.adminOnly", targets) && request.pqUser.role !== "admin") {
       throw new ForbiddenException("Operazione riservata agli amministratori");
     }

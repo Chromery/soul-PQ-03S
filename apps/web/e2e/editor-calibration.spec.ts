@@ -1,5 +1,5 @@
 import { PDFDocument, rgb } from "pdf-lib";
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { clerk } from "@clerk/testing/playwright";
 
 test("manual calibration can target one or all pages and persists independently with undo", async ({ page }) => {

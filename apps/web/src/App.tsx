@@ -84,7 +84,7 @@ import { PropertyGroupingSuggestions } from "./PropertyGroupingSuggestions";
 import { PriceRuleLab } from "./PriceRules";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.2.0";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.2.1";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 

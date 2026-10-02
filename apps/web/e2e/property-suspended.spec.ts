@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { clerk } from "@clerk/testing/playwright";
 
 test("Sospeso persists, remains distinct from Neutro and can be filtered in the archive", async ({ page }) => {

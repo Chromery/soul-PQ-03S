@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { clerk } from "@clerk/testing/playwright";
 
 test("property notes share editor storage; categories remain readable with old narrow preferences", async ({ page }) => {

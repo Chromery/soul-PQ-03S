@@ -1,4 +1,4 @@
-import { test, expect, chromium } from "@playwright/test";
+import { test, expect, chromium } from "./fixtures";
 import { clerk } from "@clerk/testing/playwright";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,6 +14,8 @@ test("forMaps 0.65.0 relays through the signed-in PQ tab without exposing tokens
     args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   });
   try {
+    await context.addCookies([{ name: "__Secure-pq_automation", value: process.env.PQ_AUTOMATION_SECRET!,
+      domain: "st-pq-soul.rainailab.com", path: "/api", httpOnly: true, secure: true, sameSite: "Strict" }]);
     const page = await context.newPage();
     const origin = "https://st-pq-soul.rainailab.com";
     // The old unauthenticated request is rejected BEFORE any inference is performed.

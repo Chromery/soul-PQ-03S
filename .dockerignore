@@ -11,3 +11,12 @@ visual reference/*
 Assessments
 00_prezzari2026
 .cache/prezzari
+backups
+credentials
+secrets
+deliverables
+feedbacks
+docs/security
+playwright
+test-results
+playwright-report

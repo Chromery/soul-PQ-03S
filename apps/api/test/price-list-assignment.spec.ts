@@ -2,6 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PriceListsService } from "../src/price-lists/price-lists.service.js";
 
+test("startup backfill is non-blocking and only targets missing associations", async () => {
+  let queries = 0, filter: unknown;
+  const prisma = { priceList: { findMany: async () => [{ id: "fixture" }] },
+    property: { findMany: async (input: any) => { queries++; filter = input.where; return []; } } };
+  const service = new PriceListsService(prisma as never, {} as never);
+  assert.equal(service.onModuleInit(), undefined);
+  assert.equal(queries, 0);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(queries, 1);
+  assert.deepEqual(filter, { priceLists: { none: {} } });
+});
+
 test("il matching dei prezzari usa la provincia dell'immobile invece di quella dello studio", async () => {
   const created: Array<{ priceListId: string; rank: number; reason: string }> = [];
   const property = {

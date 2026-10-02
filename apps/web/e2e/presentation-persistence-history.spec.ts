@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { clerk } from "@clerk/testing/playwright";
 
 for (const group of [false, true]) test(`presentation ${group ? "group" : "study"}: persistent edits, generator sorting, immutable history and delete`, async ({ page }) => {

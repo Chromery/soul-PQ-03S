@@ -835,10 +835,10 @@ components:
           default: application/pdf
         file_base64:
           type: string
-          description: Base64 puro oppure data URL `data:application/pdf;base64,...`.
+          description: Base64 puro oppure data URL `data:application/pdf;base64,...`. Deve decodificare un PDF leggibile non cifrato, da 1 a 500 pagine, massimo 40 MiB. File non validi sono rifiutati prima del salvataggio.
         storage_key:
           type: string
-          description: Accettato per retrocompatibilita/test; in produzione PQ salva il base64 su B2.
+          description: Accettato per retrocompatibilita/test soltanto nel prefisso documenti S3_KEY_PREFIX dell'ambiente (es. erp/ in produzione, staging/ in staging). Percorsi relativi, namespace backup e chiavi esterne sono rifiutati. Preferire file_base64.
         sha256:
           type: string
           description: Se presente, PQ lo verifica sul PDF decodificato.

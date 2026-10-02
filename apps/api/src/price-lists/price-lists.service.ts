@@ -14,20 +14,23 @@ export class PriceListsService implements OnModuleInit {
     private readonly storage: DocumentStorageService,
   ) {}
 
-  async onModuleInit() {
-    try {
-      await this.assignAllProperties();
-    } catch (error) {
-      console.error("Price list backfill failed on API startup", error);
-    }
+  onModuleInit() {
+    // Imports refresh their own matches. Startup only fills missing associations
+    // in the background: a restart must not rewrite every property or block health.
+    setImmediate(() => { void this.assignAllProperties(true).catch(() => {
+      console.error("Price list background backfill failed");
+    }); }).unref();
   }
 
-  async assignAllProperties() {
+  async assignAllProperties(onlyMissing = false) {
+    const priceLists = await this.prisma.priceList.findMany();
+    if (!priceLists.length) return 0;
     const properties = await this.prisma.property.findMany({
+      ...(onlyMissing ? { where: { priceLists: { none: {} } } } : {}),
       include: { study: true },
     });
     for (const property of properties) {
-      await this.assignForPropertyRecord(property);
+      await this.assignForPropertyRecord(property, priceLists);
     }
     return properties.length;
   }
@@ -63,8 +66,8 @@ export class PriceListsService implements OnModuleInit {
     await this.assignForPropertyRecord(property);
   }
 
-  private async assignForPropertyRecord(property: PropertyWithStudy) {
-    const priceLists = await this.prisma.priceList.findMany();
+  private async assignForPropertyRecord(property: PropertyWithStudy, catalog?: PriceList[]) {
+    const priceLists = catalog ?? await this.prisma.priceList.findMany();
     const ranked = rankPriceLists(property, priceLists).slice(0, 5);
     await this.prisma.$transaction([
       this.prisma.propertyPriceList.deleteMany({ where: { propertyId: property.id } }),

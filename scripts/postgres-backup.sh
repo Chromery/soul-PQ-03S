@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 backup_dir="${BACKUP_DIR:-/backups}"
 retention_days="${BACKUP_RETENTION_DAYS:-14}"
@@ -15,13 +16,16 @@ run_backup() {
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
   backup_file="${backup_dir}/${db_name}-${timestamp}.dump"
 
-  if pg_dump -h "$db_host" -U "$db_user" -d "$db_name" -Fc -f "$backup_file"; then
+  partial_file="${backup_file}.part"
+  if pg_dump -h "$db_host" -U "$db_user" -d "$db_name" -Fc -f "$partial_file" && pg_restore -l "$partial_file" >/dev/null; then
+    mv "$partial_file" "$backup_file"
     echo "Backup PostgreSQL creato: $backup_file"
-    upload_backup "$backup_file"
+    upload_backup "$backup_file" || return 1
     find "$backup_dir" -type f -name "${db_name}-*.dump" -mtime +"$retention_days" -delete
   else
     echo "Backup PostgreSQL fallito" >&2
-    rm -f "$backup_file"
+    rm -f "$partial_file"
+    return 1
   fi
 }
 
@@ -29,7 +33,7 @@ upload_backup() {
   backup_file="$1"
   if [ -z "${S3_ENDPOINT:-}" ] || [ -z "${S3_BUCKET:-}" ] || [ -z "${S3_ACCESS_KEY_ID:-}" ] || [ -z "${S3_SECRET_ACCESS_KEY:-}" ]; then
     echo "Upload B2 saltato: configurazione S3/B2 incompleta"
-    return
+    return 1
   fi
 
   export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY_ID"
@@ -78,5 +82,7 @@ while true; do
   delay="$(seconds_until_next_backup)"
   echo "Prossimo backup PostgreSQL alle ${backup_time} (${TZ:-UTC}), tra ${delay}s"
   sleep "$delay"
-  run_backup
+  if ! run_backup; then
+    echo "Backup non completato: verificare disco, database e storage remoto" >&2
+  fi
 done

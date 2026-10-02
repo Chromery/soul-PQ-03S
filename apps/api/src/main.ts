@@ -5,6 +5,9 @@ import { NestFactory } from "@nestjs/core";
 import { json, urlencoded } from "express";
 import { AppModule } from "./app.module.js";
 import { ErpAuditService } from "./erp-sync/erp-audit.service.js";
+import { ErpSyncService } from "./erp-sync/erp-sync.service.js";
+import { AuthService } from "./auth/auth.service.js";
+import { authorizeBeforeBody, securityHeaders } from "./http-security.js";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
@@ -14,7 +17,10 @@ async function bootstrap() {
 
   app.setGlobalPrefix("api");
   const erpAudit = app.get(ErpAuditService);
+  const auth = app.get(AuthService), erp = app.get(ErpSyncService);
+  app.use(securityHeaders);
   app.use(erpAudit.track);
+  app.use(authorizeBeforeBody(request => auth.authenticate(request), header => erp.assertAuthorized(header)));
   app.use(json({ limit: "60mb", verify: erpAudit.recordRaw }));
   app.use(urlencoded({ extended: true, limit: "60mb", verify: erpAudit.recordRaw }));
   app.use(erpAudit.capture);

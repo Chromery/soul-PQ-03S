@@ -2,7 +2,7 @@ import { Injectable, ServiceUnavailableException, UnauthorizedException } from "
 import { ConfigService } from "@nestjs/config";
 import { createClerkClient, verifyToken, type ClerkClient } from "@clerk/backend";
 import type { Request } from "express";
-import { accessMetadata, displayProfile, grantedRole, requireTrustedOrigin, sessionToken, type PqIdentity } from "./auth.policy.js";
+import { accessMetadata, displayProfile, grantedRole, requireAutomationSecret, requireTrustedOrigin, sessionToken, type PqIdentity } from "./auth.policy.js";
 
 @Injectable()
 export class AuthService {
@@ -33,7 +33,10 @@ export class AuthService {
       throw new UnauthorizedException("Sessione non valida per questo ambiente");
     }
     const cached = this.identities.get(claims.sub);
-    if (cached && cached.expires > Date.now()) return cached.identity;
+    if (cached && cached.expires > Date.now()) {
+      requireAutomationSecret(cached.identity, request.headers, environment!, this.config.get<string>("PQ_AUTOMATION_SECRET"));
+      return cached.identity;
+    }
     this.client ??= createClerkClient({ secretKey, publishableKey });
     let user;
     try { user = await this.client.users.getUser(claims.sub); }
@@ -43,6 +46,7 @@ export class AuthService {
     const email = user.emailAddresses.find((address) => address.id === user.primaryEmailAddressId && address.verification?.status === "verified")?.emailAddress;
     if (!email) throw new UnauthorizedException("Email verificata richiesta");
     const identity: PqIdentity = { userId: user.id, ...grant, email, ...displayProfile(user, email) };
+    requireAutomationSecret(identity, request.headers, environment!, this.config.get<string>("PQ_AUTOMATION_SECRET"));
     // Small bounded cache: role changes and account blocks apply within 15 seconds.
     if (this.identities.size >= 500) this.identities.clear();
     this.identities.set(user.id, { expires: Date.now() + 15_000, identity });

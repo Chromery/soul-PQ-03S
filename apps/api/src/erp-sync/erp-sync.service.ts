@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Optional, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { assertDocumentStorageKey } from "./storage-policy.js";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { ActivitiesService } from "../activities/activities.service.js";
 import {
@@ -569,13 +570,15 @@ export class ErpSyncService {
     const fileName = requiredString(input.file_nome, "documenti[].file_nome");
     const mimeType = optionalString(input.mime_type) ?? "application/pdf";
     if (mimeType !== "application/pdf") throw new BadRequestException(`mime_type non supportato per ${fileName}`);
+    const storageKey = optionalString(input.storage_key);
+    if (storageKey) assertDocumentStorageKey(storageKey, process.env.S3_KEY_PREFIX?.trim() || "erp");
     return {
       type,
       erpDocumentId: optionalString(input.documento_erp_id),
       fileName,
       mimeType,
       fileBase64: optionalString(input.file_base64),
-      storageKey: optionalString(input.storage_key),
+      storageKey,
       expectedSha256: optionalString(input.sha256),
       sizeBytes: integerNumber(input.dimensione_byte, undefined),
     };

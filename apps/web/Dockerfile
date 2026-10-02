@@ -15,5 +15,6 @@ RUN npm run build --workspace @soul/web
 
 FROM nginx:1.27-alpine
 COPY apps/web/docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY apps/web/docker/security-headers.conf /etc/nginx/pq-security-headers.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 EXPOSE 80

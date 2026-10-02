@@ -1,5 +1,14 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { clerk } from "@clerk/testing/playwright";
+
+test("test OTP alone cannot access PQ, even with a cached identity", async ({ page, context }) => {
+  await page.goto("/");
+  await clerk.signIn({ page, emailAddress: process.env.E2E_CLERK_USER_EMAIL! });
+  await expect(page.getByLabel("Operatore corrente")).toBeVisible();
+  expect(await page.evaluate(async () => (await fetch("/api/studies")).status)).toBe(200);
+  await context.clearCookies({ name: "__Secure-pq_automation" });
+  expect(await page.evaluate(async () => (await fetch("/api/studies")).status)).toBe(403);
+});
 
 test("anonymous API requests cannot read studies or documents", async ({ request }) => {
   for (const endpoint of ["/api/studies", "/api/activities", "/api/system/status", "/api/system/erp-audit", "/api/system/erp-openapi", "/api/properties/320129/documents/planimetria/download"]) {

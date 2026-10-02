@@ -1,9 +1,24 @@
 import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import type { Request } from "express";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 export type PqRole = "admin" | "operator";
 export type PqIdentity = { userId: string; role: PqRole; name: string; firstName: string; lastName: string; jobTitle: string | null; email: string; automation: boolean };
 export type AuthenticatedRequest = Request & { pqUser: PqIdentity };
+
+// Clerk development OTPs are public test values, not credentials. Every request
+// from a test identity also needs a server-side secret, including cached identities.
+export function requireAutomationSecret(identity: Pick<PqIdentity, "automation" | "email">,
+  headers: Request["headers"], environment: string, secret: string | undefined) {
+  if (!identity.automation && !/\+clerk_test[^@]*@/i.test(identity.email)) return;
+  const cookies = (headers.cookie ?? "").split(";").map(v => v.trim())
+    .filter(v => v.startsWith("__Secure-pq_automation="));
+  const supplied = cookies.length === 1 ? cookies[0].slice("__Secure-pq_automation=".length) : "";
+  if (environment !== "staging" || !secret || secret.length < 32 || !supplied || supplied.length > 256 ||
+    !timingSafeEqual(createHash("sha256").update(secret).digest(), createHash("sha256").update(supplied).digest())) {
+    throw new ForbiddenException("Credenziale di automazione richiesta");
+  }
+}
 
 // Business profile is display-only, never a permission grant. Invitation public
 // metadata is server-managed; an explicit private profile overrides it.

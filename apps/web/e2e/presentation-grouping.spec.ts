@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { clerk } from "@clerk/testing/playwright";
 
 for (const groupScope of [false, true]) test(`presentation grouping in ${groupScope ? "study group" : "study"}: defaults, edits, dissolve, persistence and partial export`, async ({ page }) => {

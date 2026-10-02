@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { clerk } from "@clerk/testing/playwright";
 
 test("group membership: select full group plus properties, remove individual members and confirm saved valuation reset", async ({page}) => {

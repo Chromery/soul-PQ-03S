@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { clerk } from "@clerk/testing/playwright";
 
 test("presentation rows sort by outcome and columns without mixing edits; study date appears after every outcome change", async ({ page }) => {

@@ -10,7 +10,7 @@ import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
 import { AuthService } from "../src/auth/auth.service.js";
 import { AdminOnly, AuthGuard, ExternalAuthentication } from "../src/auth/auth.guard.js";
-import { accessMetadata, displayProfile, grantedRole, requireTrustedOrigin, sessionToken } from "../src/auth/auth.policy.js";
+import { accessMetadata, displayProfile, grantedRole, requireAutomationSecret, requireTrustedOrigin, sessionToken } from "../src/auth/auth.policy.js";
 import { AuthController } from "../src/auth/auth.controller.js";
 import type { PrismaService } from "../src/prisma/prisma.service.js";
 
@@ -36,6 +36,23 @@ function service(metadata: Record<string, unknown> = { pq: { role: "operator", e
   return auth;
 }
 const request = (token = jwt()) => ({ method: "GET", headers: { cookie: `__session=${token}` } }) as Request;
+
+test("public Clerk test OTP is insufficient, including after identity cache is warmed", async () => {
+  const secret = "test-only-automation-secret-" + "a".repeat(32);
+  const auth = service({ pq: { role: "operator", environment: "staging", automation: true } });
+  Object.assign(auth, { config: new ConfigService({ ...settings, PQ_AUTOMATION_SECRET: secret }) });
+  await assert.rejects(() => auth.authenticate(request()), ForbiddenException);
+  const valid = request(); valid.headers.cookie += `; __Secure-pq_automation=${secret}`;
+  assert.equal((await auth.authenticate(valid)).automation, true);
+  await assert.rejects(() => auth.authenticate(request()), ForbiddenException);
+  const wrong = request(); wrong.headers.cookie += "; __Secure-pq_automation=incorrect";
+  await assert.rejects(() => auth.authenticate(wrong), ForbiddenException);
+  const identity = { automation: false, email: "test+clerk_test_1@example.com" };
+  assert.throws(() => requireAutomationSecret(identity, {}, "staging", secret), ForbiddenException);
+  assert.throws(() => requireAutomationSecret(identity, valid.headers, "production", secret), ForbiddenException);
+  assert.throws(() => requireAutomationSecret(identity, valid.headers, "staging", undefined), ForbiddenException);
+  assert.throws(() => requireAutomationSecret(identity, { cookie: `__Secure-pq_automation=${secret}; __Secure-pq_automation=${secret}` }, "staging", secret), ForbiddenException);
+});
 
 test("real signed Clerk session accepted; invalid, expired and other-instance tokens rejected", async () => {
   assert.equal((await service().authenticate(request())).role, "operator");

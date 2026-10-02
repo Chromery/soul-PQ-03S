@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { clerk } from "@clerk/testing/playwright";
 
 test("search shortcut stays on one line and focuses search across viewport sizes", async ({ page }) => {
@@ -33,7 +33,7 @@ test("search shortcut stays on one line and focuses search across viewport sizes
       await page.keyboard.press("Meta+k");
       await expect(search).toBeFocused();
     }
-  await expect(page.getByLabel("Versione deploy 1.2.0")).toBeVisible();
+  await expect(page.getByLabel("Versione deploy 1.2.1")).toBeVisible();
   } finally {
     await clerk.signOut({ page });
   }

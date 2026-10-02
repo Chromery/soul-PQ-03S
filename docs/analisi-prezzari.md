@@ -1,5 +1,7 @@
 # Laboratorio prezzari — branch `analisi-prezzari`
 
+> Aggiornamento di consegna, 2 ottobre 2026: l'integrazione è confluita in staging e main ed è pubblicata in produzione dalla 1.2.0. Le sezioni seguenti descrivono l'analisi originale; i vincoli di conferma e i limiti di accuratezza rimangono validi. Il gate professionale sulle tariffe compete a Soul.
+
 ## Obiettivo e perimetro
 
 Prototipo pubblicato **solo in staging**, separato da `main`: trasformare i prezzari forniti in un catalogo interrogabile e proporre al tecnico varianti pertinenti, senza modificare automaticamente le valutazioni.

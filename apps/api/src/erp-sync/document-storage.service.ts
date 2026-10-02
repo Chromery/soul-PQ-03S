@@ -5,6 +5,7 @@ import type { GetObjectCommandOutput } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { Readable } from "node:stream";
+import { assertStorageKey, assertDocumentStorageKey, decodePdfUpload, safeStoragePart } from "./storage-policy.js";
 
 type StoreDocumentInput = {
   studioErpId: string;
@@ -37,24 +38,25 @@ export class DocumentStorageService {
   }
 
   async storeBase64Pdf(input: StoreDocumentInput) {
-    const buffer = this.decodeBase64(input.fileBase64, input.fileNome);
+    const buffer = await decodePdfUpload(input.fileBase64);
     const sha256 = createHash("sha256").update(buffer).digest("hex");
     if (input.expectedSha256 && input.expectedSha256.toLowerCase() !== sha256) {
       throw new BadRequestException(`SHA256 non coerente per ${input.fileNome}`);
     }
 
-    const safeStudy = safePathPart(input.studioErpId);
-    const safeProperty = safePathPart(input.immobileErpId);
-    const safeType = safePathPart(input.tipo);
+    const safeStudy = safeStoragePart(input.studioErpId);
+    const safeProperty = safeStoragePart(input.immobileErpId);
+    const safeType = safeStoragePart(input.tipo);
     const safeFileName = safeFile(input.fileNome);
     const storageKey = path.posix.join(
-      safePathPart(this.keyPrefix),
+      this.keyPrefix,
       safeStudy,
       safeProperty,
       safeType,
       `${sha256.slice(0, 12)}-${safeFileName}`,
     );
 
+    assertDocumentStorageKey(storageKey, this.keyPrefix);
     await this.putObject(storageKey, buffer, sha256, input.fileNome);
 
     return {
@@ -65,10 +67,12 @@ export class DocumentStorageService {
   }
 
   async readPdfObject(storageKey: string) {
+    assertDocumentStorageKey(storageKey, this.keyPrefix);
     return this.readObject(storageKey, "application/pdf");
   }
 
   async deleteObject(storageKey: string) {
+    assertDocumentStorageKey(storageKey, this.keyPrefix);
     await this.client().send(
       new DeleteObjectCommand({
         Bucket: this.requireBucket(),
@@ -78,6 +82,7 @@ export class DocumentStorageService {
   }
 
   async readObject(storageKey: string, fallbackContentType = "application/octet-stream") {
+    assertStorageKey(storageKey);
     try {
       const output = await this.client().send(
         new GetObjectCommand({
@@ -97,15 +102,6 @@ export class DocumentStorageService {
       }
       throw error;
     }
-  }
-
-  private decodeBase64(value: string, fileName: string) {
-    const payload = value.includes(",") ? value.slice(value.indexOf(",") + 1) : value;
-    if (!payload.trim()) throw new BadRequestException(`file_base64 mancante per ${fileName}`);
-
-    const buffer = Buffer.from(payload, "base64");
-    if (buffer.byteLength === 0) throw new BadRequestException(`file_base64 non valido per ${fileName}`);
-    return buffer;
   }
 
   private async putObject(key: string, body: Buffer, sha256: string, fileName: string) {
@@ -157,13 +153,9 @@ function optionalConfig(value?: string) {
   return trimmed || undefined;
 }
 
-function safePathPart(value: string) {
-  return value.trim().replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "unknown";
-}
-
 function safeFile(value: string) {
   const base = path.basename(value.trim());
-  return safePathPart(base || "documento.pdf");
+  return safeStoragePart(base || "documento.pdf");
 }
 
 async function toReadable(body: NonNullable<GetObjectCommandOutput["Body"]>) {
