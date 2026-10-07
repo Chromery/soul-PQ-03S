@@ -1,5 +1,6 @@
-const defaultQwenCaptchaEndpoint = "https://pq-soul.rainailab.com/api/qwen-captcha";
+const defaultQwenCaptchaEndpoint = "https://pq.soul.it/api/qwen-captcha";
 const hostedQwenCaptchaEndpoints = [
+  "https://pq.soul.it/api/qwen-captcha",
   "https://pq-soul.rainailab.com/api/qwen-captcha",
   "https://soul-pq-alpha.rainailab.com/api/qwen-captcha",
   "https://soul-pq-alpha-2.iggau.com/api/qwen-captcha"
@@ -35,6 +36,7 @@ function allowedQwenEndpoint(value) {
     const host = url.hostname.toLowerCase();
     const localHosts = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
     const pqHosts = new Set([
+      "pq.soul.it",
       "pq-soul.rainailab.com",
       "st-pq-soul.rainailab.com",
       "soul-pq-alpha.rainailab.com",
@@ -123,7 +125,7 @@ async function sendCaptchaToQwen(imageDataUrl, metadata) {
   const attempts = [];
 
   const configured = allowedQwenEndpoint(metadata?.options?.qwenCaptchaEndpoint);
-  if (configured && ["https://pq-soul.rainailab.com", "https://st-pq-soul.rainailab.com"].includes(new URL(configured).origin)) {
+  if (configured && ["https://pq.soul.it", "https://pq-soul.rainailab.com", "https://st-pq-soul.rainailab.com"].includes(new URL(configured).origin)) {
     const origin = new URL(configured).origin;
     const tabs = await chrome.tabs.query({ url: `${origin}/*` });
     for (const tab of tabs) {

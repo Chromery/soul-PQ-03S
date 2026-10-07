@@ -40,7 +40,8 @@ export function Authentication({ children }: { children: ReactNode }) {
   if (!key?.startsWith(expectedPrefix) || !["staging", "production"].includes(environment)) {
     return <AccessPage><h2>Stiamo preparando il tuo accesso.</h2><p>La configurazione dell’accesso sicuro è in corso. Contatta l’amministratore per maggiori informazioni.</p></AccessPage>;
   }
-  return <ClerkProvider publishableKey={key} localization={pqClerkLocalization} signInFallbackRedirectUrl="/" signUpFallbackRedirectUrl="/"
+  return <ClerkProvider publishableKey={key} proxyUrl={import.meta.env.VITE_CLERK_PROXY_URL || undefined} localization={pqClerkLocalization}
+    signInUrl="/sign-in" signUpUrl="/sign-up" afterSignOutUrl="/" signInFallbackRedirectUrl="/" signUpFallbackRedirectUrl="/"
     appearance={{ variables: { colorPrimary: "#006B94", borderRadius: "12px" } }}>
     <AuthenticatedWorkspace>{children}</AuthenticatedWorkspace>
   </ClerkProvider>;

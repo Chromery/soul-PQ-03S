@@ -5438,10 +5438,10 @@ function SettingsPage({ appVersion, onNotice }: { appVersion: string; onNotice: 
             </a>
             <a className="button secondary compact-button" href="/formaps-open/formaps-open-extension.zip" download>
               <Download size={15} />
-              Scarica estensione 0.65.0
+              Scarica estensione 0.65.1
             </a>
           </div>
-          <p className="settings-note">Con il login PQ serve forMaps Open 0.65.0. Aggiorna l’estensione da chrome://extensions, poi ricarica le schede PQ e forMaps. Mantieni aperta una scheda PQ con accesso effettuato nello stesso ambiente: la vecchia estensione non può leggere il CAPTCHA tramite il servizio protetto.</p>
+          <p className="settings-note">Per il nuovo dominio pq.soul.it serve forMaps Open 0.65.1. Aggiorna l’estensione da chrome://extensions, poi ricarica le schede PQ e forMaps. Mantieni aperta una scheda PQ con accesso effettuato nello stesso ambiente: la vecchia estensione non può leggere il CAPTCHA tramite il servizio protetto.</p>
         </div>
 
         <div className="detail-card settings-card">

@@ -1,0 +1,27 @@
+# One-time client cutover build, based on the verified 1.2.1 runtime images.
+# Build from the main worktree's release archive on the client VPS.
+# No credentials are copied into these images.
+FROM pq-soul-api:1.2.1 AS api-build
+COPY apps/api apps/api
+RUN npm run build --workspace @soul/api \
+  && npm test --workspace @soul/api
+
+FROM pq-soul-api:1.2.1 AS api
+COPY --from=api-build /app/apps/api/dist apps/api/dist
+
+FROM pq-soul-api:1.2.1 AS web-build
+COPY apps/web apps/web
+ARG VITE_API_URL=/api
+ARG VITE_APP_ENV=production
+ARG VITE_CLERK_PUBLISHABLE_KEY
+ARG VITE_CLERK_PROXY_URL
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_APP_ENV=$VITE_APP_ENV
+ENV VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY
+ENV VITE_CLERK_PROXY_URL=$VITE_CLERK_PROXY_URL
+RUN npm run build --workspace @soul/web
+
+FROM pq-soul-web:1.2.1 AS web
+COPY apps/web/docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY apps/web/docker/security-headers.conf /etc/nginx/pq-security-headers.conf
+COPY --from=web-build /app/apps/web/dist /usr/share/nginx/html

@@ -63,6 +63,18 @@ test("real signed Clerk session accepted; invalid, expired and other-instance to
 test("no Clerk configuration is fail-closed", async () => {
   await assert.rejects(() => new AuthService(new ConfigService({})).authenticate(request()), ServiceUnavailableException);
 });
+test("Clerk proxy issuer is accepted only for an explicitly configured trusted HTTPS origin", async () => {
+  const auth = service();
+  Object.assign(auth, { config: new ConfigService({ ...settings, CLERK_PROXY_URL: `${origin}/__clerk` }) });
+  assert.equal((await auth.authenticate(request(jwt({ iss: `${origin}/__clerk` })))).role, "operator");
+  assert.equal((await auth.authenticate(request())).role, "operator");
+  await assert.rejects(() => service().authenticate(request(jwt({ iss: `${origin}/__clerk` }))), UnauthorizedException);
+  await assert.rejects(() => auth.authenticate(request(jwt({ iss: `${origin}/other` }))), UnauthorizedException);
+  for (const proxy of ["https://evil.example/__clerk", "http://st-pq-soul.rainailab.com/__clerk", `${origin}/__clerk?x=1`, "not-a-url"]) {
+    Object.assign(auth, { config: new ConfigService({ ...settings, CLERK_PROXY_URL: proxy }) });
+    await assert.rejects(() => auth.authenticate(request()), ServiceUnavailableException);
+  }
+});
 test("signed-in but ungranted accounts cannot enter PQ", async () => {
   await assert.rejects(() => service({}).authenticate(request()), ForbiddenException);
   assert.throws(() => grantedRole({ pq: { role: "admin", environment: "production" } }, "staging"), ForbiddenException);

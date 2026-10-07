@@ -28,7 +28,18 @@ export class AuthService {
         jwtKey: this.config.get<string>("CLERK_JWT_KEY")?.replace(/\\n/g, "\n") });
     } catch { throw new UnauthorizedException("Sessione scaduta o non valida"); }
     const issuer = `https://${Buffer.from(publishableKey.slice(`pk_${keyType}_`.length), "base64").toString().replace(/\$$/, "")}`;
-    if (!claims.sub || !claims.sid || !claims.azp || !origins.includes(claims.azp) || claims.iss !== issuer ||
+    const issuers = [issuer];
+    const proxyUrl = this.config.get<string>("CLERK_PROXY_URL")?.trim();
+    if (proxyUrl) {
+      let proxy: URL;
+      try { proxy = new URL(proxyUrl); }
+      catch { throw new ServiceUnavailableException("Proxy di autenticazione non valido"); }
+      if (proxy.protocol !== "https:" || proxy.username || proxy.password || proxy.search || proxy.hash || !origins.includes(proxy.origin)) {
+        throw new ServiceUnavailableException("Proxy di autenticazione non valido");
+      }
+      issuers.push(proxy.href.replace(/\/$/, ""));
+    }
+    if (!claims.sub || !claims.sid || !claims.azp || !origins.includes(claims.azp) || !issuers.includes(claims.iss ?? "") ||
         (claims.sts !== undefined && claims.sts !== "active")) {
       throw new UnauthorizedException("Sessione non valida per questo ambiente");
     }
