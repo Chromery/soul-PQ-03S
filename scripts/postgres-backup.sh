@@ -32,7 +32,7 @@ run_backup() {
 upload_backup() {
   backup_file="$1"
   if [ -z "${S3_ENDPOINT:-}" ] || [ -z "${S3_BUCKET:-}" ] || [ -z "${S3_ACCESS_KEY_ID:-}" ] || [ -z "${S3_SECRET_ACCESS_KEY:-}" ]; then
-    echo "Upload B2 saltato: configurazione S3/B2 incompleta"
+    echo "Upload S3 saltato: configurazione S3 incompleta"
     return 1
   fi
 
@@ -40,6 +40,10 @@ upload_backup() {
   export AWS_SECRET_ACCESS_KEY="$S3_SECRET_ACCESS_KEY"
   export AWS_DEFAULT_REGION="${S3_REGION:-us-west-004}"
   export AWS_EC2_METADATA_DISABLED=true
+  # S3-compatible providers may reject the AWS CLI's optional streaming/multipart
+  # checksum extensions. Keep required checksums and SigV4/TLS enabled.
+  export AWS_REQUEST_CHECKSUM_CALCULATION="${AWS_REQUEST_CHECKSUM_CALCULATION:-when_required}"
+  export AWS_RESPONSE_CHECKSUM_VALIDATION="${AWS_RESPONSE_CHECKSUM_VALIDATION:-when_required}"
 
   aws_config_dir="/tmp/aws"
   mkdir -p "$aws_config_dir"
@@ -50,9 +54,9 @@ upload_backup() {
 
   remote_key="${remote_prefix%/}/$(basename "$backup_file")"
   if aws --endpoint-url "$S3_ENDPOINT" s3 cp "$backup_file" "s3://${S3_BUCKET}/${remote_key}" --only-show-errors; then
-    echo "Backup PostgreSQL caricato su B2: s3://${S3_BUCKET}/${remote_key}"
+    echo "Backup PostgreSQL caricato su S3: s3://${S3_BUCKET}/${remote_key}"
   else
-    echo "Upload B2 fallito per $backup_file" >&2
+    echo "Upload S3 fallito per $backup_file" >&2
     return 1
   fi
 }

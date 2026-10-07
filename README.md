@@ -17,8 +17,13 @@ I limiti dell'estrazione dei prezzari sono descritti in [analisi prezzari](docs/
 
 Seguire [AGENTS.md](AGENTS.md): worktree `staging` e `main`, progetti Compose e database distinti. Non distribuire produzione dal worktree di staging.
 
-- Produzione: `https://pq-soul.rainailab.com`, progetto `soul-prospect-qualifier`.
+- Produzione: `https://pq.soul.it`, VPS cliente, directory `/srv/soul-pq`, progetto `soul-prospect-qualifier` (profilo Compose `live`).
 - Staging: `https://st-pq-soul.rainailab.com`, progetto `soul-pq-staging`.
+- Vecchio `pq-soul.rainailab.com`: avviso di trasferimento e ponte API ERP verso la nuova produzione. Il database locale e conservato in sola lettura; API e backup locali non devono ripartire.
+
+Dal 7 ottobre 2026 Clerk usa il dominio `pq.soul.it` con il proxy ufficiale same-origin `/__clerk`. Configurare `VITE_CLERK_PROXY_URL` e `CLERK_PROXY_URL` allo stesso URL HTTPS; la chiave segreta del proxy resta in un file Nginx 0600 sulla VPS, mai in Git. Gli account e i ruoli sono quelli dell'istanza di produzione esistente. Le registrazioni email sul dominio cliente richiedono i record DNS indicati da Clerk.
+
+Lo storage produzione e Aruba `https://r3-it.storage.cloud.it`, bucket privato `soul-pq-production`, firma `us-east-1`, path-style, prefisso `erp`. Il backup remoto usa `backups/pq-soul-it/postgres`. forMaps richiede l'estensione **0.65.1** per il nuovo dominio.
 
 ## Installazione e migrazione
 
@@ -31,7 +36,7 @@ Docker Engine con Compose v2, Git; Node 22 per gli script locali. Le immagini in
 5. Solo sul nuovo ambiente vuoto, avviare PostgreSQL, ripristinare il dump e applicare `npm run db:migrate:deploy --workspace @soul/api` nel container API.
 6. Avviare API/web e verificare autenticazione, ERP, documenti, editor e PDF prima del cambio traffico.
 
-Comandi di build, dal clone/worktree corretto:
+Comandi generici di prima installazione, dal clone/worktree corretto (non eseguirli sul vecchio archivio locale). La VPS cliente usa il Compose di rilascio image-only e il profilo `live`:
 
 ```sh
 docker compose -p soul-prospect-qualifier build api web postgres-backup
@@ -68,6 +73,8 @@ L'automazione usa un'identità Clerk dedicata e, dalla 1.2.1, un secondo segreto
 - `backups/postgres`: dump completi; i `.part` non sono backup validi.
 
 Il worker crea un dump ogni giorno alle 03:00 Europe/Rome, verifica l'indice e lo carica nello storage remoto. Conservazione locale 14 giorni; la retention remota richiede una policy del provider. Un fallimento di dump/upload restituisce errore. Il namespace remoto staging è `staging/backups/postgres`, distinto dalla produzione.
+
+Il worker imposta i checksum opzionali AWS su `when_required` per compatibilita con Aruba; firma SigV4 e HTTPS restano attivi. Il caricamento e stato collaudato con download completo del dump e confronto SHA-256. Il backup pre-migrazione e in `backups/migration-20261007T130528Z` sul vecchio host e `/srv/pq-migration/cutover-20261007T130528Z` sulla VPS cliente: dump finale, snapshot completo dei file S3, repository, configurazione privata e verifiche di integrita. Non pubblicare queste cartelle.
 
 Non cambiare `POSTGRES_PASSWORD` nel solo `.env` su un DB esistente: occorre anche ruotare la password del ruolo PostgreSQL e riallineare API/worker. Non cambiare il token ERP di produzione senza coordinare l'integratore.
 
