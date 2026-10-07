@@ -78,13 +78,13 @@ import {
 } from "./lotValuation";
 import type { LotValuation, LotValuationMode } from "./lotValuation";
 import { ManualOverrideIndicator } from "./ManualOverrideIndicator";
-import { EmptyWorkspace, WelcomeModal, TestStudiesToggle } from "./WelcomeExperience";
+import { EmptyWorkspace, WelcomeModal, SoulMigrationWelcomeModal, TestStudiesToggle } from "./WelcomeExperience";
 import { CurrentOperator, useIdentity } from "./Auth";
 import { PropertyGroupingSuggestions } from "./PropertyGroupingSuggestions";
 import { PriceRuleLab } from "./PriceRules";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.2.1";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.2.2";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -2686,12 +2686,13 @@ function mergeActivityEvents(current: ActivityEvent[], incoming: ActivityEvent[]
 }
 
 function App() {
-  const { profile, markWelcomeSeen } = useIdentity();
+  const { profile, markWelcomeSeen, markSoulMigrationWelcomeSeen } = useIdentity();
   const [studies, setStudies] = useState<FeasibilityStudy[]>([]);
   const [studiesLoading, setStudiesLoading] = useState(true);
   const [studiesError, setStudiesError] = useState("");
   const [showTestStudies, setShowTestStudies] = useState(false);
-  const [welcomeOpen, setWelcomeOpen] = useState(() => !profile.welcomeSeenAt);
+  const [migrationWelcomeOpen, setMigrationWelcomeOpen] = useState(() => import.meta.env.VITE_APP_ENV === "production" && !profile.soulMigrationWelcomeSeenAt);
+  const [welcomeOpen, setWelcomeOpen] = useState(() => import.meta.env.VITE_APP_ENV !== "production" && !profile.welcomeSeenAt);
   const visibleStudies = useMemo(() => studies.filter((study) => showTestStudies || !study.isTest), [studies, showTestStudies]);
   const testStudyCount = studies.filter((study) => study.isTest).length;
   const [route, setRoute] = useState<AppRoute>(routeFromLocation);
@@ -4302,7 +4303,11 @@ function App() {
         </section>
 
       </main>
-      {welcomeOpen && <WelcomeModal onClose={() => {
+      {migrationWelcomeOpen && <SoulMigrationWelcomeModal onClose={() => {
+        setMigrationWelcomeOpen(false);
+        void markSoulMigrationWelcomeSeen().catch(() => setToast("Benvenuto non salvato: verrà riproposto al prossimo accesso."));
+      }} />}
+      {!migrationWelcomeOpen && welcomeOpen && <WelcomeModal onClose={() => {
         setWelcomeOpen(false);
         if (!profile.welcomeSeenAt) void markWelcomeSeen().catch(() => setToast("Benvenuto non salvato: verrà riproposto al prossimo accesso."));
       }} />}

@@ -3,8 +3,8 @@ import { passwordLengthMessage, pqClerkLocalization } from "./clerk-localization
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import "./auth.css";
 
-type Profile = { userId: string; name: string; firstName: string; lastName: string; jobTitle: string | null; email: string; role: "admin" | "operator"; automation: boolean; welcomeSeenAt: string | null };
-const IdentityContext = createContext<{ profile: Profile; markWelcomeSeen: () => Promise<void> } | null>(null);
+type Profile = { userId: string; name: string; firstName: string; lastName: string; jobTitle: string | null; email: string; role: "admin" | "operator"; automation: boolean; welcomeSeenAt: string | null; soulMigrationWelcomeSeenAt: string | null };
+const IdentityContext = createContext<{ profile: Profile; markWelcomeSeen: () => Promise<void>; markSoulMigrationWelcomeSeen: () => Promise<void> } | null>(null);
 export function useIdentity() {
   const identity = useContext(IdentityContext);
   if (!identity) throw new Error("Profilo autenticato richiesto");
@@ -80,5 +80,11 @@ function AuthenticatedWorkspace({ children }: { children: ReactNode }) {
     const saved = await response.json() as { welcomeSeenAt: string };
     setProfile((current) => current ? { ...current, welcomeSeenAt: saved.welcomeSeenAt } : current);
   }
-  return <IdentityContext.Provider value={{ profile, markWelcomeSeen }}><div key={profile.userId}>{children}</div></IdentityContext.Provider>;
+  async function markSoulMigrationWelcomeSeen() {
+    const response = await fetch("/api/auth/soul-migration-welcome-seen", { method: "POST", credentials: "same-origin" });
+    if (!response.ok) throw new Error("Non è stato possibile salvare il benvenuto.");
+    const saved = await response.json() as { soulMigrationWelcomeSeenAt: string };
+    setProfile((current) => current ? { ...current, soulMigrationWelcomeSeenAt: saved.soulMigrationWelcomeSeenAt } : current);
+  }
+  return <IdentityContext.Provider value={{ profile, markWelcomeSeen, markSoulMigrationWelcomeSeen }}><div key={profile.userId}>{children}</div></IdentityContext.Provider>;
 }

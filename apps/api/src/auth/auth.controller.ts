@@ -8,7 +8,8 @@ export class AuthController {
   @Get("me")
   async me(@Req() request: AuthenticatedRequest) {
     const preferences = await this.prisma.userPreferences.findUnique({ where: { clerkUserId: request.pqUser.userId } });
-    return { ...request.pqUser, welcomeSeenAt: preferences?.welcomeSeenAt ?? null };
+    return { ...request.pqUser, welcomeSeenAt: preferences?.welcomeSeenAt ?? null,
+      soulMigrationWelcomeSeenAt: preferences?.soulMigrationWelcomeSeenAt ?? null };
   }
   @Post("welcome-seen")
   async welcomeSeen(@Req() request: AuthenticatedRequest) {
@@ -18,5 +19,18 @@ export class AuthController {
       update: {},
     });
     return { welcomeSeenAt: preferences.welcomeSeenAt };
+  }
+
+  @Post("soul-migration-welcome-seen")
+  async soulMigrationWelcomeSeen(@Req() request: AuthenticatedRequest) {
+    const clerkUserId = request.pqUser.userId;
+    await this.prisma.userPreferences.upsert({ where: { clerkUserId },
+      create: { clerkUserId }, update: {} });
+    await this.prisma.userPreferences.updateMany({
+      where: { clerkUserId, soulMigrationWelcomeSeenAt: null },
+      data: { soulMigrationWelcomeSeenAt: new Date() },
+    });
+    const preferences = await this.prisma.userPreferences.findUniqueOrThrow({ where: { clerkUserId } });
+    return { soulMigrationWelcomeSeenAt: preferences.soulMigrationWelcomeSeenAt };
   }
 }

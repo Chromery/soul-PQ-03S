@@ -1,4 +1,4 @@
-# Soul Prospect Qualifier — 1.2.1
+# Soul Prospect Qualifier — 1.2.2
 
 Piattaforma interna Soul per studi di fattibilità, immobili, planimetrie, stime e presentazioni.
 

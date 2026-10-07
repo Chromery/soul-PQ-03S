@@ -176,6 +176,34 @@ test("welcome timestamp is persisted per authenticated user and idempotent", asy
   assert.equal((await controller.me({ pqUser: { userId: "second" } } as any)).welcomeSeenAt, null);
 });
 
+test("Soul migration welcome is independent, idempotent and isolated per user", async () => {
+  const previousWelcome = new Date("2026-09-01T10:00:00Z");
+  const rows = new Map<string, any>([["first", { welcomeSeenAt: previousWelcome, soulMigrationWelcomeSeenAt: null }]]);
+  const prisma = { userPreferences: {
+    findUnique: async ({ where }: any) => rows.get(where.clerkUserId) ?? null,
+    findUniqueOrThrow: async ({ where }: any) => rows.get(where.clerkUserId),
+    upsert: async ({ where }: any) => {
+      if (!rows.has(where.clerkUserId)) rows.set(where.clerkUserId, { welcomeSeenAt: new Date(), soulMigrationWelcomeSeenAt: null });
+      return rows.get(where.clerkUserId);
+    },
+    updateMany: async ({ where, data }: any) => {
+      assert.equal(where.soulMigrationWelcomeSeenAt, null);
+      const row = rows.get(where.clerkUserId);
+      if (row.soulMigrationWelcomeSeenAt === null) Object.assign(row, data);
+    },
+  } } as unknown as PrismaService;
+  const controller = new AuthController(prisma);
+  const req = { pqUser: { userId: "first" } } as any;
+  assert.equal((await controller.me(req)).soulMigrationWelcomeSeenAt, null);
+  const first = await controller.soulMigrationWelcomeSeen(req);
+  assert.ok(first.soulMigrationWelcomeSeenAt instanceof Date);
+  assert.equal((await controller.soulMigrationWelcomeSeen(req)).soulMigrationWelcomeSeenAt, first.soulMigrationWelcomeSeenAt);
+  assert.equal((await controller.me(req)).welcomeSeenAt, previousWelcome);
+  const second = { pqUser: { userId: "second" } } as any;
+  assert.equal((await controller.me(second)).soulMigrationWelcomeSeenAt, null);
+  assert.ok((await controller.soulMigrationWelcomeSeen(second)).soulMigrationWelcomeSeenAt instanceof Date);
+});
+
 test("HTTP routes reject anonymous requests including direct downloads and enforce roles", async () => {
   class Studies {
     list() { return [{ id: "fixture" }]; }

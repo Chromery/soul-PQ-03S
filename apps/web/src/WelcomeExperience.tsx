@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { ArrowRight, Building2, FileDown, Layers3, RefreshCw, X } from "lucide-react";
+import { ArrowRight, Building2, Check, FileDown, Layers3, RefreshCw, X } from "lucide-react";
 import "./welcomeExperience.css";
 
 const features = [
@@ -7,6 +7,30 @@ const features = [
   { icon: Layers3, title: "Dalla planimetria alla valutazione", text: "Misura le aree e confronta rendita catastale e IMU." },
   { icon: FileDown, title: "Dall’analisi alla presentazione", text: "Prepara il PDF v3, annota le valutazioni e aggiorna l’esito dello studio." },
 ];
+
+export function SoulMigrationWelcomeModal({ onClose }: { onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    const previous = document.activeElement as HTMLElement | null;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    element?.showModal();
+    return () => {
+      element?.close();
+      document.body.style.overflow = overflow;
+      previous?.focus();
+    };
+  }, []);
+  return <dialog ref={dialog} className="pq-welcome pq-migration-welcome" aria-labelledby="pq-migration-title"
+    onCancel={(event) => { event.preventDefault(); onClose(); }}>
+    <div className="pq-welcome-blue">
+      <button autoFocus className="pq-welcome-close" onClick={onClose} aria-label="Chiudi il benvenuto"><X size={20} /></button>
+      <span className="pq-migration-check" aria-hidden="true"><Check size={36} strokeWidth={2} /></span>
+      <h1 id="pq-migration-title">Migrazione al server Soul riuscita, benvenuto</h1>
+    </div>
+  </dialog>;
+}
 
 function PlanIllustration() {
   return <div className="pq-plan-art" aria-hidden="true">

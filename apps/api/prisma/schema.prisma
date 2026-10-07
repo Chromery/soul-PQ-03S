@@ -10,6 +10,7 @@ datasource db {
 model UserPreferences {
   clerkUserId   String   @id
   welcomeSeenAt DateTime @default(now())
+  soulMigrationWelcomeSeenAt DateTime?
 }
 
 enum DocumentType {

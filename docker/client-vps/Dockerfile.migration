@@ -9,6 +9,8 @@ RUN npm run build --workspace @soul/api \
 
 FROM pq-soul-api:1.2.1 AS api
 COPY --from=api-build /app/apps/api/dist apps/api/dist
+COPY --from=api-build /app/apps/api/src/generated apps/api/src/generated
+COPY apps/api/prisma apps/api/prisma
 
 FROM pq-soul-api:1.2.1 AS web-build
 RUN npm ci --include=dev --workspace @soul/web --include-workspace-root
