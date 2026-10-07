@@ -3,6 +3,7 @@
 # No credentials are copied into these images.
 FROM pq-soul-api:1.2.1 AS api-build
 COPY apps/api apps/api
+COPY apps/web/src apps/web/src
 RUN npm run build --workspace @soul/api \
   && npm test --workspace @soul/api
 
