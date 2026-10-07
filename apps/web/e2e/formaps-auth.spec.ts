@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-test("forMaps 0.65.0 relays through the signed-in PQ tab without exposing tokens", async () => {
+test("forMaps 0.65.1 relays through the signed-in PQ tab without exposing tokens", async () => {
   test.setTimeout(90_000);
   const profile = await mkdtemp(path.join(tmpdir(), "pq-extension-e2e-"));
   const extension = path.resolve("public/formaps-open/extension");
@@ -48,7 +48,7 @@ test("forMaps 0.65.0 relays through the signed-in PQ tab without exposing tokens
       });
       return { version, reply };
     });
-    expect(result.version).toBe("0.65.0");
+    expect(result.version).toBe("0.65.1");
     expect(result.reply.ok).toBe(true);
     expect(result.reply.response.result.captchaCode).toBe("FIXTURE");
     expect(relayed).toBe(1);

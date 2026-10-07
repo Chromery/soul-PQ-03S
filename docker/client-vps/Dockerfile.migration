@@ -11,6 +11,7 @@ FROM pq-soul-api:1.2.1 AS api
 COPY --from=api-build /app/apps/api/dist apps/api/dist
 
 FROM pq-soul-api:1.2.1 AS web-build
+RUN npm ci --workspace @soul/web --include-workspace-root
 COPY apps/web apps/web
 ARG VITE_API_URL=/api
 ARG VITE_APP_ENV=production
