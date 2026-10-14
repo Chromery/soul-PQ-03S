@@ -29,6 +29,7 @@ Catalogo generato da `npm run prezzari:import`. Lo zip e la cartella estratta re
 | Latina | PROVINCIA | Lazio | Latina D-E.pdf |  | 158191 |
 | Lazio | REGIONE | Lazio | Roma_Lazio_fototeca storica.txt |  | 115 |
 | Roma | PROVINCIA | Lazio | Roma Prontuario-cat-D-E-Roma-07-07-1995.pdf | 1995 | 13593436 |
+| Roma | PROVINCIA | Lazio | Roma Prontuario dicembre 2025.pdf | 2025 | 2584902 |
 | Genova | PROVINCIA | Liguria | Genova PRONTUARIO-DP-GE-12-DICEMBRE-2019-ALL.pdf | 2019 | 1814003 |
 | Savona | PROVINCIA | Liguria | Savona 2019.pdf | 2019 | 2011630 |
 | Savona | PROVINCIA | Liguria | Savona prontuario 2018.pdf | 2018 | 2011630 |

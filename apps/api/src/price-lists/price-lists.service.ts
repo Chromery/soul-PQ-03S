@@ -94,7 +94,7 @@ type PriceListMatch = {
   distanceKm?: number;
 };
 
-function rankPriceLists(property: PropertyWithStudy, priceLists: PriceList[]): PriceListMatch[] {
+export function rankPriceLists(property: PropertyWithStudy, priceLists: PriceList[]): PriceListMatch[] {
   const target = territoryForProperty(property);
 
   const matches: PriceListMatch[] = [];

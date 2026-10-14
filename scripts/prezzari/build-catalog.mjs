@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { ROMA_2025_SHA256, romaPriceContext } from "./roma-2025.mjs";
 import {
   candidatePage,
   hash,
@@ -261,6 +262,16 @@ for (const source of inventory) {
     document.epoch = "1988-1989";
     document.includesCharges = true;
   }
+  if (source.sha256 === ROMA_2025_SHA256) {
+    document.year = 2025;
+    document.epoch = "1988-1989";
+    document.includesCharges = false;
+    document.notes = [
+      "Copertina: Roma, dicembre 2025. Il nome del file ricevuto indicava edito 02.2026, ma il documento dichiara dicembre 2025. Pagine PDF 45–46: costi tecnici di costruzione, esclusi terreno e oneri indiretti (spese tecniche, oneri concessori e di urbanizzazione, oneri finanziari e profitto).",
+      "Pagina PDF 66: valutare esplicitamente i correttivi di localizzazione, dimensione e qualità (ciascuno ±5%); non applicati automaticamente. Gli allegati distinguono incidenze percentuali, settori e zone OMI: non sono tutti prezzi al metro quadro.",
+      "C1 indica la componente suolo, non una categoria catastale. Q_media è una quotazione OMI di riferimento, non il prezzo da applicare al lotto. L'originale e le condizioni della singola voce devono essere verificati dal tecnico.",
+    ];
+  }
   if (source.file === "Lecco.pdf") {
     document.year = 2015;
     document.includesCharges = false;
@@ -328,7 +339,11 @@ for (const source of inventory) {
       )
         continue;
       const review = [];
-      const quote = compact(r.quote).slice(0, 2500);
+      let quote = compact(r.quote).slice(0, 2500);
+      if (source.sha256 === ROMA_2025_SHA256 && Number(r.page) >= 67 && Number(r.page) <= 87 && !compact(page.text).includes(quote)) {
+        const context = romaPriceContext(page.text, r.valueMin, Number.isFinite(r.valueMax) ? r.valueMax : null);
+        if (context && compact(context).length <= 2500) quote = compact(context);
+      }
       if (!quote || !compact(page.text).includes(quote))
         review.push("Estratto non coincidente con il testo sorgente");
       const tokens = numberTokens(quote);
@@ -454,6 +469,8 @@ for (const source of inventory) {
         review.push(
           "Pagina di esempio o modello di stima compilato: non tariffa autonoma.",
         );
+      if (source.sha256 === ROMA_2025_SHA256 && Number(r.page) < 62)
+        review.push("Riferimenti OMI e verifiche di congruenza: non sono tariffe finali da applicare direttamente.");
       if (unit === "m3" && nonBuildingVolume(r.label))
         review.push(
           "Volume di un’opera o componente, non volume dell’edificio: non convertire con l’altezza dell’area.",
@@ -562,6 +579,20 @@ for (const source of inventory) {
         /\b(?:cs|cu|costo(?: unitario)?)\s*=|\d\s*\+\s*\d\s*[*×]\s*\(/i.test(
           `${rule.quote} ${rule.qualifiers}`,
         );
+      if (source.sha256 === ROMA_2025_SHA256 && Number(r.page) === 73 && /urbanizzazione/i.test(r.label)) {
+        rule.evidence = "review";
+        rule.reviewReasons.push("Urbanizzazione del centro commerciale: non è il valore del terreno nudo. Non applicare come prezzo del lotto.");
+      }
+      if (source.sha256 === ROMA_2025_SHA256 && kind === "land" && Number(r.page) >= 122) {
+        rule.ordinary = false; // A listed OMI zone is not a statistically typical scenario.
+        const zone = /\bzona\s+([A-Z]\d{1,3})\b/i.exec(r.label)?.[1]
+          || /\bzona\s+([A-Z]\d{1,3})\b/i.exec(qualifiers)?.[1];
+        if (zone && new RegExp(`\\b${zone}\\b`, "i").test(quote)) rule.zone = zone.toUpperCase();
+        else {
+          rule.evidence = "review";
+          rule.reviewReasons.push("Zona OMI non identificata con certezza: verificare l'allegato territoriale.");
+        }
+      }
       if (
         document.preferredForRegion &&
         rule.page === 16 &&

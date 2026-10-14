@@ -3,6 +3,34 @@ import { clerk } from "@clerk/testing/playwright";
 import { PDFDocument } from "pdf-lib";
 import { createHash } from "node:crypto";
 
+test("Rome 2025 source is intact and OMI land proposals require an explicit zone", async ({ page }) => {
+  test.setTimeout(90000);
+  await page.goto("/");
+  await clerk.signIn({page,emailAddress:process.env.E2E_CLERK_USER_EMAIL!});
+  const id="bbcbedb7de8fc3a0cfb623f5c456d11069e6e8cac44bde28967bc3ff4187f81d";
+  const original=await page.evaluate(async id=>{
+    const response=await fetch(`/api/price-rules/documents/${id}/source`);
+    return {status:response.status,bytes:Array.from(new Uint8Array(await response.arrayBuffer()))};
+  },id);
+  expect(original.status).toBe(200);
+  expect(createHash("sha256").update(Buffer.from(original.bytes)).digest("hex")).toBe(id);
+  await page.goto("/prezzari");
+  await page.getByLabel("Provincia",{exact:true}).selectOption("RM");
+  await page.getByText("Caratteristiche e fonti",{exact:true}).click();
+  await page.getByLabel("Documento specifico").selectOption(id);
+  await page.getByLabel("Comune",{exact:true}).fill("Roma");
+  await page.getByLabel("Tipologia area",{exact:true}).selectOption("lotto");
+  await page.getByLabel("Zona OMI di Roma / provincia").fill("B1");
+  await expect(page.locator(".price-results.is-loading")).toHaveCount(0);
+  await expect(page.locator(".price-card").first()).toContainText("B1");
+  await expect(page.locator(".price-card").filter({hasText:"Zona necessaria"})).toHaveCount(0);
+  for(const width of [1366,390]) {
+    await page.setViewportSize({width,height:900});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);
+    if(process.env.PQ_GROUPING_REVIEW_DIR) await page.screenshot({path:`${process.env.PQ_GROUPING_REVIEW_DIR}/roma-${width}.png`});
+  }
+});
+
 test("price catalog requires authentication and serves the exact source to a staging operator", async ({
   page,
   request,
@@ -38,8 +66,8 @@ test("price catalog requires authentication and serves the exact source to a sta
       ).json(),
     };
   });
-  expect(result.catalog.totals.files).toBe(120);
-  expect(result.catalog.totals.documents).toBe(116);
+  expect(result.catalog.totals.files).toBe(121);
+  expect(result.catalog.totals.documents).toBe(117);
   expect(result.status).toBe(200);
   expect(result.mime).toContain("application/pdf");
   expect(

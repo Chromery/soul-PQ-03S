@@ -144,6 +144,8 @@ export function calculatePriceProposal(
     missingInputs.push(
       "Zona necessaria: indica il comune o scegli la zona documentata",
     );
+  else if (rule.zone && query.zone !== rule.zone)
+    missingInputs.push("Zona non compatibile con questa voce territoriale");
   if ((document.includesLand || rule.includesLand) && rule.kind === "building")
     missingInputs.push(
       "Prezzo comprensivo del suolo: verificare separatamente il modello di lotto dell’editor. Applicazione diretta disabilitata per evitare duplicazioni.",

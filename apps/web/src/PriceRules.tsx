@@ -234,6 +234,7 @@ export function PriceRuleBrowser(props: BrowserProps) {
     [area, setArea] = useState(""),
     [zone, setZone] = useState("");
   const [scenario, setScenario] = useState("");
+  useEffect(() => { setZone(""); }, [province, municipality, documentId]);
   useEffect(() => {
     if (scenario) {
       setScenario("");
@@ -543,7 +544,12 @@ export function PriceRuleBrowser(props: BrowserProps) {
               disegnata.
             </small>
           </label>
-          <label>
+          {province === "RM" || selectedDocument?.province === "RM" ? <label>
+            Zona OMI di Roma / provincia
+            <input aria-label="Zona OMI di Roma / provincia" value={zone} maxLength={4}
+              placeholder="Es. B1, E138" onChange={(e) => setZone(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))} />
+            <small>Per i terreni scegli la zona indicata nell'allegato. Non viene dedotta dall'indirizzo.</small>
+          </label> : <label>
             Zona di Bergamo
             <select
               aria-label="Zona di Bergamo"
@@ -563,7 +569,7 @@ export function PriceRuleBrowser(props: BrowserProps) {
                 ? `Zona individuata: ${results.zone}`
                 : "Nessuna zona presunta"}
             </small>
-          </label>
+          </label>}
           <label>
             Documento specifico
             <select

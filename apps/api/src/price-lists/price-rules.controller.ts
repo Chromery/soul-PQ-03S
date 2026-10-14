@@ -63,7 +63,7 @@ export function parsePriceQuery(raw: Record<string, unknown>): PriceQuery {
     throw new BadRequestException("Destinazione non valida");
   if (result.documentId && !/^[a-f0-9]{64}$/.test(String(result.documentId)))
     throw new BadRequestException("Documento non valido");
-  if (result.zone && !/^[A-E]$/.test(String(result.zone)))
+  if (result.zone && !/^(?:[A-E]|[A-Z]\d{1,3})$/.test(String(result.zone)))
     throw new BadRequestException("Zona non valida");
   return result as PriceQuery;
 }

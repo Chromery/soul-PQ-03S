@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PriceListsService } from "../src/price-lists/price-lists.service.js";
+import { PriceListsService, rankPriceLists } from "../src/price-lists/price-lists.service.js";
+
+test("Roma 2025 is preferred to 1995 for RM properties, not for a different province", () => {
+  const base = { comune:null, provincia:"RM", region:"Lazio", latitude:null, longitude:null, priority:40 };
+  const sources = [{...base,id:"roma-1995",year:1995},{...base,id:"roma-2025",year:2025}];
+  const property = {comune:"FIUMICINO",provincia:"RM",address:"",study:{provincia:"MI",region:"Lombardia"}};
+  const matches = rankPriceLists(property as never, sources as never);
+  assert.equal(matches[0].priceList.id,"roma-2025");
+  assert.equal(matches[0].reason,"Provincia corrispondente");
+  assert.equal(sources[0].id,"roma-1995");
+  assert.ok(!rankPriceLists({...property,comune:"MILANO",provincia:"MI"} as never,sources as never)
+    .some(m=>m.reason === "Provincia corrispondente"));
+});
 
 test("startup backfill is non-blocking and only targets missing associations", async () => {
   let queries = 0, filter: unknown;

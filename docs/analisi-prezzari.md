@@ -123,6 +123,39 @@ La selezione delle pagine candidate usa indicatori di valuta/unità e tabelle nu
 
 ## Riproducibilità
 
+### Integrazione Roma, dicembre 2025 (14 ottobre 2026)
+
+Fonte: `00_prezzari2026/Roma Prontuario dicembre 2025.pdf`, SHA-256
+`bbcbedb7de8fc3a0cfb623f5c456d11069e6e8cac44bde28967bc3ff4187f81d`.
+Il file ricevuto menzionava febbraio 2026; si conserva invece la data dichiarata
+in copertina, dicembre 2025. Le 153 pagine hanno testo nativo, senza OCR.
+L'epoca economica rimane 1988–1989; i costi escludono suolo e oneri indiretti.
+I correttivi facoltativi di localizzazione, dimensione e qualità (±5% ciascuno)
+sono segnalati, non applicati automaticamente.
+
+Le tabelle costruttive e gli allegati territoriali sono estratti con la pipeline
+esistente e sottoposti alla seconda verifica indipendente. Q_media non è il valore
+del terreno e C1 non è una categoria catastale. L'urbanizzazione del centro
+commerciale a pagina PDF 73 è esclusa dalle proposte applicabili al lotto.
+Le tariffe territoriali dei terreni richiedono comune e zona OMI esatti; la zona
+non viene presunta dall'indirizzo. Restano distinti i valori per camera/posto,
+le percentuali e i casi non confermati. L'edizione Roma 1995 è mantenuta.
+
+Per aggiungere questa fonte al DB/S3, senza il reimport globale:
+
+```sh
+node apps/api/scripts/import-catalog-source.mjs bbcbedb7de8fc3a0cfb623f5c456d11069e6e8cac44bde28967bc3ff4187f81d
+# Dopo aver verificato il riepilogo dry-run e il backup:
+node apps/api/scripts/import-catalog-source.mjs bbcbedb7de8fc3a0cfb623f5c456d11069e6e8cac44bde28967bc3ff4187f81d --apply
+```
+
+Eseguire nel container API del corretto ambiente, con la fonte montata in
+`PRICE_RULE_SOURCE_DIR`. Il comando verifica SHA-256 locale e dopo download S3,
+inserisce solo questa fonte e aggiorna le associazioni degli immobili della
+provincia corrispondente. Non modifica aree, prezzi scelti o valutazioni salvate.
+Il PDF è un asset esterno a Git: trasferirlo anche alla directory sorgenti della
+VPS, oltre al catalogo compilato incluso nella release.
+
 Originali: `00_prezzari2026/`, montati **in sola lettura** nell’API. Non sono incorporati in Git né copiati nel database. Il catalogo derivato versionato è `apps/api/src/price-lists/data/catalog.generated.json`.
 
 La versione del catalogo contiene anche un’impronta del contenuto: due revisioni dell’estrazione non vengono confuse solo perché generate nello stesso giorno. Questa versione viene conservata nella provenienza del prezzo applicato.

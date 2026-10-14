@@ -1,8 +1,8 @@
 # Copertura del laboratorio prezzari
 
-Generato: 2026-09-19T17:55:50.580Z. Catalogo: `2026-09-19.1+4c0dfcccf33c`. Modello: `deepseek-v4-flash`. Prompt estrazione: `1d514faae90a`; controllo semantico: `7601effc8eb8`.
+Generato: 2026-10-14T21:22:38.620Z. Catalogo: `2026-09-19.1+215636dea8f6`. Modello: `deepseek-v4-flash`. Prompt estrazione: `1d514faae90a`; controllo semantico: `7601effc8eb8`.
 
-Inventario: **120 file**, **116 fonti uniche**, **3635 pagine/blocchi**. Voci estratte: **31349**; riscontro letterale superato: **20362**; quarantena: **10987**; seconda verifica superata: **11268**; seconda verifica da completare: **0**.
+Inventario: **121 file**, **117 fonti uniche**, **3788 pagine/blocchi**. Voci estratte: **33456**; riscontro letterale superato: **22393**; quarantena: **11063**; seconda verifica superata: **12732**; seconda verifica da completare: **0**.
 
 Le voci con verifica superata possono comunque richiedere altezza, comune, zona o altre condizioni prima di essere applicabili. Le fonti non sono tutte tariffari: vi sono note, esempi, calcolatori e copie identiche. “Analizzato” significa copertura delle pagine candidate, non certificazione di ogni cella. La consultazione della fonte e la conferma del tecnico restano obbligatorie.
 
@@ -93,6 +93,7 @@ Le varianti complete sono scaricabili da **Prezzari → Scarica tutte le voci (C
 | Reggio Calabria — REGGIO CALABRIA.pdf | 30 | 2 | 18/18 | 198 | 151 | 49 | 47 | Analizzato |
 | Reggio Emilia — Reggio Emilia VALUTAZIONI_D_E_Reggio_Emilia_100423(1).pdf | 60 | 9 | 0/0 | 0 | 0 | 0 | 0 | Nessuna tariffa estratta |
 | Reggio Emilia — Reggio Emilia VALUTAZIONI_D_E_seminario 2013.pdf | 59 | 14 | 12/12 | 0 | 0 | 0 | 0 | Nessuna tariffa estratta |
+| Roma — Roma Prontuario dicembre 2025.pdf | 153 | 0 | 61/61 | 2107 | 2031 | 1464 | 76 | Analizzato |
 | Roma — Roma Prontuario-cat-D-E-Roma-07-07-1995.pdf | 34 | 34 | 16/16 | 56 | 15 | 3 | 41 | Analizzato |
 | Sassari — Sassari prezzario_fabbricati_SS_2019.pdf | 22 | 0 | 13/13 | 267 | 156 | 107 | 111 | Analizzato |
 | Savona — Savona 2019.pdf | 62 | 2 | 26/26 | 77 | 47 | 47 | 30 | Analizzato |
@@ -142,23 +143,23 @@ Una voce può essere pertinente a più destinazioni: i conteggi di questa tabell
 
 | Destinazione | Voci associate | Seconda verifica OK |
 |---|---:|---:|
-| capannone | 2242 | 858 |
-| casa-di-cura | 233 | 82 |
-| commerciale | 1993 | 355 |
-| custom | 11224 | 2353 |
-| hotel | 1229 | 303 |
+| capannone | 2253 | 869 |
+| casa-di-cura | 240 | 88 |
+| commerciale | 2017 | 365 |
+| custom | 11823 | 2389 |
+| hotel | 1242 | 313 |
 | interrato | 172 | 86 |
 | laboratorio | 266 | 23 |
-| locali-tecnici | 620 | 322 |
-| lotto | 11405 | 6302 |
-| negozio | 227 | 30 |
-| parcheggio-esterno | 175 | 79 |
-| parcheggio-interrato | 235 | 65 |
-| parcheggio-multipiano | 107 | 44 |
-| sistemazione-esterna | 655 | 250 |
-| tettoie | 436 | 207 |
-| uffici | 1423 | 345 |
-| verde | 81 | 40 |
+| locali-tecnici | 621 | 323 |
+| lotto | 12821 | 7692 |
+| negozio | 233 | 30 |
+| parcheggio-esterno | 181 | 80 |
+| parcheggio-interrato | 247 | 68 |
+| parcheggio-multipiano | 108 | 44 |
+| sistemazione-esterna | 660 | 253 |
+| tettoie | 438 | 209 |
+| uffici | 1447 | 349 |
+| verde | 82 | 41 |
 
 ## Pagine ancora incomplete
 
@@ -168,10 +169,10 @@ Nessuna pagina candidata risulta incompleta nella pipeline corrente. Rimangono i
 
 | Unità / valuta | Voci |
 |---|---:|
-| EUR / each | 4344 |
+| EUR / each | 4380 |
 | EUR / m | 330 |
-| EUR / m2 | 16944 |
-| EUR / m3 | 1711 |
+| EUR / m2 | 18998 |
+| EUR / m3 | 1728 |
 | EUR / other | 2192 |
 | EUR / percent | 3585 |
 | ITL / each | 301 |
