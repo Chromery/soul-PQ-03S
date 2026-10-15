@@ -50,6 +50,10 @@ L'avvio API applica le migrazioni ma **non esegue seed demo**. Il seed è esplic
 
 ## Sviluppo e test
 
+Nella branch `ordinamento`, la [ricerca sulla priorità degli immobili](docs/ordinamento/README.md)
+usa un database e un worktree dedicati. Il [rapporto iniziale](docs/ordinamento/2026-10-15-analisi-iniziale.md)
+documenta campione, indicatori, limiti e proposta per il batch.
+
 ```sh
 npm ci
 npm run db:generate

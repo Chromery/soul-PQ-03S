@@ -20,3 +20,5 @@ backups/
 feedback logs/
 apps/api/src/generated/prisma
 .cache/prezzari/
+.research/
+__pycache__/

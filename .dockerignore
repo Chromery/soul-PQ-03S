@@ -20,3 +20,5 @@ docs/security
 playwright
 test-results
 playwright-report
+.research
+**/__pycache__

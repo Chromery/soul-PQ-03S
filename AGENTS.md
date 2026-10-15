@@ -1,5 +1,13 @@
 # Istruzioni operative del progetto
 
+## Ricerca ordinamento
+
+- La branch `ordinamento` usa il worktree `/home/debian/dev/Dashboard-generale-03S-ordinamento` e il solo database di ricerca del progetto `soul-pq-ordinamento`, definito in `compose.ordinamento.yaml`.
+- Usare esplicitamente quel file Compose: nessuna porta pubblicata, rete `none`, nessun servizio applicativo o worker. Il database ripristinato ha la sola lettura come impostazione predefinita.
+- Snapshot, documenti, estrazioni e CSV nominativi sono in `.research/`, esclusa da Git e dalle immagini Docker. Non copiare `.env` di produzione né avviare il Compose applicativo in questo worktree.
+- Gli studi archiviati (`isTest=true`) sono esclusi dagli export analitici. Neutri e sospesi non sono esempi negativi; gli esiti positivi sono fattibilità del tecnico, non risparmi già conseguiti.
+- Procedura e risultati: `docs/ordinamento/README.md` e `docs/ordinamento/2026-10-15-analisi-iniziale.md`.
+
 ## Worktree e ambienti di deploy
 
 - `/home/debian/dev/Dashboard-generale-03S` e il worktree della branch `staging`. Da questa cartella si costruisce e si aggiorna esclusivamente l'ambiente di staging (`soul-pq-staging`, raggiungibile su `http://100.68.243.18:8181`).
