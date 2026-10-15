@@ -1,6 +1,7 @@
 # Ricerca ordinamento
 
 Prima analisi: [risultati del 15 ottobre 2026](2026-10-15-analisi-iniziale.md).
+Approfondimento: [confronto con T3, casi individuali e verifica dei pattern](2026-10-15-approfondimento-pattern.md).
 
 Questo modulo studia la priorità di analisi degli immobili. Non modifica il prodotto,
 gli esiti del tecnico o le rendite in produzione. Nessun modello è distribuito.
@@ -21,7 +22,8 @@ La produzione di origine è quella attuale su `pq.soul.it`, `/srv/soul-pq`.
 Il database locale del vecchio progetto di produzione non è stato usato o modificato.
 Il dump non contiene gli allegati: quelli già presenti sono stati copiati separatamente
 con sole operazioni S3 `GetObject`, verificati per checksum/dimensione e deduplicati per SHA-256.
-Nessun documento è stato inviato a servizi di analisi esterni.
+L'estrazione testuale in blocco usa Poppler locale; la revisione mirata di note,
+visure e planimetrie è svolta nelle sessioni Codex di ricerca.
 
 ## Riprodurre l'analisi esistente
 
@@ -32,6 +34,7 @@ python3 scripts/ordinamento/export.py
 python3 scripts/ordinamento/analyze.py
 python3 scripts/ordinamento/document_features.py
 python3 scripts/ordinamento/economics.py
+python3 scripts/ordinamento/refine_patterns.py
 python3 -m unittest discover -s scripts/ordinamento -p 'test_*.py' -v
 ```
 
@@ -123,8 +126,15 @@ Tutti nella directory indicata da `.research/LATEST`:
 | `document-findings.json` | Conteggi degli indicatori documentali |
 | `positive-property-audit.csv` | Controllo delle proposte a livello immobile; gruppi non sommabili |
 | `positive-unit-proposals.csv`, `economics-findings.json` | Proposte economiche per unità/gruppo, da presentazioni datate |
+| `refined-findings.json`, `refined-cv-*.csv` | Confronto dei segnali documentali sullo stesso campione e con gruppi separati |
+| `comparable-geometry-pairs.csv` | Coppie con esito opposto, stesso studio/categoria e rendite vicine; misure manuali |
+| `t3-study-presentations.csv` | Riconciliazione delle proposte per studio, incluse presentazioni condivise |
 | `baseline-document-review-queue.csv` | 599 immobili neutri D esclusa D/10 ordinati per rendita, per raccogliere evidenza |
 
 La coda da 599 righe è solo una baseline di acquisizione documentale nel portafoglio
 esistente: probabilità e risparmio atteso sono intenzionalmente vuoti. Non applica
 ancora tutte le esclusioni fiscali o commerciali e non autorizza contatti automatici.
+
+Per i gruppi, `evaluated-units.csv` non espone una proposta ereditata dal primo membro:
+i valori di proposta restano vuoti. Usare `positive-unit-proposals.csv` per importi
+riconciliati con l'insieme esatto dei membri della presentazione.

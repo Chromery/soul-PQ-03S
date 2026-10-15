@@ -329,6 +329,12 @@ def main():
         cats = sorted({r["category"] for r in group})
         units.append({**first, **geom, "id": uid, "member_ids": [r["id"] for r in group], "members": len(group),
                       "rent": sum(r["rent"] or 0 for r in group), "category": "+".join(cats)})
+        if len(group) > 1:
+            # The first member's proposal is not the group's proposal. Financial
+            # group figures require the exact-member matching in economics.py.
+            units[-1].update(proposed_rent=None,
+                             proposal_source="requires_exact_membership_presentation",
+                             rent_reduction=None, reduction_fraction=None)
     for r in units:
         r["rent_per_covered_sqm"] = r["rent"] / r["covered_area"] if r.get("covered_area", 0) > 0 and (r.get("custom_share") or 0) < .1 and not r.get("possible_non_sqm_units") and r["category"] in {"D/1", "D/7", "D/8"} else None
     cv, predictions = validate(units)

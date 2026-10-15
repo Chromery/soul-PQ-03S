@@ -1,5 +1,11 @@
 # Ordinamento degli immobili: prima analisi del 15 ottobre 2026
 
+Il successivo [approfondimento dei pattern](2026-10-15-approfondimento-pattern.md)
+verifica questi indizi su un campione documentale comune: la rettifica corrente
+non aggiunge un miglioramento predittivo convincente alla rendita con i modelli
+provati, e la precedente rideterminazione ha frequenza simile nei due esiti.
+Include anche casi individuali, controlli visivi delle planimetrie e i risultati di T3.
+
 ## Risultato e scelta del repository
 
 Ci sono segnali utili per un ordinamento preliminare: rendita attuale, rendita rapportata

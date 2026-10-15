@@ -2,6 +2,7 @@ import unittest
 
 from analyze import auc, band, category, estimate, geometry, label, number, selection_area
 from document_features import extract
+from refine_patterns import documented_units, evaluate_models
 
 
 class AnalysisTests(unittest.TestCase):
@@ -70,6 +71,29 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(result["history_article22_revision"])
         self.assertEqual(result["evidence"]["history_article22_revision"]["page"], 2)
         self.assertIsNone(extract("unreadable PDF")["current_rurality_mention"])
+
+    def test_missing_group_member_visura_is_not_an_absent_indicator(self):
+        unit = {"id": "group", "member_ids": '["a", "b"]', "y": "1", "rent": "20000"}
+        a = {"property_id": "a", **extract("Unità immobiliare dal 01/01/2025 classamento e rendita rettificati")}
+        b = {"property_id": "b", **extract("unreadable PDF")}
+        self.assertEqual(documented_units([unit], [a, b]), ([], ["group"]))
+        b = {"property_id": "b", **extract("Unità immobiliare dal 01/01/2025 classamento e rendita non rettificati")}
+        rows, excluded = documented_units([unit], [a, b])
+        self.assertEqual(excluded, [])
+        self.assertTrue(rows[0]["rectified"])
+
+    def test_held_out_labels_cannot_change_their_own_fold_predictions(self):
+        rows = [{"id": str(i), "study_id": str(i//2), "cluster": str(i//2),
+                 "y": (i//2) % 2, "rent": 10000 + 12000*i,
+                 "category": "D/1", "rectified": bool(i % 3)} for i in range(20)]
+        _, before = evaluate_models(rows)
+        held_out = {p["id"] for p in before if p["repeat"] == 0 and p["fold"] == 0}
+        changed = [{**r, "y": 1-r["y"] if r["id"] in held_out else r["y"]} for r in rows]
+        _, after = evaluate_models(changed)
+        for old, new in zip(before, after):
+            if old["repeat"] == 0 and old["fold"] == 0:
+                for key in [k for k in old if k.endswith("_score")]:
+                    self.assertEqual(old[key], new[key])
 
 
 if __name__ == "__main__":
