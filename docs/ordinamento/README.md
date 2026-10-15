@@ -2,6 +2,8 @@
 
 Prima analisi: [risultati del 15 ottobre 2026](2026-10-15-analisi-iniziale.md).
 Approfondimento: [confronto con T3, casi individuali e verifica dei pattern](2026-10-15-approfondimento-pattern.md).
+Ulteriore analisi: [composizione degli spazi e lettura degli elaborati senza esiti](2026-10-15-spazi-e-raccolta-dati.md).
+Proposta: [dati da raccogliere durante gli studi in PQ](dati-da-raccogliere-in-pq.md).
 
 Questo modulo studia la priorità di analisi degli immobili. Non modifica il prodotto,
 gli esiti del tecnico o le rendite in produzione. Nessun modello è distribuito.
@@ -35,6 +37,7 @@ python3 scripts/ordinamento/analyze.py
 python3 scripts/ordinamento/document_features.py
 python3 scripts/ordinamento/economics.py
 python3 scripts/ordinamento/refine_patterns.py
+python3 scripts/ordinamento/space_patterns.py
 python3 -m unittest discover -s scripts/ordinamento -p 'test_*.py' -v
 ```
 
@@ -129,6 +132,8 @@ Tutti nella directory indicata da `.research/LATEST`:
 | `refined-findings.json`, `refined-cv-*.csv` | Confronto dei segnali documentali sullo stesso campione e con gruppi separati |
 | `comparable-geometry-pairs.csv` | Coppie con esito opposto, stesso studio/categoria e rendite vicine; misure manuali |
 | `t3-study-presentations.csv` | Riconciliazione delle proposte per studio, incluse presentazioni condivise |
+| `space-features.csv`, `space-findings.json` | Destinazioni annotate, componenti del valore, associazioni e audit della raccolta dati |
+| `space-cv-*.csv`, `space-within-study.csv` | Verifiche esplorative delle geometrie manuali, con gruppi separati e confronti interni agli studi |
 | `baseline-document-review-queue.csv` | 599 immobili neutri D esclusa D/10 ordinati per rendita, per raccogliere evidenza |
 
 La coda da 599 righe è solo una baseline di acquisizione documentale nel portafoglio

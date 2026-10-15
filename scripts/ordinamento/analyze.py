@@ -81,13 +81,19 @@ def geometry(draft):
     payload_total = number(payload.get("totalArea"))
     selected_pages = {str(sel.get("page")) for sel in payload.get("selections", [])}
     pages = [(payload.get("pageScales") or {}).get(page, payload) for page in selected_pages]
+    custom_labels = {u.get("id"): u.get("label") or "" for u in payload.get("customUsages", [])}
+    # Historical fields named areaOverrideM2 also store rooms, seats and volumes.
+    # Detect explicit quantity labels even when their unit price is below 2,000.
+    explicit_non_sqm = any(re.search(r"\b(?:mc|m3|m³|posti|camere)\b|\ba\s+camera\b",
+        " ".join([s.get("customUsageLabel") or "", custom_labels.get(s.get("customUsageId"), "")]), re.I)
+        for s in payload.get("selections", []))
     return {"area": total, "covered_area": covered, "outside_area": outside,
             "outside_share": outside / total if total else None,
             "office_share": areas["uffici"] / covered if covered else None,
             "shed_share": areas["capannone"] / covered if covered else None,
             "custom_share": areas["custom"] / total if total else None,
             "usage_areas": dict(areas),
-            "possible_non_sqm_units": any((number(s.get("rate")) or 0) > 2000 and number(s.get("areaOverrideM2")) is not None for s in payload.get("selections", [])),
+            "possible_non_sqm_units": explicit_non_sqm or any((number(s.get("rate")) or 0) > 2000 and number(s.get("areaOverrideM2")) is not None for s in payload.get("selections", [])),
             "area_reconciliation_error": abs(total - payload_total) if payload_total is not None else None,
             "scale_sources": sorted({p.get("scaleSource", "UNKNOWN") for p in pages}),
             "scale_vs_ai_mismatch": any(number(p.get("aiScaleDenominator")) and

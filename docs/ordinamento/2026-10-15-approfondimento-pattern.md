@@ -1,5 +1,10 @@
 # Pattern tecnici e criteri di priorità per gli studi Soul
 
+Il seguito su [spazi e raccolta dati](2026-10-15-spazi-e-raccolta-dati.md) estende
+il confronto delle geometrie e corregge l'esclusione delle quantità non superficiali:
+il campione geometrico passa da 103 a 102 unità dopo il riconoscimento di m³ nei silos.
+I risultati documentali e la riconciliazione delle presentazioni qui riportati restano validi.
+
 I dati disponibili permettono già di costruire un primo ordinamento e di individuare
 ipotesi tecniche verificabili. Il segnale quantitativo più stabile resta la rendita
 attuale; per avvicinarsi alla lavorabilità serve ricostruire il margine rispetto alle

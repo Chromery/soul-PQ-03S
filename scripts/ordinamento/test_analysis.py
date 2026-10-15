@@ -3,6 +3,7 @@ import unittest
 from analyze import auc, band, category, estimate, geometry, label, number, selection_area
 from document_features import extract
 from refine_patterns import documented_units, evaluate_models
+from space_patterns import MODELS, cv as space_cv, fit, predict, solve
 
 
 class AnalysisTests(unittest.TestCase):
@@ -52,6 +53,36 @@ class AnalysisTests(unittest.TestCase):
         self.assertFalse(result["possible_non_sqm_units"])
         draft["payload"]["selections"][0]["rate"] = 92000
         self.assertTrue(geometry(draft)["possible_non_sqm_units"])
+
+    def test_explicit_volumes_and_seats_are_not_square_metres_at_low_prices(self):
+        for usage_label, rate in [("silos mc ipotetici", 40), ("Teatro posti", 1250), ("Hotel a camera", 800)]:
+            draft = {"payload": {"customUsages": [{"id": "u", "label": usage_label}],
+                     "selections": [{"usageId": "custom", "customUsageId": "u", "areaOverrideM2": 50, "rate": rate}]}}
+            self.assertTrue(geometry(draft)["possible_non_sqm_units"])
+
+    def test_ridge_logistic_has_finite_predictions_and_affine_invariant_scaling(self):
+        self.assertEqual(solve([[2, 1], [1, 3]], [5, 5]), [2, 1])
+        rows = [{"x": x, "y": int(x > 0)} for x in [-3, -2, -1, 1, 2, 3]]
+        model = fit(rows, ["x"])
+        self.assertLess(predict(model, {"x": -1}), .5)
+        self.assertGreater(predict(model, {"x": 1}), .5)
+        transformed = fit([{**r, "x": 100+10*r["x"]} for r in rows], ["x"])
+        self.assertAlmostEqual(predict(model, {"x": 1}), predict(transformed, {"x": 110}), places=8)
+        one_class = fit([{**r, "y": 1} for r in rows], ["x"])
+        self.assertTrue(0 < predict(one_class, {"x": 1}) < 1)
+
+    def test_space_validation_does_not_use_held_out_outcomes(self):
+        keys = sorted({key for model_keys in MODELS.values() for key in model_keys})
+        rows = [{"id": str(i), "study_id": str(i//2), "cluster": str(i//2), "y": i % 2,
+                 **{key: float((i+j) % 7) for j, key in enumerate(keys)}} for i in range(20)]
+        _, before = space_cv(rows, repeats=1)
+        held_out = {r["unit_id"] for r in before if r["fold"] == 0}
+        changed = [{**r, "y": 1-r["y"] if r["id"] in held_out else r["y"]} for r in rows]
+        _, after = space_cv(changed, repeats=1)
+        for old, new in zip(before, after):
+            if old["fold"] == 0:
+                for name in MODELS:
+                    self.assertEqual(old[name], new[name])
 
     def test_auc_ties(self):
         rows = [{"y": 0, "score": 1}, {"y": 1, "score": 1}]
