@@ -28,7 +28,9 @@ test("Swagger download is the versioned YAML and requires Clerk admin, never ext
   assert.equal(headers.get("Cache-Control"), "no-store");
   assert.match(headers.get("Content-Disposition")!, /^attachment;/);
   const spec = load(text) as any;
-  assert.equal(spec.info.version, "1.5.5");
+  assert.equal(spec.info.version, "1.5.6");
+  assert.equal(spec.paths["/studi/sync"].post.responses["503"].$ref, "#/components/responses/ErpSyncUnavailable");
+  assert.equal(spec.components.responses.ErpSyncUnavailable.content["application/json"].examples.storageSuspended.value.code, "STORAGE_UNAVAILABLE");
   assert.deepEqual(spec.components.schemas.MetricheStudioOutput.properties.valore_ottimizzazione.type, ["string", "null"]);
   assert.deepEqual(spec.paths["/system/erp-openapi"].get.security, [{ clerkSession: [] }, { clerkBearer: [] }]);
 });

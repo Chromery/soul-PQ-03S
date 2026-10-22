@@ -4,6 +4,7 @@
 FROM pq-soul-api:1.2.1 AS api-build
 COPY apps/api apps/api
 COPY apps/web/src apps/web/src
+COPY docs/openapi/erp-pq-sync.openapi.yaml docs/openapi/erp-pq-sync.openapi.yaml
 RUN npm run build --workspace @soul/api \
   && npm test --workspace @soul/api
 
@@ -12,6 +13,7 @@ COPY --from=api-build /app/apps/api/dist apps/api/dist
 COPY --from=api-build /app/apps/api/src/generated apps/api/src/generated
 COPY apps/api/prisma apps/api/prisma
 COPY apps/api/scripts/import-catalog-source.mjs apps/api/scripts/import-catalog-source.mjs
+COPY docs/openapi/erp-pq-sync.openapi.yaml docs/openapi/erp-pq-sync.openapi.yaml
 
 FROM pq-soul-api:1.2.1 AS web-build
 RUN npm ci --include=dev --workspace @soul/web --include-workspace-root

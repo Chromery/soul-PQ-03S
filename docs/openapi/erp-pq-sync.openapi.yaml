@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Soul Prospect Qualifier - ERP/PQ Sync API
-  version: 1.5.5
+  version: 1.5.6
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -9,6 +9,14 @@ info:
     API server-to-server esposte da Soul Prospect Qualifier per sincronizzare gli
     studi di fattibilita dall'ERP e permettere all'ERP di leggere le modifiche
     successive prodotte in PQ.
+
+    La v1.5.6 (PQ 1.2.4) restituisce 503 con code STORAGE_UNAVAILABLE se lo
+    storage documenti rifiuta l'operazione o non e raggiungibile; reason
+    ACCOUNT_SUSPENDED identifica la sospensione segnalata dal provider.
+    Non ripetere automaticamente il sync senza verificare il ripristino dello storage.
+    Il batch non e atomico: studi precedenti nello stesso batch possono essere gia
+    sincronizzati. Un errore di upload degli allegati precede il salvataggio dello
+    studio corrente. Usare gli stessi ID ERP per l'eventuale nuovo tentativo.
 
     La v1.5.4 (PQ 1.1.8) separa i parametri IMU attuale e prevista.
     Gli override preesistenti sono copiati all'IMU attuale senza cambiare gli importi.
@@ -327,7 +335,7 @@ paths:
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "503":
-          $ref: "#/components/responses/ErpAuthUnavailable"
+          $ref: "#/components/responses/ErpSyncUnavailable"
         "500":
           $ref: "#/components/responses/InternalServerError"
   /studi/modifiche:
@@ -1253,7 +1261,40 @@ components:
                 type: string
         error:
           type: string
+        code:
+          type: string
+          description: Codice applicativo stabile, se disponibile. STORAGE_UNAVAILABLE per indisponibilita dello storage documenti.
+        reason:
+          type: string
+          enum: [ACCOUNT_SUSPENDED, UNAVAILABLE]
+          description: Presente con code STORAGE_UNAVAILABLE; non contiene credenziali o dettagli privati del provider.
   responses:
+    ErpSyncUnavailable:
+      description: Autenticazione ERP non configurata oppure storage documenti non disponibile. Ripristinare il servizio prima di riprovare; il batch non e atomico.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            storageSuspended:
+              value:
+                statusCode: 503
+                error: Service Unavailable
+                code: STORAGE_UNAVAILABLE
+                reason: ACCOUNT_SUSPENDED
+                message: "Storage documenti non disponibile: il servizio di archiviazione segnala l'account sospeso. Contattare l'amministratore PQ e riprovare dopo il ripristino del servizio."
+            storageUnavailable:
+              value:
+                statusCode: 503
+                error: Service Unavailable
+                code: STORAGE_UNAVAILABLE
+                reason: UNAVAILABLE
+                message: "Storage documenti non disponibile. Impossibile completare l'operazione: contattare l'amministratore PQ e riprovare dopo il ripristino del servizio."
+            authUnavailable:
+              value:
+                statusCode: 503
+                message: Autenticazione ERP non configurata
+                error: Service Unavailable
     BadRequest:
       description: Payload non valido
       content:

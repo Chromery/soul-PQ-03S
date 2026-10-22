@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, HttpException, Injectable, InternalServerErrorException, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client, S3ServiceException } from "@aws-sdk/client-s3";
 import type { GetObjectCommandOutput } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -18,6 +18,7 @@ type StoreDocumentInput = {
 
 @Injectable()
 export class DocumentStorageService {
+  private readonly logger = new Logger(DocumentStorageService.name);
   private readonly endpoint?: string;
   private readonly region: string;
   private readonly bucket?: string;
@@ -73,23 +74,23 @@ export class DocumentStorageService {
 
   async deleteObject(storageKey: string) {
     assertDocumentStorageKey(storageKey, this.keyPrefix);
-    await this.client().send(
+    await this.storageRequest("delete", () => this.client().send(
       new DeleteObjectCommand({
         Bucket: this.requireBucket(),
         Key: storageKey,
       }),
-    );
+    ));
   }
 
   async readObject(storageKey: string, fallbackContentType = "application/octet-stream") {
     assertStorageKey(storageKey);
     try {
-      const output = await this.client().send(
+      const output = await this.storageRequest("read", () => this.client().send(
         new GetObjectCommand({
           Bucket: this.requireBucket(),
           Key: storageKey,
         }),
-      );
+      ));
       if (!output.Body) throw new NotFoundException("Documento non trovato nello storage S3");
       return {
         stream: await toReadable(output.Body),
@@ -106,7 +107,7 @@ export class DocumentStorageService {
 
   private async putObject(key: string, body: Buffer, sha256: string, fileName: string) {
     const bucket = this.requireBucket();
-    await this.client().send(
+    await this.storageRequest("write", () => this.client().send(
       new PutObjectCommand({
         Bucket: bucket,
         Key: key,
@@ -118,7 +119,29 @@ export class DocumentStorageService {
           file_name: fileName,
         },
       }),
-    );
+    ));
+  }
+
+  private async storageRequest<T>(operation: "read" | "write" | "delete", request: () => Promise<T>): Promise<T> {
+    try {
+      return await request();
+    } catch (error) {
+      // Preserve application validation and genuine missing-object responses.
+      if (error instanceof HttpException || (operation === "read" && isMissingObjectError(error))) throw error;
+      const details = storageFailure(error);
+      if (!details) throw error;
+      // Do not log SDK messages, request bodies, document keys or credentials.
+      this.logger.error(JSON.stringify({ event: "document_storage_unavailable", operation, ...details }));
+      throw new ServiceUnavailableException({
+        statusCode: 503,
+        error: "Service Unavailable",
+        code: "STORAGE_UNAVAILABLE",
+        reason: details.reason,
+        message: details.reason === "ACCOUNT_SUSPENDED"
+          ? "Storage documenti non disponibile: il servizio di archiviazione segnala l'account sospeso. Contattare l'amministratore PQ e riprovare dopo il ripristino del servizio."
+          : "Storage documenti non disponibile. Impossibile completare l'operazione: contattare l'amministratore PQ e riprovare dopo il ripristino del servizio.",
+      });
+    }
   }
 
   private client() {
@@ -170,6 +193,28 @@ async function toReadable(body: NonNullable<GetObjectCommandOutput["Body"]>) {
 
 function isMissingObjectError(error: unknown) {
   if (!error || typeof error !== "object") return false;
-  const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  const candidate = error as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
+  // A missing bucket is a storage configuration problem, not a missing document.
+  if (candidate.name === "NoSuchBucket" || candidate.Code === "NoSuchBucket") return false;
   return candidate.name === "NoSuchKey" || candidate.name === "NotFound" || candidate.$metadata?.httpStatusCode === 404;
+}
+
+function storageFailure(error: unknown) {
+  if (!error || typeof error !== "object") return null;
+  const candidate = error as { name?: string; Code?: string; code?: string; $metadata?: { httpStatusCode?: number; requestId?: string } };
+  const codes = [candidate.name, candidate.Code, candidate.code];
+  const transportCodes = ["TimeoutError", "RequestTimeout", "RequestTimeoutException", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "ENOTFOUND", "EAI_AGAIN"];
+  const providerCodes = ["UserSuspended", "AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch", "NoSuchBucket", "ServiceUnavailable", "SlowDown", "InternalError"];
+  if (!(error instanceof S3ServiceException) && !candidate.$metadata?.httpStatusCode
+    && !codes.some(code => code && [...transportCodes, ...providerCodes].includes(code))) return null;
+  return {
+    reason: codes.includes("UserSuspended") ? "ACCOUNT_SUSPENDED" : "UNAVAILABLE",
+    providerCode: safeDiagnosticIdentifier(candidate.Code ?? candidate.code ?? candidate.name),
+    providerStatus: candidate.$metadata?.httpStatusCode,
+    providerRequestId: safeDiagnosticIdentifier(candidate.$metadata?.requestId),
+  };
+}
+
+function safeDiagnosticIdentifier(value: unknown) {
+  return typeof value === "string" && /^[A-Za-z0-9_./+=-]{1,200}$/.test(value) ? value : undefined;
 }
