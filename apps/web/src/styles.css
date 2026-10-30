@@ -9135,3 +9135,8 @@ button.activity-item {
 .presentation-history-list article > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
 .presentation-history-empty { text-align: center; padding: 40px 20px; color: #64748b; background: #f3f8fc; border-radius: 12px; }
 @media (max-width: 640px) { .presentation-history-list article { align-items: flex-start; flex-direction: column; } }
+
+.presentation-layout-option { display: grid; gap: 8px; padding: 12px 14px; margin: 12px 0; border: 1px solid #cfe1ea; border-radius: 8px; background: #f4f9fc; }
+.presentation-layout-option strong { font-size: 13px; }
+.presentation-layout-option select { width: 100%; min-width: 0; padding: 8px; border: 1px solid #b8cdd9; border-radius: 6px; background: white; color: #243f52; font: inherit; }
+.presentation-layout-option small { color: #536878; line-height: 1.4; }

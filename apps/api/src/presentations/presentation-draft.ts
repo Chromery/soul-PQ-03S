@@ -13,12 +13,14 @@ export function validateDraftChanges(input: unknown, propertyIds: Set<string>, g
   for (const [key, value] of Object.entries(changes)) {
     const separator = key.lastIndexOf(":"), id = key.slice(0, separator), field = key.slice(separator + 1);
     const groupField = id.startsWith("group:") && ["societa", "comune", "indirizzo", "foglioParticellaSub", "categoria", "reductionBasis"].includes(field);
-    if (key !== "clientName" && key !== "showImuColumns" && (!DRAFT_FIELDS.includes(field)
+    if (key !== "clientName" && key !== "showImuColumns" && key !== "tableLayout" && (!DRAFT_FIELDS.includes(field)
       || (id.startsWith("group:") && !groupField)
       || (!propertyIds.has(id) && !(groupField && groupKeys.has(id)) && value !== null)))
       throw new BadRequestException("Campo o immobile non appartenente alla presentazione");
     if (value !== null && (typeof value !== "string" || value.length > 1000))
       throw new BadRequestException("Valore della bozza non valido (massimo 1000 caratteri)");
+    if (key === "tableLayout" && value !== null && value !== "compact" && value !== "paginated")
+      throw new BadRequestException("Impaginazione della presentazione non valida");
     if (key === "showImuColumns" && value !== null && value !== "true" && value !== "false")
       throw new BadRequestException("Visibilità delle colonne IMU non valida");
     if (field === "presentationGroup" && value !== null && value !== ""

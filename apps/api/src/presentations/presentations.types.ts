@@ -21,6 +21,8 @@ export type PresentationSnapshot = {
   generatedAt: string;
   // Opt-in, frozen per deck. Historical presentations keep the original columns.
   showImuColumns?: boolean;
+  // Display-only: complete company names and all source rows remain in the snapshot.
+  tableLayout?: "compact" | "paginated";
   studio: {
     id: string;
     company: string;

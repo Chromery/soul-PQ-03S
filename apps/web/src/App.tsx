@@ -84,7 +84,7 @@ import { PropertyGroupingSuggestions } from "./PropertyGroupingSuggestions";
 import { PriceRuleLab } from "./PriceRules";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.2.4";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.2.5";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -6845,6 +6845,22 @@ function usePersistentPresentationDraft(endpoint: string, baseline: Presentation
     updatePresentationPropertyField: updateProperty, resetPresentationPropertyField: resetProperty, resetPresentationDraft: reset };
 }
 
+function PresentationLayoutOption({ persistence, disabled = false }: {
+  persistence: ReturnType<typeof usePresentationDraftStore>; disabled?: boolean;
+}) {
+  return <label className="presentation-layout-option">
+    <strong>Impaginazione elenco immobili</strong>
+    <select value={persistence.overrides.tableLayout === "paginated" ? "paginated" : "compact"}
+      disabled={disabled || !persistence.loaded}
+      onChange={event => persistence.change({ tableLayout: event.target.value })}>
+      <option value="compact">Pagina compatta · abbrevia i nomi società</option>
+      <option value="paginated">Più pagine · nomi società completi</option>
+    </select>
+    <small>La modalità compatta limita i nomi società a due righe solo nel PDF. Gli elenchi lunghi
+      proseguono su due o più pagine, con totali e sintesi alla fine. Nessun immobile viene escluso.</small>
+  </label>;
+}
+
 function PresentationImuColumnsOption({ persistence, disabled = false }: {
   persistence: ReturnType<typeof usePresentationDraftStore>; disabled?: boolean;
 }) {
@@ -7376,7 +7392,8 @@ function PresentationAction({
               Seleziona gli immobili da includere. I contenuti e gli importi arrivano dall’anteprima editabile presente nella pagina corrente.
             </p>
             <PresentationSaveStatus persistence={persistence} />
-            {isV3 && <PresentationImuColumnsOption persistence={persistence} disabled={busy} />}
+            {isV3 && <><PresentationLayoutOption persistence={persistence} disabled={busy} />
+              <PresentationImuColumnsOption persistence={persistence} disabled={busy} /></>}
 
             <div className="presentation-selection-toolbar">
               <strong>{selectedPropertyIds.length}/{study.properties.length} selezionati</strong>
@@ -7669,6 +7686,7 @@ function PresentationDataPreview({
       </label>
 
       <PresentationSaveStatus persistence={persistence} />
+      <PresentationLayoutOption persistence={persistence} />
       <PresentationImuColumnsOption persistence={persistence} />
 
       <p className="presentation-preview-info">

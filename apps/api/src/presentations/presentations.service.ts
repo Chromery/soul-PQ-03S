@@ -262,6 +262,7 @@ export class PresentationsService implements OnModuleDestroy {
       version,
       generatedAt: generatedAt.toISOString(),
       ...(version === 3 ? { reductionBasis: "per-row" as const,
+        tableLayout: (savedDraft?.overrides as Record<string, unknown> | undefined)?.tableLayout === "paginated" ? "paginated" : "compact",
         showImuColumns: (savedDraft?.overrides as Record<string, unknown> | undefined)?.showImuColumns === "true" } : {}),
       studio: {
         ...studio,
@@ -393,7 +394,9 @@ export class PresentationsService implements OnModuleDestroy {
       await writeFile(htmlPath, html, "utf8");
       const browser = await this.browser();
       const exportConfig = exportConfigFor(snapshot.version);
-      const captures = await captureHybridSlides(browser, htmlPath, temporaryDirectory, exportConfig);
+      const captures = snapshot.version === 3
+        ? await captureEconomicsSlides(browser, htmlPath, temporaryDirectory, exportConfig)
+        : await captureHybridSlides(browser, htmlPath, temporaryDirectory, exportConfig);
       const pdf = snapshot.version === 3
         ? await composeV3Pdf(captures, snapshot, browser)
         : await createHybridPdf(
@@ -542,6 +545,27 @@ async function createNativePdf(
   }
 }
 
+// V3 replaces template page 5 with every measured economics page, in order.
+async function captureEconomicsSlides(browser: Browser, input: string, directory: string, config: ExportConfig) {
+  const page = await browser.newPage({ viewport: config.viewport, deviceScaleFactor: 2 });
+  try {
+    await page.goto(exportUrl(input, 5), { waitUntil: "load", timeout: 30_000 });
+    await waitForDeck(page);
+    const slides = page.locator(".economics");
+    const captures = new Map<number, HybridCapture>();
+    for (let index = 0; index < await slides.count(); index += 1) {
+      const target = slides.nth(index);
+      await target.scrollIntoViewIfNeeded();
+      const destination = path.join(directory, `economics-${index + 1}.png`);
+      await target.screenshot({ path: destination, type: "png", animations: "disabled" });
+      captures.set(5 + index, { format: "png", path: destination });
+    }
+    return captures;
+  } finally {
+    await page.close();
+  }
+}
+
 async function captureHybridSlides(
   browser: Browser,
   input: string,
@@ -657,12 +681,12 @@ async function composeV3Pdf(
     }
 
     const { width, height } = templatePdf.getPage(pageIndex).getSize();
-    const imageBytes = await readFile(economicsCapture.path);
-    const image = economicsCapture.format === "jpeg"
-      ? await outputPdf.embedJpg(imageBytes)
-      : await outputPdf.embedPng(imageBytes);
-    const page = outputPdf.addPage([width, height]);
-    page.drawImage(image, { x: 0, y: 0, width, height });
+    for (const capture of captures.values()) {
+      const imageBytes = await readFile(capture.path);
+      const image = await outputPdf.embedPng(imageBytes);
+      const page = outputPdf.addPage([width, height]);
+      page.drawImage(image, { x: 0, y: 0, width, height });
+    }
   }
 
   setPdfMetadata(outputPdf, snapshot, "Soul PDF v3 hybrid exporter");

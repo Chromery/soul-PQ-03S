@@ -56,11 +56,15 @@ for (const group of [false, true]) test(`presentation ${group ? "group" : "study
   const imuColumns = preview.getByRole("checkbox", { name: /Mostra IMU attuale e IMU prevista/ });
   await expect(imuColumns).not.toBeChecked();
   await imuColumns.check(); await saved();
+  const layout = preview.getByRole("combobox", { name: /Impaginazione elenco immobili/ });
+  await expect(layout).toHaveValue("compact");
+  await layout.selectOption("paginated"); await saved();
   await address.fill("Via modificata 44");
   await preview.getByLabel("Cliente mostrato in copertina").fill("Cliente personalizzato");
   await saved();
   await page.reload(); await expect(address).toHaveValue("Via modificata 44");
   await expect(imuColumns).toBeChecked();
+  await expect(layout).toHaveValue("paginated");
   await expect(preview.getByLabel("Cliente mostrato in copertina")).toHaveValue("Cliente personalizzato");
   properties[3].address = "Indirizzo ERP aggiornato";
   properties[4].address = "Via ERP non modificata";
@@ -78,6 +82,10 @@ for (const group of [false, true]) test(`presentation ${group ? "group" : "study
   const modalImuColumns = modal.getByRole("checkbox", { name: /Mostra IMU attuale e IMU prevista/ });
   await expect(modalImuColumns).toBeChecked();
   await modalImuColumns.uncheck(); await saved();
+  const modalLayout = modal.getByRole("combobox", { name: /Impaginazione elenco immobili/ });
+  await expect(modalLayout).toHaveValue("paginated");
+  await modalLayout.selectOption("compact"); await saved();
+  await expect(layout).toHaveValue("compact");
   await expect(imuColumns).not.toBeChecked();
   for (const width of [1280, 768]) {
     await page.setViewportSize({ width, height: 900 });

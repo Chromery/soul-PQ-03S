@@ -241,6 +241,12 @@
     .economics.ultra .annual-saving small, .economics.ultra .ten-year-head span { font-size: 9px; }
     .economics.ultra .annual-saving strong, .economics.ultra .ten-year-head strong { font-size: 20px; }
 
+    html.presentation-v3 .economics { width: 1400px; height: 990px; aspect-ratio: auto; }
+
+    /* Company shortening is presentation-only; the snapshot retains the full value. */
+    .economics.layout-compact .company-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+    .economics.layout-paginated .company-name { display: block; }
+
     /* 6 — chiusura */
     .closing { background: var(--blue); color: white; }
     .closing-image { position: absolute; inset: 0 0 0 52%; width: 48%; height: 100%; object-fit: cover; filter: saturate(.65) contrast(.9); }
@@ -391,7 +397,7 @@
       const imuLabel = Number.isFinite(imuVariation)
         ? `${imuVariation > 0 ? "+" : imuVariation < 0 ? "−" : ""}${euro.format(Math.abs(imuVariation))}`
         : "n.d.";
-      return `<tr class="${item.memberIds?.length > 1 ? "grouped-property" : ""}"><td>${escapeHtml(item.societa)}</td><td>${escapeHtml(item.comune)}</td><td>${escapeHtml(item.indirizzo)}</td><td>${escapeHtml(item.foglioParticellaSub)}</td><td>${escapeHtml(item.categoria || "—")}</td><td>${euro.format(item.renditaAttuale)}</td><td>${euro.format(item.renditaAttribuibile)}</td>${imuCells(item.imuAttuale, item.imuOttenibile)}<td>${euro.format(rentDiff)}</td><td class="${imuClass}">${imuLabel}</td><td>${percent(reduction)}</td></tr>`;
+      return `<tr class="${item.memberIds?.length > 1 ? "grouped-property" : ""}"><td><span class="company-name" title="${escapeHtml(item.societa)}">${escapeHtml(item.societa)}</span></td><td>${escapeHtml(item.comune)}</td><td>${escapeHtml(item.indirizzo)}</td><td>${escapeHtml(item.foglioParticellaSub)}</td><td>${escapeHtml(item.categoria || "—")}</td><td>${euro.format(item.renditaAttuale)}</td><td>${euro.format(item.renditaAttribuibile)}</td>${imuCells(item.imuAttuale, item.imuOttenibile)}<td>${euro.format(rentDiff)}</td><td class="${imuClass}">${imuLabel}</td><td>${percent(reduction)}</td></tr>`;
     }).join("");
     const totalRentDifference = currentRent - estimatedRent;
     const completeImu = data.immobili.every(item => Number.isFinite(item.imuAttuale) && Number.isFinite(item.imuOttenibile));
@@ -447,24 +453,72 @@
     document.addEventListener("keydown", (event) => { if (event.key === "ArrowLeft") show(active - 1); if (event.key === "ArrowRight") show(active + 1); });
     const assets = [...document.images].map((image) => image.complete ? Promise.resolve() : new Promise((resolve) => { image.onload = image.onerror = resolve; }));
     Promise.all([document.fonts.ready, ...assets]).then(() => {
-      if (showImuColumns) {
-        // Extra columns can make long company/address labels taller. Keep the whole
-        // table and summary inside slide 5, including dense grouped portfolios.
-        const slide = document.querySelector(".economics"), summary = slide.querySelector(".bottom-grid");
-        const fit = () => {
-          propertiesCard.style.zoom = "1";
-          const available = slide.clientHeight - parseFloat(getComputedStyle(slide).paddingBottom)
-            - propertiesCard.offsetTop - summary.offsetHeight - parseFloat(getComputedStyle(summary).marginTop);
-          if (available > 0 && propertiesCard.offsetHeight > available)
-            propertiesCard.style.zoom = String(available / propertiesCard.offsetHeight);
-          slide.querySelectorAll(".metric strong").forEach(amount => {
-            amount.style.fontSize = "";
-            if (amount.scrollWidth > amount.clientWidth)
-              amount.style.fontSize = `${parseFloat(getComputedStyle(amount).fontSize) * amount.clientWidth / amount.scrollWidth}px`;
-          });
-        };
-        fit();
-        window.addEventListener("resize", fit);
+      if (data.version === 3) {
+        const first = document.querySelector(".economics");
+        const paginated = data.tableLayout === "paginated";
+        first.classList.add(paginated ? "layout-paginated" : "layout-compact");
+        // Keep readable rows in multipage mode instead of shrinking the whole list.
+        if (paginated) propertiesCard.classList.remove("ultra");
+        first.querySelectorAll(".metric strong").forEach(amount => {
+          if (amount.scrollWidth > amount.clientWidth)
+            amount.style.fontSize = `${parseFloat(getComputedStyle(amount).fontSize) * amount.clientWidth / amount.scrollWidth}px`;
+        });
+        const summary = first.querySelector(".bottom-grid");
+        const totals = propertiesCard.querySelector("tfoot");
+        const allRows = Array.from(rows.children);
+        const heights = allRows.map(row => row.getBoundingClientRect().height);
+        const summarySpace = summary.offsetHeight + parseFloat(getComputedStyle(summary).marginTop);
+        const footerHeight = totals.getBoundingClientRect().height;
+        const tableChrome = propertiesCard.offsetHeight - heights.reduce((sum, height) => sum + height, 0) - footerHeight;
+        const tableSpace = first.clientHeight - parseFloat(getComputedStyle(first).paddingBottom) - propertiesCard.offsetTop - 4;
+        const fullCapacity = tableSpace - tableChrome;
+        const lastCapacity = fullCapacity - footerHeight - summarySpace;
+        // Reserve the summary only on the last page. Fill that page backwards,
+        // then divide preceding rows at their measured heights without splitting a row.
+        let lastStart = allRows.length, lastHeight = 0;
+        while (lastStart > 0 && (lastStart === allRows.length || lastHeight + heights[lastStart - 1] <= lastCapacity)) {
+          lastStart -= 1;
+          lastHeight += heights[lastStart];
+        }
+        const groups = [];
+        let group = [], height = 0;
+        for (let index = 0; index < lastStart; index += 1) {
+          if (group.length && height + heights[index] > fullCapacity) {
+            groups.push(group); group = []; height = 0;
+          }
+          group.push(allRows[index]); height += heights[index];
+        }
+        if (group.length) groups.push(group);
+        groups.push(allRows.slice(lastStart));
+        const skeleton = first.cloneNode(true);
+        skeleton.removeAttribute("id");
+        skeleton.querySelectorAll("[id]").forEach(element => element.removeAttribute("id"));
+        skeleton.querySelector("tbody").replaceChildren();
+        skeleton.querySelector("tfoot").remove();
+        skeleton.querySelector(".bottom-grid").remove();
+        rows.replaceChildren(); totals.remove(); summary.remove();
+        let previous = first;
+        const economicsPages = groups.map((pageRows, index) => {
+          const slide = index === 0 ? first : skeleton.cloneNode(true);
+          if (index > 0) { slide.id = `slide-5-${index + 1}`; previous.after(slide); }
+          previous = slide;
+          const card = slide.querySelector(".properties-card");
+          card.querySelector("tbody").append(...pageRows);
+          const isLast = index === groups.length - 1;
+          if (isLast) { card.querySelector("table").append(totals); slide.append(summary); }
+          // Handle an unusually tall single grouped row without losing any text.
+          const available = tableSpace - (isLast ? summarySpace : 0);
+          if (card.offsetHeight > available) card.style.zoom = String(Math.max(1, available) / card.offsetHeight);
+          return slide;
+        });
+        economicsPages.forEach((slide, index) => {
+          slide.dataset.economicsPage = String(index + 1);
+          if (economicsPages.length > 1) slide.querySelector(".properties-card .card-title").textContent
+            = `Immobili oggetto di analisi · ${index + 1} / ${economicsPages.length}`;
+        });
+        // Navigation also includes continuation pages (PDF export uses the same DOM).
+        slides.splice(0, slides.length, ...document.querySelectorAll(".slide"));
+        document.getElementById("counter").textContent = `${active + 1} / ${slides.length}`;
       }
       const marker = document.createElement("span"); marker.id = "assets-ready"; marker.hidden = true; document.body.append(marker);
     });
