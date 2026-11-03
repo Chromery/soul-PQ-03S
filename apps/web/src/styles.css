@@ -9140,3 +9140,7 @@ button.activity-item {
 .presentation-layout-option strong { font-size: 13px; }
 .presentation-layout-option select { width: 100%; min-width: 0; padding: 8px; border: 1px solid #b8cdd9; border-radius: 6px; background: white; color: #243f52; font: inherit; }
 .presentation-layout-option small { color: #536878; line-height: 1.4; }
+
+.presentation-highlight-toggle { display: flex; gap: 5px; align-items: center; font-size: 11px; margin-top: 6px; white-space: nowrap; }
+.presentation-highlight-toggle input { accent-color: #9b7300; }
+.presentation-preview-table tr.presentation-highlighted td { background: #fff2bd; }

@@ -2,6 +2,7 @@ export type PresentationPropertySnapshot = {
   id: string;
   memberIds?: string[];
   outcome?: string;
+  highlighted?: boolean;
   reductionBasis?: "rent" | "imu";
   societa: string;
   comune: string;

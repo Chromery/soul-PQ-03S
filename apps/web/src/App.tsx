@@ -1,7 +1,7 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/react";
 import type { ReactNode } from "react";
-import { usePresentationDraftStore } from "./presentation-draft-store";
+import { flushPresentationDrafts, refreshPresentationDrafts, usePresentationDraftStore } from "./presentation-draft-store";
 import { allocatePresentationTotal } from "./presentation-group-allocation";
 import { formatStudyOutcomeDate } from "./study-outcome-date";
 import {
@@ -84,7 +84,7 @@ import { PropertyGroupingSuggestions } from "./PropertyGroupingSuggestions";
 import { PriceRuleLab } from "./PriceRules";
 const PlanimetriaEditor = lazy(() => import("./PlanimetriaEditor"));
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
-const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.2.5";
+const APP_DEPLOY_VERSION = import.meta.env.VITE_APP_VERSION ?? "1.3.0";
 
 type ActivityType = "ERP_SYNC" | "STUDY_CONCLUDED";
 
@@ -157,6 +157,10 @@ type PropertyItem = {
   oneri?: boolean;
   currentRendita: number;
   estimatedRendita: number;
+  estimatedRenditaBase?: number;
+  estimatedImuBase?: number | null;
+  hasManualEstimatedRendita?: boolean;
+  imuForecastParameters?: PropertyImuCalculation | null;
   diffPercent: number;
   currentImu?: number | null;
   estimatedImu?: number | null;
@@ -1949,8 +1953,8 @@ function formatPercent(value: number) {
   })}%`;
 }
 
-function formatEstimatedValue(value: number | null | undefined) {
-  return value === null || value === undefined || value === 0 ? "Da stimare" : formatEuro(value);
+function formatEstimatedValue(value: number | null | undefined, manual = false) {
+  return value === null || value === undefined || (value === 0 && !manual) ? "Da stimare" : formatEuro(value);
 }
 
 type PropertyDocumentKind = "planimetria" | "visura" | "elenco_subalterni";
@@ -2443,12 +2447,12 @@ function compactGroupValues(values: Array<string | null | undefined>) {
 }
 
 function propertyRenditaDiffAmount(property: PropertyItem) {
-  if (!property.hasStudy && property.estimatedRendita <= 0) return null;
+  if (!property.hasStudy && !property.hasManualEstimatedRendita && property.estimatedRendita <= 0) return null;
   return property.estimatedRendita - property.currentRendita;
 }
 
 function propertyRenditaDiffPercent(property: PropertyItem) {
-  if (!property.hasStudy && property.estimatedRendita <= 0) return null;
+  if (!property.hasStudy && !property.hasManualEstimatedRendita && property.estimatedRendita <= 0) return null;
   return deviationPercent(property.currentRendita, property.estimatedRendita) ?? property.diffPercent;
 }
 
@@ -2530,6 +2534,8 @@ function propertyWithEstimatedValue(
   estimatedImu?: number | null,
   imuCalculation?: PropertyImuCalculation | null,
 ): PropertyItem {
+  if (property.hasManualEstimatedRendita) return { ...property, estimatedRenditaBase: estimatedRendita,
+    estimatedImuBase: estimatedImu ?? null, hasStudy: true };
   const diffPercent =
     property.currentRendita === 0
       ? 0
@@ -2746,6 +2752,26 @@ function App() {
 
     void loadStudies();
     return () => abortController.abort();
+  }, []);
+
+  useEffect(() => {
+    const generations = new Map<string, number>();
+    const refresh = (event: Event) => {
+      const ids = (event as CustomEvent<string[]>).detail;
+      if (!Array.isArray(ids)) return;
+      for (const id of new Set(ids)) {
+        const generation = (generations.get(id) ?? 0) + 1;
+        generations.set(id, generation);
+        void fetch(`${API_BASE_URL}/studies/${encodeURIComponent(id)}`).then(async response => {
+          if (!response.ok) throw new Error("Aggiornamento immobile non riuscito");
+          const study = await response.json() as FeasibilityStudy;
+          if (generations.get(id) === generation && study?.id === id)
+            setStudies(current => current.map(item => item.id === id ? study : item));
+        }).catch(() => flash("Dati salvati. Aggiorna la pagina per ricaricare la lista immobili."));
+      }
+    };
+    window.addEventListener("pq-presentation-rent-saved", refresh);
+    return () => window.removeEventListener("pq-presentation-rent-saved", refresh);
   }, []);
 
   useEffect(() => {
@@ -3158,6 +3184,7 @@ function App() {
     }
     const update = (await response.json()) as PropertyImuOverrideUpdate;
     updatePropertyInStudies(propertyId, (property) => ({ ...property, ...update }), true);
+    refreshPresentationDrafts();
     const current = "currentImuRateOverride" in patch || "currentImuMultiplierOverride" in patch;
     flash(`Parametri ${current ? "IMU attuale" : "IMU prevista"} salvati. L’altro calcolo rimane indipendente.`);
     return update;
@@ -5992,7 +6019,7 @@ function StudyGroupDetail({
                   {visibleColumns.has("sub") && <td>{property.subalterno || "—"}</td>}
                   {visibleColumns.has("category") && <td className="table-category-cell" title={property.categoria}>{property.categoria || "—"}</td>}
                   {visibleColumns.has("currentRendita") && <td>{formatEuro(property.currentRendita)}</td>}
-                  {visibleColumns.has("estimatedRendita") && <td>{formatEstimatedValue(property.estimatedRendita)}</td>}
+                  {visibleColumns.has("estimatedRendita") && <td>{formatEstimatedValue(property.estimatedRendita, property.hasManualEstimatedRendita)}</td>}
                   {visibleColumns.has("renditaDiff") && <td><MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} favorableDirection="down" /></td>}
                   {visibleColumns.has("currentImu") && <td><ImuCurrent property={property} /></td>}
                   {visibleColumns.has("estimatedImu") && <td><ImuEstimate property={property} /></td>}
@@ -6657,9 +6684,9 @@ function presentationDraftFromStudy(study: FeasibilityStudy): PresentationDraft 
       foglioParticellaSub: cadastralPropertyReference(property).split(" · ").join(" - "),
       categoria: property.categoria,
       renditaAttuale: formatPresentationMoneyInput(property.currentRendita),
-      renditaAttribuibile: formatPresentationMoneyInput(property.estimatedRendita),
+      renditaAttribuibile: formatPresentationMoneyInput(property.estimatedRenditaBase ?? property.estimatedRendita),
       imuAttuale: formatPresentationMoneyInput(property.currentImu),
-      imuOttenibile: formatPresentationMoneyInput(property.estimatedImu),
+      imuOttenibile: formatPresentationMoneyInput(property.estimatedImuBase !== undefined ? property.estimatedImuBase : property.estimatedImu),
     })),
   };
 }
@@ -6702,7 +6729,7 @@ function presentationImuFromRendita(
   const rendita = presentationMoneyToCents(value, true);
   if (rendita === undefined) return "";
   if (!calculation || calculation.status !== "calculated") return null;
-  const taxableBase = rendita * 1.05 * calculation.cadastralMultiplier;
+  const taxableBase = Math.round((rendita * 1.05 * calculation.cadastralMultiplier + Number.EPSILON) * 100) / 100;
   return formatPresentationMoneyInput(
     Math.round((taxableBase * (calculation.ratePercent / 100) + Number.EPSILON) * 100) / 100,
   );
@@ -6824,7 +6851,7 @@ function usePersistentPresentationDraft(endpoint: string, baseline: Presentation
     const source = properties.find(property => property.id === propertyId);
     const updates: Record<string, string> = { [`${propertyId}:${field}`]: value };
     const linkedField = field === "renditaAttuale" ? "imuAttuale" : field === "renditaAttribuibile" ? "imuOttenibile" : null;
-    const calculation = field === "renditaAttuale" ? source?.currentImuCalculation : source?.imuCalculation;
+    const calculation = field === "renditaAttuale" ? source?.currentImuCalculation : source?.imuForecastParameters ?? source?.imuCalculation;
     const recalculated = linkedField ? presentationImuFromRendita(value, calculation) : null;
     if (linkedField && recalculated !== null) updates[`${propertyId}:${linkedField}`] = recalculated;
     persistence.change(updates);
@@ -6978,6 +7005,17 @@ function PresentationGroupingToolbar({ groups, selectedIds, persistence, onSelec
   </div>;
 }
 
+function PresentationHighlightToggle({ scope, persistence }: {
+  scope: string; persistence: ReturnType<typeof usePresentationDraftStore>;
+}) {
+  return <label className="presentation-highlight-toggle">
+    <input type="checkbox" aria-label={`Evidenzia nel PDF · ${scope}`} disabled={!persistence.loaded}
+      checked={persistence.overrides[`${scope}:highlight`] === "true"}
+      onChange={event => persistence.change({ [`${scope}:highlight`]: event.target.checked ? "true" : null })} />
+    Evidenzia nel PDF
+  </label>;
+}
+
 function PresentationReductionToggle({ scope, persistence }: {
   scope: string; persistence: ReturnType<typeof usePresentationDraftStore>;
 }) {
@@ -6992,7 +7030,7 @@ function PresentationReductionToggle({ scope, persistence }: {
 function PresentationGroupCells({ group, outcomes, persistence, sources = [] }: {
   group: PresentationRowGroup; outcomes: Map<string, PropertyOutcome>;
   persistence: ReturnType<typeof usePresentationDraftStore>;
-  sources?: readonly Pick<PropertyItem, "id" | "currentImuCalculation" | "imuCalculation">[];
+  sources?: readonly Pick<PropertyItem, "id" | "currentImuCalculation" | "imuCalculation" | "imuForecastParameters">[];
 }) {
   const values = new Set(group.members.map(member => outcomes.get(member.id) ?? "Neutro"));
   function change(field: PresentationPropertyField, value: string | null) {
@@ -7013,7 +7051,7 @@ function PresentationGroupCells({ group, outcomes, persistence, sources = [] }: 
       if (linked && value === null) changes[`${member.id}:${linked}`] = null;
       else if (linked && next !== null) {
         const source = sources.find(source => source.id === member.id);
-        const calculation = field === "renditaAttuale" ? source?.currentImuCalculation : source?.imuCalculation;
+        const calculation = field === "renditaAttuale" ? source?.currentImuCalculation : source?.imuForecastParameters ?? source?.imuCalculation;
         const recalculated = presentationImuFromRendita(next, calculation);
         if (recalculated !== null) changes[`${member.id}:${linked}`] = recalculated;
       }
@@ -7021,7 +7059,7 @@ function PresentationGroupCells({ group, outcomes, persistence, sources = [] }: 
     persistence.change(changes);
   }
   return <>
-    <td>{values.size === 1 ? <OutcomeBadge outcome={[...values][0]} /> : <span>Esiti misti</span>}<small className="presentation-group-count">{group.members.length} {group.members.length === 1 ? "immobile" : "immobili"}</small><PresentationReductionToggle scope={group.key} persistence={persistence} /></td>
+    <td>{values.size === 1 ? <OutcomeBadge outcome={[...values][0]} /> : <span>Esiti misti</span>}<small className="presentation-group-count">{group.members.length} {group.members.length === 1 ? "immobile" : "immobili"}</small><PresentationReductionToggle scope={group.key} persistence={persistence} /><PresentationHighlightToggle scope={group.key} persistence={persistence} /></td>
     {PRESENTATION_PROPERTY_FIELDS.map(field => <td key={field} className="presentation-group-value">
       <PresentationGroupInput key={`${field}:${group.members.map(member => member.id).join(",")}`}
         field={field} value={group.property[field]} groupKey={group.key} disabled={!persistence.loaded}
@@ -7202,7 +7240,9 @@ function PresentationAction({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [busy, modalOpen]);
 
-  function openGenerator() {
+  async function openGenerator() {
+    if (!await flushPresentationDrafts()) { onNotice("Salva le modifiche in sospeso prima di generare la presentazione."); return; }
+    await persistence.reload();
     setMenuOpen(false);
     setSelectedPropertyIds(defaultPresentationPropertyIds(study));
     setGeneratedDeck(null);
@@ -7428,7 +7468,7 @@ function PresentationAction({
                     {label}{selectionSort.key === key ? (selectionSort.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : <ArrowDownUp size={13} />}
                   </button></th>)}
               </tr></thead><tbody>{orderedSelectionGroups.map(group => <Fragment key={group.key}>
-                {group.members.length > 1 && <tr className="presentation-group-row" data-presentation-group={group.key}>
+                {group.members.length > 1 && <tr className={`presentation-group-row ${persistence.overrides[`${group.key}:highlight`] === "true" ? "presentation-highlighted" : ""}`} data-presentation-group={group.key}>
                   <td><div className="presentation-group-controls"><input type="checkbox" disabled={busy}
                     aria-label={`Includi gruppo ${group.property.indirizzo}`} checked={group.members.every(member => selectedPropertyIds.includes(member.id))}
                     ref={element => { if (element) element.indeterminate = group.members.some(member => selectedPropertyIds.includes(member.id)) && !group.members.every(member => selectedPropertyIds.includes(member.id)); }}
@@ -7448,7 +7488,7 @@ function PresentationAction({
                 const propertyDraft = propertyDraftById.get(property.id);
                 const incomplete = !propertyDraft || presentationPropertyHasIncompleteData(propertyDraft);
                 return (
-                  <tr key={property.id} data-property-id={property.id} className={selectedPropertyIds.includes(property.id) ? "selected" : ""}>
+                  <tr key={property.id} data-property-id={property.id} className={`${selectedPropertyIds.includes(property.id) ? "selected" : ""} ${persistence.overrides[`${group.key.startsWith("group:") ? group.key : property.id}:highlight`] === "true" ? "presentation-highlighted" : ""}`}>
                     <td>
                     <input
                       type="checkbox"
@@ -7459,7 +7499,7 @@ function PresentationAction({
                     />
                     </td>
                     {selectionColumns.map(({ key }) => <td key={key}>{key === "outcome"
-                      ? <><OutcomeBadge outcome={selectionOutcomes.get(property.id) ?? "Neutro"} />{incomplete && <small className="presentation-incomplete">Dati incompleti</small>}{group.members.length === 1 && <PresentationReductionToggle scope={group.key.startsWith("group:") ? group.key : property.id} persistence={{ ...persistence, loaded: persistence.loaded && !busy }} />}</>
+                      ? <><OutcomeBadge outcome={selectionOutcomes.get(property.id) ?? "Neutro"} />{incomplete && <small className="presentation-incomplete">Dati incompleti</small>}{group.members.length === 1 && <><PresentationReductionToggle scope={group.key.startsWith("group:") ? group.key : property.id} persistence={{ ...persistence, loaded: persistence.loaded && !busy }} /><PresentationHighlightToggle scope={group.key.startsWith("group:") ? group.key : property.id} persistence={{ ...persistence, loaded: persistence.loaded && !busy }} /></>}</>
                       : ["renditaAttuale", "renditaAttribuibile", "imuAttuale", "imuOttenibile"].includes(key)
                         ? formatPresentationDraftAmount(propertyDraft?.[key], "n.d.") : propertyDraft?.[key] || "—"}</td>)}
                   </tr>
@@ -7560,7 +7600,7 @@ function PresentationDataPreview({
   onPropertyFieldReset,
   onReset,
 }: {
-  sourceProperties: readonly (PresentationGroupingSource & Pick<PropertyItem, "currentImuCalculation" | "imuCalculation">)[];
+  sourceProperties: readonly (PresentationGroupingSource & Pick<PropertyItem, "currentImuCalculation" | "imuCalculation" | "imuForecastParameters">)[];
   persistence: ReturnType<typeof usePresentationDraftStore>;
   draft: PresentationDraft;
   baseline: PresentationDraft;
@@ -7690,8 +7730,10 @@ function PresentationDataPreview({
       <PresentationImuColumnsOption persistence={persistence} />
 
       <p className="presentation-preview-info">
-        Se modifichi una rendita, la relativa IMU viene ricalcolata soltanto per la presentazione con
-        aliquota e moltiplicatore della stima. Le aree e i valori salvati nell’editor non vengono modificati.
+        La R.C. attribuibile inserita qui aggiorna la rendita proposta e il calcolo IMU anche nella lista immobili.
+        I dati delle singole righe sono condivisi tra società e gruppo. Copertina, impaginazione e raggruppamenti
+        restano specifici della presentazione. Le aree della stima restano invariate; “Ripristina” torna al valore della stima.
+        “Evidenzia nel PDF” applica uno sfondo giallo alla riga scelta.
         {" "}Indirizzo, categoria e altri testi della riga unificata sono indipendenti dai membri: modificali qui senza svuotare i singoli immobili.
         Gli importi del gruppo sono ripartiti proporzionalmente (in assenza di valori, secondo le rendite attuali o in parti uguali).
         I campi descrittivi vuoti dei membri usano nel PDF i dati originali, oppure il testo del gruppo. Invio o uscita dal campo per salvare; la freccia ripristina il valore automatico.
@@ -7719,7 +7761,7 @@ function PresentationDataPreview({
           </thead>
           <tbody>
             {orderedGroups.map(group => <Fragment key={group.key}>
-              {group.members.length > 1 && <tr className="presentation-group-row" data-presentation-group={group.key}>
+              {group.members.length > 1 && <tr className={`presentation-group-row ${persistence.overrides[`${group.key}:highlight`] === "true" ? "presentation-highlighted" : ""}`} data-presentation-group={group.key}>
                 <td><div className="presentation-group-controls">
                   <input type="checkbox" aria-label={`Seleziona gruppo ${group.property.indirizzo}`}
                     disabled={!persistence.loaded} checked={group.members.every(member => selectedRows.includes(member.id))}
@@ -7735,10 +7777,10 @@ function PresentationDataPreview({
                 <PresentationGroupCells group={group} outcomes={outcomes} persistence={persistence} sources={sourceProperties} />
               </tr>}
               {(group.members.length === 1 || expandedGroups.has(group.key)) && group.members.map(property => (
-              <tr key={property.id} data-property-id={property.id} className={group.members.length > 1 ? "presentation-group-member" : ""}>
+              <tr key={property.id} data-property-id={property.id} className={`${group.members.length > 1 ? "presentation-group-member" : ""} ${persistence.overrides[`${group.key.startsWith("group:") ? group.key : property.id}:highlight`] === "true" ? "presentation-highlighted" : ""}`}>
                 <td><input type="checkbox" aria-label={`Seleziona ${property.indirizzo}`} disabled={!persistence.loaded}
                   checked={selectedRows.includes(property.id)} onChange={event => setSelectedRows(current => event.target.checked ? [...current, property.id] : current.filter(id => id !== property.id))} /></td>
-                <td><OutcomeBadge outcome={outcomes.get(property.id) ?? "Neutro"} />{group.members.length === 1 && <PresentationReductionToggle scope={group.key.startsWith("group:") ? group.key : property.id} persistence={persistence} />}</td>
+                <td><OutcomeBadge outcome={outcomes.get(property.id) ?? "Neutro"} />{group.members.length === 1 && <><PresentationReductionToggle scope={group.key.startsWith("group:") ? group.key : property.id} persistence={persistence} /><PresentationHighlightToggle scope={group.key.startsWith("group:") ? group.key : property.id} persistence={persistence} /></>}</td>
                 {(["societa", "comune", "indirizzo", "foglioParticellaSub", "categoria"] as const).map((field) => (
                   <td key={field}>
                     <input
@@ -8537,7 +8579,7 @@ function StudyDetail({
                   const groupSelected = properties.every((property) => selectedPropertyIds.includes(property.id));
                   const expanded = expandedValuationGroupIds.includes(row.groupId);
                   const currentRendita = sumNumbers(properties.map((property) => property.currentRendita));
-                  const completeEstimate = properties.every((property) => property.hasStudy || property.estimatedRendita > 0);
+                  const completeEstimate = properties.every((property) => property.hasStudy || property.hasManualEstimatedRendita || property.estimatedRendita > 0);
                   const estimatedRendita = completeEstimate
                     ? sumNumbers(properties.map((property) => property.estimatedRendita))
                     : null;
@@ -8706,7 +8748,7 @@ function StudyDetail({
                     {visiblePropertyColumnIds.has("sub") && <td className="table-cell-ellipsis" title={property.subalterno || "In attesa ERP"}>{property.subalterno || "—"}</td>}
                     {visiblePropertyColumnIds.has("category") && <td className="table-category-cell" title={property.categoria}>{property.categoria || "—"}</td>}
                     {visiblePropertyColumnIds.has("currentRendita") && <td>{formatEuro(property.currentRendita)}</td>}
-                    {visiblePropertyColumnIds.has("estimatedRendita") && <td>{formatEstimatedValue(property.estimatedRendita)}</td>}
+                    {visiblePropertyColumnIds.has("estimatedRendita") && <td>{formatEstimatedValue(property.estimatedRendita, property.hasManualEstimatedRendita)}</td>}
                     {visiblePropertyColumnIds.has("renditaDiff") && (
                       <td><MoneyPercentStack amount={propertyRenditaDiffAmount(property)} percent={propertyRenditaDiffPercent(property)} favorableDirection="down" /></td>
                     )}

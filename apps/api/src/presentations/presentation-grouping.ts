@@ -31,6 +31,7 @@ export function groupPresentationRows(
       // A group has its own preference, including when only one member is exported.
       // Member preferences remain saved and become effective again on dissolution.
       const scope = key.startsWith("group:") ? key : row.id;
+      result.highlighted = overrides[`${scope}:highlight`] === "true";
       result.reductionBasis = overrides[`${scope}:reductionBasis`] === "imu" ? "imu" : "rent";
       if (key.startsWith("group:")) for (const field of ["societa", "comune", "indirizzo", "foglioParticellaSub", "categoria"] as const) {
         const value = overrides[`${key}:${field}`];

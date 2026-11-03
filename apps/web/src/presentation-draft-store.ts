@@ -19,6 +19,7 @@ class DraftStore {
   private sending: Changes = {};
   private listeners = new Set<() => void>();
   private started = false;
+  private loadVersion = 0;
   private timer?: ReturnType<typeof setTimeout>;
   private request?: Promise<void>;
   constructor(private endpoint: string) {}
@@ -28,19 +29,26 @@ class DraftStore {
     this.state = { overrides: merge(merge(this.saved, this.sending), this.pending), loaded, status };
     this.listeners.forEach(listener => listener());
   }
-  load = async () => {
-    if (this.started) return;
+  load = async (force = false) => {
+    if (this.started && !force) return;
+    const version = ++this.loadVersion;
     this.started = true;
     try {
       const response = await fetch(this.endpoint);
       if (!response.ok) throw new Error("Caricamento bozza non riuscito");
       const result = await response.json();
+      if (version !== this.loadVersion) return;
       this.saved = result?.overrides ?? {};
-      this.publish("saved", true);
+      this.publish(Object.keys(this.pending).length || Object.keys(this.sending).length ? "saving" : "saved", true);
     } catch {
+      if (version !== this.loadVersion) return;
       this.started = false;
       this.publish("error");
     }
+  };
+  invalidate = () => {
+    if (this.listeners.size) void this.load(true);
+    else { this.started = false; this.loadVersion++; }
   };
   change = (changes: Changes) => {
     if (!this.state.loaded) return;
@@ -63,9 +71,12 @@ class DraftStore {
           body: JSON.stringify({ changes: this.sending }), keepalive: true });
         if (!response.ok) throw new Error("Salvataggio bozza non riuscito");
         const result = await response.json();
+        this.loadVersion++;
         this.saved = result.overrides;
         this.sending = {};
         this.publish(Object.keys(this.pending).length ? "saving" : "saved");
+        refreshPresentationDrafts(this.endpoint);
+        if (result.affectedStudyIds?.length) window.dispatchEvent(new CustomEvent("pq-presentation-rent-saved", { detail: result.affectedStudyIds }));
       } catch {
         this.pending = { ...this.sending, ...this.pending };
         this.sending = {};
@@ -79,6 +90,15 @@ class DraftStore {
   };
 }
 
+export function refreshPresentationDrafts(exceptEndpoint?: string) {
+  for (const [endpoint, store] of stores) if (endpoint !== exceptEndpoint) store.invalidate();
+}
+
+export async function flushPresentationDrafts() {
+  return (await Promise.all([...stores.values()].filter(store => store.state.loaded && store.state.status !== "saved").map(store => store.flush()))).every(Boolean);
+}
+
+if (typeof window !== "undefined") window.addEventListener("focus", () => refreshPresentationDrafts());
 if (typeof window !== "undefined") window.addEventListener("beforeunload", event => {
   if ([...stores.values()].some(store => store.state.loaded && store.state.status !== "saved")) {
     event.preventDefault(); event.returnValue = "";
@@ -90,5 +110,5 @@ export function usePresentationDraftStore(endpoint: string) {
   if (!store) { store = new DraftStore(endpoint); stores.set(endpoint, store); }
   const state = useSyncExternalStore(store.subscribe, store.snapshot);
   useEffect(() => { void store.load(); }, [store]);
-  return { ...state, change: store.change, flush: store.flush };
+  return { ...state, change: store.change, flush: store.flush, reload: () => store.load(true) };
 }

@@ -9,6 +9,7 @@ import { imuOverrides, type ImuOverrides } from "../imu/imu-overrides.js";
 import { ImuService } from "../imu/imu.service.js";
 import type { ImuCalculation } from "../imu/imu.types.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { manualPresentationRent } from "../presentations/shared-presentation-values.js";
 import { estimatedRenditaFromAnalysisDraft, estimatedRenditaFromDraftPayload } from "../rendita.js";
 import { VisuraExtractionService } from "../visura-extraction/visura-extraction.service.js";
 
@@ -531,7 +532,8 @@ export class PropertiesService {
     }
     const existing = await this.prisma.property.findUnique({
       where: { id: propertyId },
-      include: { analysisDraft: true },
+      include: { analysisDraft: true, valuationGroup: { include: { analysisDraft: true } },
+        study: { include: { presentationDraft: true, studyGroup: { include: { presentationDraft: true, analysisDraft: true } } } } },
     });
     if (!existing) throw new NotFoundException("Immobile non trovato");
     const outcome = hasOutcome ? validatePropertyOutcome(input.outcome) : existing.outcome;
@@ -568,23 +570,26 @@ export class PropertiesService {
     }
 
     const calculationProperty = { ...property, imuRateOverride, imuMultiplierOverride, currentImuRateOverride, currentImuMultiplierOverride };
-    const estimatedRendita = estimatedRenditaFromAnalysisDraft(existing.analysisDraft, oneri)
-      ?? Number(property.estimatedRendita);
+    const estimatedRenditaBase = existing.valuationGroup?.analysisDraft || existing.study?.studyGroup?.analysisDraft
+      ? Number(property.estimatedRendita) : estimatedRenditaFromAnalysisDraft(existing.analysisDraft, oneri) ?? Number(property.estimatedRendita);
+    const manualRent = manualPresentationRent(propertyId, existing.study?.presentationDraft, existing.study?.studyGroup?.presentationDraft);
+    const estimatedRendita = manualRent ?? estimatedRenditaBase;
+    const baseCalculation = estimatedRenditaBase > 0 || property.hasStudy ? this.calculateImu(estimatedRenditaBase, calculationProperty) : null;
     const currentImuCalculation = this.calculateImu(Number(property.currentRendita), calculationProperty, true);
-    const estimatedImuCalculation = estimatedRendita > 0 || property.hasStudy
+    const estimatedImuCalculation = manualRent !== null || estimatedRendita > 0 || property.hasStudy
       ? this.calculateImu(estimatedRendita, calculationProperty)
       : null;
     const currentImu = calculatedAmount(currentImuCalculation)
       ?? (property.currentImu === null ? null : Number(property.currentImu));
     const estimatedImu = calculatedAmount(estimatedImuCalculation)
-      ?? (property.estimatedImu === null ? null : Number(property.estimatedImu));
+      ?? (manualRent !== null || property.estimatedImu === null ? null : Number(property.estimatedImu));
     const imuDiff = currentImu === null || estimatedImu === null ? 0 : estimatedImu - currentImu;
     await this.prisma.property.update({
       where: { id: propertyId },
       data: {
-        estimatedRendita,
-        diffPercent: percentageDiff(Number(property.currentRendita), estimatedRendita),
-        estimatedImu,
+        estimatedRendita: estimatedRenditaBase,
+        diffPercent: percentageDiff(Number(property.currentRendita), estimatedRenditaBase),
+        estimatedImu: calculatedAmount(baseCalculation) ?? (property.estimatedImu == null ? null : Number(property.estimatedImu)),
         imuDiff,
       },
     });
@@ -595,6 +600,10 @@ export class PropertiesService {
       oneri,
       notes: property.notes,
       estimatedRendita,
+      estimatedRenditaBase,
+      estimatedImuBase: calculatedAmount(baseCalculation),
+      hasManualEstimatedRendita: manualRent !== null,
+      imuForecastParameters: this.calculateImu(0, calculationProperty),
       diffPercent: percentageDiff(Number(property.currentRendita), estimatedRendita),
       imuRateOverride,
       imuMultiplierOverride,
@@ -610,7 +619,7 @@ export class PropertiesService {
         : property.currentImu === null ? "unavailable" : "stored",
       estimatedImuSource: estimatedImuCalculation?.status === "calculated"
         ? "calculated"
-        : property.estimatedImu === null ? "unavailable" : "stored",
+        : manualRent !== null || property.estimatedImu === null ? "unavailable" : "stored",
     };
   }
 
@@ -780,17 +789,17 @@ export class PropertiesService {
       include: {
         analysisDraft: true,
         valuationGroup: { include: { analysisDraft: true } },
-        study: { select: { studyGroup: { select: { analysisDraft: { select: { id: true } } } } } },
+        study: { select: { presentationDraft: true, studyGroup: { select: { presentationDraft: true, analysisDraft: { select: { id: true } } } } } },
       },
     });
     const usesStudyGroupDraft = properties.some((property) => Boolean(property.study?.studyGroup?.analysisDraft));
     const originalRendita = sum(properties.map((property) => Number(property.currentRendita)));
     const totalRendita = sum(
       properties.map((property) =>
-        usesStudyGroupDraft || property.valuationGroup?.analysisDraft
-          ? Number(property.estimatedRendita)
-          : estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
-            ?? Number(property.estimatedRendita)),
+        manualPresentationRent(property.id, property.study?.presentationDraft, property.study?.studyGroup?.presentationDraft)
+          ?? (usesStudyGroupDraft || property.valuationGroup?.analysisDraft
+            ? Number(property.estimatedRendita)
+            : estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri) ?? Number(property.estimatedRendita))),
     );
     const catDRendita = sum(
       properties
@@ -805,10 +814,9 @@ export class PropertiesService {
     );
     const estimatedImu = sum(
       properties.map((property) => {
-        const estimatedRendita = usesStudyGroupDraft || property.valuationGroup?.analysisDraft
-          ? Number(property.estimatedRendita)
-          : estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
-            ?? Number(property.estimatedRendita);
+        const estimatedRendita = manualPresentationRent(property.id, property.study?.presentationDraft, property.study?.studyGroup?.presentationDraft)
+          ?? (usesStudyGroupDraft || property.valuationGroup?.analysisDraft ? Number(property.estimatedRendita)
+            : estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri) ?? Number(property.estimatedRendita));
         return calculatedAmount(this.calculateImu(estimatedRendita, property))
           ?? (property.estimatedImu === null ? 0 : Number(property.estimatedImu));
       }),

@@ -21,6 +21,7 @@ import { ImuService } from "../imu/imu.service.js";
 import type { ImuCalculation } from "../imu/imu.types.js";
 import { PriceListsService } from "../price-lists/price-lists.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { manualPresentationRent, type DraftValues } from "../presentations/shared-presentation-values.js";
 import { estimatedRenditaFromAnalysisDraft } from "../rendita.js";
 import { municipalityWithSection } from "../visura-extraction/visura-text-extractor.js";
 import type { UpdateStudyDto } from "./dto/update-study.dto.js";
@@ -40,7 +41,8 @@ type PropertyWithDocuments = Property & {
 type StudyWithRelations = FeasibilityStudy & {
   properties: PropertyWithDocuments[];
   versions: StudyVersion[];
-  studyGroup: { name: string | null; analysisDraft: StudyGroupAnalysisDraft | null } | null;
+  presentationDraft?: DraftValues;
+  studyGroup: { name: string | null; analysisDraft: StudyGroupAnalysisDraft | null; presentationDraft?: DraftValues } | null;
 };
 
 type CreateStudyInput = {
@@ -89,7 +91,8 @@ export class StudiesService {
       include: {
         properties: { include: propertyInclude(), orderBy: propertyOrderBy() },
         versions: { orderBy: { versionNumber: "desc" } },
-        studyGroup: { include: { analysisDraft: true } },
+        presentationDraft: true,
+        studyGroup: { include: { analysisDraft: true, presentationDraft: true } },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -102,7 +105,8 @@ export class StudiesService {
       include: {
         properties: { include: propertyInclude(), orderBy: propertyOrderBy() },
         versions: { orderBy: { versionNumber: "desc" } },
-        studyGroup: { include: { analysisDraft: true } },
+        presentationDraft: true,
+        studyGroup: { include: { analysisDraft: true, presentationDraft: true } },
       },
     });
     return study ? this.toApiStudy(study) : null;
@@ -147,7 +151,8 @@ export class StudiesService {
       include: {
         properties: { include: propertyInclude(), orderBy: propertyOrderBy() },
         versions: { orderBy: { versionNumber: "desc" } },
-        studyGroup: { include: { analysisDraft: true } },
+        presentationDraft: true,
+        studyGroup: { include: { analysisDraft: true, presentationDraft: true } },
       },
     });
     if (
@@ -576,8 +581,8 @@ export class StudiesService {
 
   private toApiStudy(study: StudyWithRelations) {
     const usesStudyGroupDraft = Boolean(study.studyGroup?.analysisDraft);
-    const { studyGroup: _studyGroup, ...studyFields } = study;
-    const properties = study.properties.map((property) => this.toApiProperty(property, usesStudyGroupDraft));
+    const { studyGroup: _studyGroup, presentationDraft: _presentationDraft, ...studyFields } = study;
+    const properties = study.properties.map((property) => this.toApiProperty(property, usesStudyGroupDraft, manualPresentationRent(property.id, study.presentationDraft, study.studyGroup?.presentationDraft)));
     const currentImu = sum(properties.map((property) => property.currentImu ?? 0));
     const estimatedImu = sum(properties.map((property) => property.estimatedImu ?? 0));
     return {
@@ -588,16 +593,16 @@ export class StudiesService {
         status: normalizeStudyOutcome(version.status),
       })),
       studyGroupName: study.studyGroup?.name ?? null,
-      diffRendita: Number(study.diffRendita),
+      diffRendita: sum(properties.map(property => property.estimatedRendita - property.currentRendita)),
       diffImu: estimatedImu - currentImu,
       originalRendita: Number(study.originalRendita),
-      totalRendita: Number(study.totalRendita),
+      totalRendita: sum(properties.map(property => property.estimatedRendita)),
       catDRendita: Number(study.catDRendita),
       properties,
     };
   }
 
-  private toApiProperty(property: PropertyWithDocuments, usesStudyGroupDraft = false) {
+  private toApiProperty(property: PropertyWithDocuments, usesStudyGroupDraft = false, manualRent: number | null = null) {
     const formapsTerritory = formapsTerritoryByMunicipalityId(property.formapsMunicipalityId)
       ?? resolveFormapsTerritory(
         property.provincia,
@@ -609,15 +614,16 @@ export class StudiesService {
     const visura = property.documents.find((document) => document.type === DocumentType.VISURA);
     const elencoSubalterni = property.documents.find((document) => document.type === DocumentType.ELENCO_SUBALTERNI);
     const currentRendita = Number(property.currentRendita);
-    const estimatedRendita = effectiveEstimatedRendita(property, usesStudyGroupDraft);
+    const estimatedRenditaBase = effectiveEstimatedRendita(property, usesStudyGroupDraft);
+    const estimatedRendita = manualRent ?? estimatedRenditaBase;
     const currentImuCalculation = this.calculateImu(currentRendita, property, undefined, true);
-    const estimatedImuCalculation = estimatedRendita > 0 || property.hasStudy
+    const estimatedImuCalculation = manualRent !== null || estimatedRendita > 0 || property.hasStudy
       ? this.calculateImu(estimatedRendita, property)
       : null;
     const currentImu = calculatedAmount(currentImuCalculation)
       ?? (property.currentImu === null ? null : Number(property.currentImu));
     const estimatedImu = calculatedAmount(estimatedImuCalculation)
-      ?? (property.estimatedImu === null ? null : Number(property.estimatedImu));
+      ?? (manualRent !== null || property.estimatedImu === null ? null : Number(property.estimatedImu));
     const currentImuSource = currentImuCalculation.status === "calculated"
       ? "calculated"
       : property.currentImu !== null
@@ -625,7 +631,7 @@ export class StudiesService {
         : "unavailable";
     const estimatedImuSource = estimatedImuCalculation?.status === "calculated"
       ? "calculated"
-      : property.estimatedImu !== null
+      : manualRent === null && property.estimatedImu !== null
         ? "stored"
         : "unavailable";
     return {
@@ -650,6 +656,11 @@ export class StudiesService {
       oneri: property.oneri,
       currentRendita,
       estimatedRendita,
+      estimatedRenditaBase,
+      hasManualEstimatedRendita: manualRent !== null,
+      estimatedImuBase: estimatedRenditaBase > 0 || property.hasStudy
+        ? calculatedAmount(this.calculateImu(estimatedRenditaBase, property)) ?? (property.estimatedImu == null ? null : Number(property.estimatedImu)) : null,
+      imuForecastParameters: this.calculateImu(0, property),
       diffPercent: currentRendita === 0 ? 0 : ((estimatedRendita - currentRendita) / currentRendita) * 100,
       currentImu,
       estimatedImu,

@@ -29,6 +29,7 @@ import { ImuService } from "../imu/imu.service.js";
 import type { ImuCalculation } from "../imu/imu.types.js";
 import { PriceListsService } from "../price-lists/price-lists.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { manualPresentationRent, type DraftValues } from "../presentations/shared-presentation-values.js";
 import { estimatedRenditaFromAnalysisDraft } from "../rendita.js";
 import { optimizationValue } from "../presentations/optimization-value.js";
 import { ScaleExtractionService } from "../scale-extraction/scale-extraction.service.js";
@@ -65,6 +66,7 @@ type StudyWithRelations = FeasibilityStudy & {
   presentations: ErpPresentationDeck[];
   studyGroup: {
     analysisDraft: StudyGroupAnalysisDraft | null;
+    presentationDraft?: DraftValues;
     presentations: ErpPresentationDeck[];
   } | null;
 };
@@ -198,6 +200,7 @@ export class ErpSyncService {
         studyGroup: {
           include: {
             analysisDraft: true,
+            presentationDraft: true,
             presentations: {
               where: { deletedAt: null, snapshot: { path: ["version"], equals: 3 } },
               orderBy: { createdAt: "desc" },
@@ -601,12 +604,13 @@ export class ErpSyncService {
     const now = new Date();
     const calculatedProperties = study.properties.map((property) => {
       const currentRendita = Number(property.currentRendita);
-      const estimatedRendita = study.studyGroup?.analysisDraft || property.valuationGroup?.analysisDraft
+      const manualRent = manualPresentationRent(property.id, study.presentationDraft, study.studyGroup?.presentationDraft);
+      const estimatedRendita = manualRent ?? (study.studyGroup?.analysisDraft || property.valuationGroup?.analysisDraft
         ? Number(property.estimatedRendita)
         : estimatedRenditaFromAnalysisDraft(property.analysisDraft, property.oneri)
-          ?? Number(property.estimatedRendita);
+          ?? Number(property.estimatedRendita));
       const currentCalculation = this.calculateImu(currentRendita, property, true);
-      const estimatedCalculation = estimatedRendita > 0 || property.hasStudy
+      const estimatedCalculation = manualRent !== null || estimatedRendita > 0 || property.hasStudy
         ? this.calculateImu(estimatedRendita, property)
         : null;
       return {
@@ -615,7 +619,7 @@ export class ErpSyncService {
         currentImu: calculatedAmount(currentCalculation)
           ?? (property.currentImu === null ? null : Number(property.currentImu)),
         estimatedImu: calculatedAmount(estimatedCalculation)
-          ?? (property.estimatedImu === null ? null : Number(property.estimatedImu)),
+          ?? (manualRent !== null || property.estimatedImu === null ? null : Number(property.estimatedImu)),
         estimatedCalculation,
         currentCalculation,
       };
@@ -640,8 +644,8 @@ export class ErpSyncService {
       ...(presentation ? { presentazione: erpPresentationPayload(presentation) } : {}),
       metriche: {
         rendita_originale_totale: decimalToString(study.originalRendita),
-        rendita_proposta_totale: decimalToString(study.totalRendita),
-        differenza_rendita: decimalToString(study.diffRendita),
+        rendita_proposta_totale: sum(calculatedProperties.map(item => item.estimatedRendita)).toFixed(2),
+        differenza_rendita: sum(calculatedProperties.map(item => item.estimatedRendita - Number(item.property.currentRendita))).toFixed(2),
         valore_ottimizzazione: optimizationValue(calculatedProperties.map(({ property, estimatedRendita }) => ({
           id: property.id, outcome: property.outcome,
           currentRendita: Number(property.currentRendita), estimatedRendita,

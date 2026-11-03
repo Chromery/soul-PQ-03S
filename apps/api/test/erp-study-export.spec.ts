@@ -210,10 +210,24 @@ test("il pull esporta ottimizzazione solo positivi e include le modifiche alle b
   const result = await fixture.service.listModifiedStudies("2026-09-01T00:00:00.000Z");
   assert.equal(result.totale, 1);
   assert.equal(result.studi[0].metriche.valore_ottimizzazione, "249.75");
-  assert.equal(result.studi[0].metriche.differenza_rendita, "-200.00");
+  assert.equal(result.studi[0].metriche.differenza_rendita, "-26949.75");
   assert.equal(result.studi[0].modificato_il, presentationCreatedAt.toISOString());
   study.presentationDraft.overrides["IMM-1:renditaAttribuibile"] = "";
   assert.equal((await fixture.service.listModifiedStudies()).studi[0].metriche.valore_ottimizzazione, null);
   study.properties[0].outcome = "Sospeso";
   assert.equal((await fixture.service.listModifiedStudies()).studi[0].metriche.valore_ottimizzazione, "0.00");
+});
+
+test("ERP pull exports the same shared presentation rent and automatic IMU as the property list", async () => {
+  const study = studyFixture(false);
+  Object.assign(study, {presentationDraft: {updatedAt: dayBefore, overrides: {"IMM-1:renditaAttribuibile":"600"}}});
+  Object.assign(study.studyGroup, {presentationDraft: {overrides: {"IMM-1:renditaAttribuibile":"700"}}});
+  const service = new ErpSyncService({ feasibilityStudy: { findMany: async () => [study] } } as never,
+    {} as never, {} as never, {} as never, {} as never, new (class { calculate({rendita}:any) {return {status:"calculated",amount:rendita*0.2};} })() as never,
+    {} as never, { get: (_name: string, fallback: string) => fallback } as never);
+  const result = await service.listModifiedStudies();
+  assert.equal(result.studi[0].immobili[0].rendita_proposta, "600.00");
+  assert.equal(result.studi[0].metriche.rendita_proposta_totale, "600.00");
+  assert.equal(result.studi[0].metriche.differenza_rendita, "-400.00");
+  assert.equal(result.studi[0].immobili[0].imu_prevista, "120.00");
 });

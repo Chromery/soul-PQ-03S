@@ -19,7 +19,7 @@ test("table layout is validated and resettable independently of property edits",
 
 test("study and group generations freeze the saved layout without changing company names or amounts", async () => {
   const saved: PresentationSnapshot[] = [];
-  const overrides: Record<string, string> = { tableLayout: "paginated" };
+  const overrides: Record<string, string> = { tableLayout: "paginated", "p:highlight": "true" };
   const property = { id: "p", outcome: "Positivo", societa: "Società completa", comune: "Roma", provincia: "RM",
     address: "Via Roma 1", humanReadableAddress: "Via Roma 1", foglio: "1", particella: "2", subalterno: "3",
     categoria: "D/7", currentRendita: 1000, estimatedRendita: 800, currentImu: 500, estimatedImu: 400 };
@@ -37,6 +37,7 @@ test("study and group generations freeze the saved layout without changing compa
   await service.createV3("s", ["p"]);
   assert.deepEqual(saved.map(s => s.tableLayout), ["paginated", "paginated", "compact", "compact"]);
   for (const s of saved) {
+    assert.equal(s.tableRows?.[0].highlighted, true);
     assert.equal(s.immobili[0].societa, property.societa);
     assert.equal(s.immobili[0].renditaAttuale, 1000);
   }
@@ -47,7 +48,7 @@ test("measured V3 layout preserves every row, totals and summary, including the 
 }, async () => {
   const longName = "PORTAFOGLIO IMMOBILIARE - SOCIETA DI INVESTIMENTO PER AZIONI A CAPITALE FISSO IN GESTIONE ESTERNA ".repeat(2);
   const properties = Array.from({ length: 14 }, (_, index) => ({
-    id: String(index), societa: index < 4 ? longName : `Società ${index}`, comune: "Roma (RM)",
+    id: String(index), highlighted: index === 12, societa: index < 4 ? longName : `Società ${index}`, comune: "Roma (RM)",
     indirizzo: `Via del collaudo ${index}`, foglioParticellaSub: `Fg. 1 - Part. 2 - Sub. ${index}`, categoria: "D/7",
     renditaAttuale: 250000, renditaAttribuibile: 200000, imuAttuale: 50000, imuOttenibile: 40000,
   }));
@@ -71,6 +72,9 @@ test("measured V3 layout preserves every row, totals and summary, including the 
         else assert.equal(count, 1);
         assert.deepEqual(await page.locator(".economics tbody tr td:nth-child(3)").allTextContents(), properties.map(p => p.indirizzo));
         assert.deepEqual(await page.locator(".economics .company-name").allTextContents(), properties.map(p => p.societa));
+        assert.equal(await page.locator(".economics tr.highlighted-property").count(), 1);
+        assert.match(await page.locator(".economics tr.highlighted-property").innerText(), /Via del collaudo 12/);
+        assert.equal(await page.locator(".economics tr.highlighted-property td").first().evaluate(el => getComputedStyle(el).backgroundColor), "rgb(255, 242, 189)");
         assert.equal(await page.locator(".economics tfoot").count(), 1);
         assert.equal(await page.locator(".economics .bottom-grid").count(), 1);
         assert.equal(await page.locator(".economics").last().locator(".bottom-grid").count(), 1);

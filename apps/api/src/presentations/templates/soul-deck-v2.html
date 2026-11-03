@@ -139,6 +139,8 @@
     td { padding: 11px 7px; border-top: 1px solid #e3ebef; color: #243f52; font-size: 12px; line-height: 1.25; text-align: right; vertical-align: middle; overflow-wrap: anywhere; }
     td strong { display: block; color: var(--blue); font-size: 12.5px; }
     td small { display: block; margin-top: 3px; color: #657d8e; font-size: 10px; }
+    .properties-card tr.highlighted-property td { background: #fff2bd; }
+    .properties-card tr.highlighted-property td:first-child { box-shadow: inset 4px 0 #d7a300; }
     .properties-card td.good { color: var(--good); font-weight: 750; }
     .properties-card td.bad { color: var(--bad); font-weight: 750; }
     .properties-card tfoot td { background: #eef4f6; color: var(--blue); font-weight: 800; }
@@ -397,7 +399,7 @@
       const imuLabel = Number.isFinite(imuVariation)
         ? `${imuVariation > 0 ? "+" : imuVariation < 0 ? "−" : ""}${euro.format(Math.abs(imuVariation))}`
         : "n.d.";
-      return `<tr class="${item.memberIds?.length > 1 ? "grouped-property" : ""}"><td><span class="company-name" title="${escapeHtml(item.societa)}">${escapeHtml(item.societa)}</span></td><td>${escapeHtml(item.comune)}</td><td>${escapeHtml(item.indirizzo)}</td><td>${escapeHtml(item.foglioParticellaSub)}</td><td>${escapeHtml(item.categoria || "—")}</td><td>${euro.format(item.renditaAttuale)}</td><td>${euro.format(item.renditaAttribuibile)}</td>${imuCells(item.imuAttuale, item.imuOttenibile)}<td>${euro.format(rentDiff)}</td><td class="${imuClass}">${imuLabel}</td><td>${percent(reduction)}</td></tr>`;
+      return `<tr class="${item.memberIds?.length > 1 ? "grouped-property" : ""} ${item.highlighted ? "highlighted-property" : ""}"><td><span class="company-name" title="${escapeHtml(item.societa)}">${escapeHtml(item.societa)}</span></td><td>${escapeHtml(item.comune)}</td><td>${escapeHtml(item.indirizzo)}</td><td>${escapeHtml(item.foglioParticellaSub)}</td><td>${escapeHtml(item.categoria || "—")}</td><td>${euro.format(item.renditaAttuale)}</td><td>${euro.format(item.renditaAttribuibile)}</td>${imuCells(item.imuAttuale, item.imuOttenibile)}<td>${euro.format(rentDiff)}</td><td class="${imuClass}">${imuLabel}</td><td>${percent(reduction)}</td></tr>`;
     }).join("");
     const totalRentDifference = currentRent - estimatedRent;
     const completeImu = data.immobili.every(item => Number.isFinite(item.imuAttuale) && Number.isFinite(item.imuOttenibile));
