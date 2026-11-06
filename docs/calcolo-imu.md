@@ -71,6 +71,45 @@ pubblicazione vanno verificati numero dei file, intestazione PDF e SHA-256 indic
 L'aggiornamento del dataset non deve essere distribuito senza la corrispondente sincronizzazione dei PDF:
 l'API non ha un fallback verso GitHub o altre sorgenti remote.
 
+## Verifica della libreria prima del rilascio
+
+Il volume è un dato necessario all'applicazione: non viene popolato dall'immagine Docker e non va considerato
+opzionale durante una migrazione. In particolare, il controllo `/api/health` non verifica i PDF delle delibere.
+Prima di un rilascio o di un aggiornamento del dataset, eseguire il controllo completo:
+
+```sh
+node scripts/check-imu-library.mjs --library=/percorso/libreria
+```
+
+Lo script legge il dataset versionato, verifica ogni file, intestazione `%PDF-` e SHA-256, e termina con codice
+non zero se manca anche un solo documento o se una versione è diversa. Un dataset vuoto non supera il controllo.
+È possibile indicare il dataset di una specifica release con `--dataset=/percorso/imu-rates.generated.ts`.
+
+Sulla VPS cliente il volume è `soul-prospect-qualifier_imu_delibere_cache`, montato nell'API come
+`/var/lib/soul-pq/imu-delibere`. Per controllare proprio il dataset compilato nell'immagine in esecuzione:
+
+```sh
+docker cp scripts/check-imu-library.mjs soul-prospect-qualifier-api-1:/tmp/check-imu-library.mjs
+docker exec -i soul-prospect-qualifier-api-1 node --input-type=module <<'JS'
+import { checkImuLibrary } from '/tmp/check-imu-library.mjs';
+import { IMU_RATE_RECORDS } from '/app/apps/api/dist/imu/imu-rates.generated.js';
+const report = await checkImuLibrary(IMU_RATE_RECORDS, process.env.IMU_DOCUMENT_LIBRARY_DIR);
+console.log(JSON.stringify(report, null, 2));
+process.exitCode = report.ok ? 0 : 1;
+JS
+```
+
+Per il ripristino, recuperare i PDF dalla repository privata `Chromery/soul-delibere-rk`, registrando il commit
+sorgente. Copiarli in una directory temporanea nel volume, mantenendo i percorsi `delibere/...`, e verificare
+l'intera directory contro il dataset effettivamente distribuito prima di attivarla. Un PDF differente non va
+accettato cambiando il checksum o aggiornando le aliquote: occorre recuperare la versione attesa. Verificare
+poi il PDF attraverso `ImuDocumentsService` e il controller, compresi intestazione e contenuto della risposta.
+Il ripristino dei documenti non richiede modifiche agli studi, alle aliquote o al database.
+
+Il 6 novembre 2026 la libreria della VPS è stata popolata con i 7.517 PDF referenziati dalla versione 1.3.0,
+verificati contro la sorgente `47fcd7e3e5d1e99f3f4670581d8c60336dc730f2`. Evidenze operative:
+`/srv/soul-pq/maintenance/imu-library-20261106/`.
+
 ## Limiti dichiarati
 
 - nessun ragguaglio per mesi di possesso;

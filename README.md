@@ -56,7 +56,7 @@ npm run db:generate
 npm run dev:api
 npm run dev
 npm test
-node --test scripts/deployment-preflight.test.mjs scripts/postgres-backup.test.mjs scripts/prezzari/lib.test.mjs
+node --test scripts/deployment-preflight.test.mjs scripts/postgres-backup.test.mjs scripts/check-imu-library.test.mjs scripts/prezzari/lib.test.mjs
 ```
 
 I test PDF completi richiedono `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`, Poppler e Tesseract: eseguirli nell'immagine API con sorgenti/test montati in sola lettura, senza credenziali di produzione. La suite browser `apps/web/e2e` è riservata allo staging.
@@ -69,7 +69,7 @@ L'automazione usa un'identità Clerk dedicata e, dalla 1.2.1, un secondo segreto
 - S3/B2: documenti e prezzari caricati; mantenere chiavi e checksum nella migrazione.
 - `00_prezzari2026/`: originali locali del motore di suggerimento, montati read-only.
 - Volume `erp_audit_logs`: audit sanitizzato, massimo 10 giorni / 256 MiB.
-- Volume `imu_delibere_cache`: documenti IMU locali, da copiare se presenti.
+- Volume `imu_delibere_cache`: **obbligatorio**, deve contenere tutti i PDF referenziati dal dataset IMU. Una cartella vuota lascia funzionanti i calcoli ma provoca 404 su «Apri delibera». Verificare intestazioni e checksum prima del rilascio con `scripts/check-imu-library.mjs`; procedura in [calcolo-imu.md](docs/calcolo-imu.md#verifica-della-libreria-prima-del-rilascio).
 - `backups/postgres`: dump completi; i `.part` non sono backup validi.
 
 Il worker crea un dump ogni giorno alle 03:00 Europe/Rome, verifica l'indice e lo carica nello storage remoto. Conservazione locale 14 giorni; la retention remota richiede una policy del provider. Un fallimento di dump/upload restituisce errore. Il namespace remoto staging è `staging/backups/postgres`, distinto dalla produzione.
